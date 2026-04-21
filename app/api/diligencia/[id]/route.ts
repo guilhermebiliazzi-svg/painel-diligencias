@@ -42,7 +42,7 @@ export async function GET(
   }
 
   try {
-    const { rows } = await pool.query<DiligenciaRow>(
+    const result = await pool.query(
       `SELECT
          diligencia_id,
          endereco,
@@ -63,6 +63,10 @@ export async function GET(
       [id]
     );
 
+    // Cast explicito das linhas pro nosso tipo. Evita qualquer ambiguidade de
+    // inferencia do generic de pool.query<T>, que muda entre versoes do pg.
+    const rows = result.rows as DiligenciaRow[];
+
     if (rows.length === 0) {
       return NextResponse.json(
         { erro: 'Diligencia nao encontrada' },
@@ -77,7 +81,110 @@ export async function GET(
         endereco: head.endereco,
         cliente_nome: head.cliente_nome,
       },
-      certidoes: rows.map((r) => ({
+      certidoes: rows.map((r: DiligenciaRow) => ({
+        id: r.certidao_id,
+        tipo: r.tipo,
+        titular: r.titular,
+        documento: r.documento_mascarado,
+        certidao: r.certidao,
+        situacao: r.situacao,
+        resultado: r.resultado,
+        data_emissao: r.data_emissao,
+        link: r.link_documento,
+        emitida_em: r.emitida_em,
+      })),
+    });
+  } catch (err) {
+    console.error('Erro ao consultar diligencia:', err);
+    return NextResponse.json(
+      { erro: 'Erro ao consultar dados' },
+      { status: 500 }
+    );
+  }
+}// GET /api/diligencia/[id]
+//
+// Retorna todas as certidoes de uma diligencia, ja sanitizadas pela view
+// painel.v_painel_cliente (CPF/CNPJ mascarado, status em linguagem de
+// cliente, sem erros tecnicos).
+
+import { NextResponse } from 'next/server';
+import { pool } from '@/lib/db';
+
+// Regex pra validar UUID v4 (formato padrao do Postgres)
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Tipo de cada linha retornada pela view. Tem que bater com as colunas do SELECT.
+type DiligenciaRow = {
+  diligencia_id: string;
+  endereco: string;
+  cliente_nome: string;
+  certidao_id: string;
+  tipo: string;
+  titular: string | null;
+  documento_mascarado: string | null;
+  certidao: string | null;
+  situacao: string;
+  resultado: string | null;
+  data_emissao: string | null;
+  link_documento: string | null;
+  emitida_em: string | null;
+};
+
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+
+  if (!id || !UUID_RE.test(id)) {
+    return NextResponse.json(
+      { erro: 'ID de diligencia invalido' },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT
+         diligencia_id,
+         endereco,
+         cliente_nome,
+         certidao_id,
+         tipo,
+         titular,
+         documento_mascarado,
+         certidao,
+         situacao,
+         resultado,
+         data_emissao,
+         link_documento,
+         emitida_em
+       FROM painel.v_painel_cliente
+       WHERE diligencia_id = $1
+       ORDER BY titular NULLS LAST, certidao`,
+      [id]
+    );
+
+    // Cast explicito das linhas pro nosso tipo. Evita qualquer ambiguidade de
+    // inferencia do generic de pool.query<T>, que muda entre versoes do pg.
+    const rows = result.rows as DiligenciaRow[];
+
+    if (rows.length === 0) {
+      return NextResponse.json(
+        { erro: 'Diligencia nao encontrada' },
+        { status: 404 }
+      );
+    }
+
+    const head = rows[0];
+    return NextResponse.json({
+      diligencia: {
+        id: head.diligencia_id,
+        endereco: head.endereco,
+        cliente_nome: head.cliente_nome,
+      },
+      certidoes: rows.map((r: DiligenciaRow) => ({
         id: r.certidao_id,
         tipo: r.tipo,
         titular: r.titular,
