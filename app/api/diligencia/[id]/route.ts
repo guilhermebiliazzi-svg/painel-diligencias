@@ -1,19 +1,32 @@
 // GET /api/diligencia/[id]
 //
-// Retorna todas as certidões de uma diligência, já sanitizadas pela view
+// Retorna todas as certidoes de uma diligencia, ja sanitizadas pela view
 // painel.v_painel_cliente (CPF/CNPJ mascarado, status em linguagem de
-// cliente, sem erros técnicos).
-//
-// O UUID na URL é a única "autenticação" — quem tem o link, vê o painel.
-// Não é segurança cripto-forte, mas é aceitável pro fluxo: o corretor
-// envia o link pessoalmente pelo WhatsApp.
+// cliente, sem erros tecnicos).
 
 import { NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
 
-// Regex pra validar UUID v4 (formato padrão do Postgres)
+// Regex pra validar UUID v4 (formato padrao do Postgres)
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Tipo de cada linha retornada pela view. Tem que bater com as colunas do SELECT.
+type DiligenciaRow = {
+  diligencia_id: string;
+  endereco: string;
+  cliente_nome: string;
+  certidao_id: string;
+  tipo: string;
+  titular: string | null;
+  documento_mascarado: string | null;
+  certidao: string | null;
+  situacao: string;
+  resultado: string | null;
+  data_emissao: string | null;
+  link_documento: string | null;
+  emitida_em: string | null;
+};
 
 export async function GET(
   _req: Request,
@@ -21,16 +34,15 @@ export async function GET(
 ) {
   const { id } = await params;
 
-  // Validação defensiva: se vier lixo na URL, nem consulta o banco.
   if (!id || !UUID_RE.test(id)) {
     return NextResponse.json(
-      { erro: 'ID de diligência invalido' },
+      { erro: 'ID de diligencia invalido' },
       { status: 400 }
     );
   }
 
   try {
-    const { rows } = await pool.query(
+    const { rows } = await pool.query<DiligenciaRow>(
       `SELECT
          diligencia_id,
          endereco,
@@ -53,13 +65,11 @@ export async function GET(
 
     if (rows.length === 0) {
       return NextResponse.json(
-        { erro: 'Diligência não encontrada' },
+        { erro: 'Diligencia nao encontrada' },
         { status: 404 }
       );
     }
 
-    // Cabeçalho sai da primeira linha (todas têm os mesmos dados da
-    // diligência), e as certidões ficam numa lista separada.
     const head = rows[0];
     return NextResponse.json({
       diligencia: {
@@ -81,7 +91,7 @@ export async function GET(
       })),
     });
   } catch (err) {
-    console.error('Erro ao consultar diligência:', err);
+    console.error('Erro ao consultar diligencia:', err);
     return NextResponse.json(
       { erro: 'Erro ao consultar dados' },
       { status: 500 }
