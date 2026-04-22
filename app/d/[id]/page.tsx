@@ -15,7 +15,9 @@ type DiligenciaRow = {
   certidao_id: string;
   tipo: string;
   titular: string | null;
+  tipo_documento: 'imovel' | 'pf' | 'pj' | 'outro';
   documento_mascarado: string | null;
+  documento_normalizado: string | null; // chave de agrupamento (so digitos)
   certidao: string | null;
   situacao: string;
   resultado: string | null;
@@ -53,15 +55,18 @@ type Group = {
 
 function agrupar(rows: DiligenciaRow[], endereco: string): Group[] {
   const imovel: DiligenciaRow[] = [];
+  // Chave de agrupamento: documento_normalizado (so digitos, unica por titular)
   const porDocumento = new Map<string, DiligenciaRow[]>();
 
   for (const r of rows) {
-    if (!r.documento_mascarado) {
+    // Imovel: tipo_documento === 'imovel' (inclui IPTU, matricula, etc) OU sem documento
+    if (r.tipo_documento === 'imovel' || !r.documento_normalizado) {
       imovel.push(r);
     } else {
-      const arr = porDocumento.get(r.documento_mascarado) ?? [];
+      const chave = r.documento_normalizado;
+      const arr = porDocumento.get(chave) ?? [];
       arr.push(r);
-      porDocumento.set(r.documento_mascarado, arr);
+      porDocumento.set(chave, arr);
     }
   }
 
@@ -78,14 +83,17 @@ function agrupar(rows: DiligenciaRow[], endereco: string): Group[] {
   }
 
   const pessoas: Group[] = [];
-  for (const [doc, rowsPessoa] of porDocumento) {
-    const ehPJ = doc.includes('/');
-    const titular = rowsPessoa[0].titular ?? 'Titular sem nome';
+  for (const [, rowsPessoa] of porDocumento) {
+    // Usa tipo_documento da view (autoritativo)
+    const first = rowsPessoa[0];
+    const tipo: GroupTipo = first.tipo_documento === 'pj' ? 'pj' : 'pf';
+    const titular = first.titular ?? 'Titular sem nome';
+    const rotuloDoc = tipo === 'pj' ? 'CNPJ' : 'CPF';
     pessoas.push({
-      key: doc,
-      tipo: ehPJ ? 'pj' : 'pf',
+      key: first.documento_normalizado ?? Math.random().toString(),
+      tipo,
       titulo: titular,
-      subtitulo: `${ehPJ ? 'CNPJ' : 'CPF'} ${doc}`,
+      subtitulo: `${rotuloDoc} ${first.documento_mascarado ?? ''}`,
       rows: rowsPessoa,
     });
   }
