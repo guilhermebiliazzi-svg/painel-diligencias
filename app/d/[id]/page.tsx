@@ -24,6 +24,7 @@ type DiligenciaRow = {
   data_emissao: string | null;
   link_documento: string | null;
   emitida_em: string | null;
+  observacao_ia: string | null;
 };
 
 async function fetchDiligencia(id: string): Promise<DiligenciaRow[] | null> {
@@ -53,13 +54,18 @@ type Group = {
   rows: DiligenciaRow[];
 };
 
+// Situacoes que exigem atencao do cliente/corretor
+const SITUACOES_ATENCAO = new Set([
+  'Positiva',
+  'Com pendencias',
+  'Em revisao',
+]);
+
 function agrupar(rows: DiligenciaRow[], endereco: string): Group[] {
   const imovel: DiligenciaRow[] = [];
-  // Chave de agrupamento: documento_normalizado (so digitos, unica por titular)
   const porDocumento = new Map<string, DiligenciaRow[]>();
 
   for (const r of rows) {
-    // Imovel: tipo_documento === 'imovel' (inclui IPTU, matricula, etc) OU sem documento
     if (r.tipo_documento === 'imovel' || !r.documento_normalizado) {
       imovel.push(r);
     } else {
@@ -84,7 +90,6 @@ function agrupar(rows: DiligenciaRow[], endereco: string): Group[] {
 
   const pessoas: Group[] = [];
   for (const [, rowsPessoa] of porDocumento) {
-    // Usa tipo_documento da view (autoritativo)
     const first = rowsPessoa[0];
     const tipo: GroupTipo = first.tipo_documento === 'pj' ? 'pj' : 'pf';
     const titular = first.titular ?? 'Titular sem nome';
@@ -98,7 +103,6 @@ function agrupar(rows: DiligenciaRow[], endereco: string): Group[] {
     });
   }
 
-  // PFs primeiro, depois PJs; dentro de cada tipo, alfabetico
   pessoas.sort((a, b) => {
     if (a.tipo !== b.tipo) return a.tipo === 'pf' ? -1 : 1;
     return a.titulo.localeCompare(b.titulo, 'pt-BR');
@@ -126,6 +130,14 @@ const SITUACAO_STYLES: Record<string, Style> = {
     badgeBg: 'bg-emerald-100',
     badgeText: 'text-emerald-800',
     dot: 'bg-emerald-500',
+  },
+  // Constam acoes/processos — vermelho forte pra chamar atencao
+  Positiva: {
+    cardBg: 'bg-rose-50/60',
+    cardBorder: 'border-rose-300',
+    badgeBg: 'bg-rose-100',
+    badgeText: 'text-rose-800',
+    dot: 'bg-rose-500',
   },
   'Em revisao': {
     cardBg: 'bg-amber-50/50',
@@ -174,6 +186,12 @@ const DEFAULT_STYLE: Style = {
 
 function styleFor(situacao: string): Style {
   return SITUACAO_STYLES[situacao] ?? DEFAULT_STYLE;
+}
+
+function rotuloSituacao(situacao: string): string {
+  // Rotulo mais claro para "Positiva"
+  if (situacao === 'Positiva') return 'Constam ocorrências';
+  return situacao;
 }
 
 function formatDate(iso: string | null): string {
@@ -255,6 +273,8 @@ function IconeTipo({ tipo }: { tipo: GroupTipo }) {
 
 function CertidaoCard({ r }: { r: DiligenciaRow }) {
   const s = styleFor(r.situacao);
+  const mostrarObs = !!r.observacao_ia && SITUACOES_ATENCAO.has(r.situacao);
+
   return (
     <div
       className={`flex flex-col gap-2 rounded-lg border ${s.cardBorder} ${s.cardBg} p-3`}
@@ -267,9 +287,17 @@ function CertidaoCard({ r }: { r: DiligenciaRow }) {
           className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${s.badgeBg} ${s.badgeText}`}
         >
           <span className={`size-1.5 rounded-full ${s.dot}`} />
-          {r.situacao}
+          {rotuloSituacao(r.situacao)}
         </span>
       </div>
+
+      {mostrarObs && (
+        <p className={`text-xs leading-snug ${s.badgeText}`}>
+          <span className="font-semibold">⚠ Observação: </span>
+          {r.observacao_ia}
+        </p>
+      )}
+
       <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
         <span>
           {r.data_emissao
@@ -295,9 +323,9 @@ function GrupoAcordeao({ g }: { g: Group }) {
   const tot = g.rows.length;
   const concl = g.rows.filter((r) => r.situacao === 'Concluida').length;
   const pct = tot > 0 ? Math.round((concl / tot) * 100) : 0;
-  const precisaAtencao = g.rows.some((r) =>
-    ['Em revisao', 'Com pendencias'].includes(r.situacao)
-  );
+  const qtdAtencao = g.rows.filter((r) =>
+    SITUACOES_ATENCAO.has(r.situacao)
+  ).length;
 
   return (
     <details
@@ -308,13 +336,13 @@ function GrupoAcordeao({ g }: { g: Group }) {
         <IconeTipo tipo={g.tipo} />
 
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <p className="truncate text-base font-semibold text-slate-900">
               {g.titulo}
             </p>
-            {precisaAtencao && (
-              <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
-                Revisar
+            {qtdAtencao > 0 && (
+              <span className="inline-flex shrink-0 items-center rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-800">
+                {qtdAtencao} {qtdAtencao === 1 ? 'alerta' : 'alertas'}
               </span>
             )}
           </div>
@@ -384,6 +412,9 @@ export default async function DiligenciaPage({
   const concluidas = rows.filter(
     (r: DiligenciaRow) => r.situacao === 'Concluida'
   ).length;
+  const alertas = rows.filter((r: DiligenciaRow) =>
+    SITUACOES_ATENCAO.has(r.situacao)
+  ).length;
   const pct = total > 0 ? Math.round((concluidas / total) * 100) : 0;
 
   const grupos = agrupar(rows, endereco);
@@ -423,9 +454,15 @@ export default async function DiligenciaPage({
               style={{ width: `${pct}%` }}
             />
           </div>
-          <p className="mt-2 text-xs text-slate-500">
-            {pct}% das certidões concluídas
-          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+            <span>{pct}% das certidões concluídas</span>
+            {alertas > 0 && (
+              <span className="inline-flex items-center gap-1 font-semibold text-rose-700">
+                <span className="size-1.5 rounded-full bg-rose-500" />
+                {alertas} {alertas === 1 ? 'item requer' : 'itens requerem'} atenção
+              </span>
+            )}
+          </div>
         </section>
 
         <section className="space-y-3">
