@@ -167,6 +167,14 @@ const SITUACAO_STYLES: Record<string, Style> = {
     badgeText: 'text-sky-800',
     dot: 'bg-sky-500',
   },
+  // Empresa extinta/baixada — cor distinta (cinza escuro com destaque roxo)
+'Empresa extinta': {
+  cardBg: 'bg-slate-100',
+  cardBorder: 'border-slate-400',
+  badgeBg: 'bg-slate-800',
+  badgeText: 'text-white',
+  dot: 'bg-slate-300',
+},
   'Aguardando inicio': {
     cardBg: 'bg-slate-50',
     cardBorder: 'border-slate-200',
