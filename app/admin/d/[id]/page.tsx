@@ -160,8 +160,30 @@ const CATEGORIAS_PJ: Categoria[] = [
   },
   {
     titulo: 'CNDs do TJSP',
-    tipos: ['tjsp_falencia', 'tjsp_civeis'],
-    // PJ so tem certidoes do e-SAJ (nao tem eproc), entao sem subgrupos
+    tipos: [
+      // eproc
+      'tjsp_civel_1g',
+      // e-SAJ
+      'tjsp_civeis',
+      'tjsp_criminais',
+      'tjsp_inventarios',
+      'tjsp_falencia',
+    ],
+    subgrupos: [
+      {
+        titulo: 'eproc',
+        tipos: new Set(['tjsp_civel_1g']),
+      },
+      {
+        titulo: 'e-SAJ',
+        tipos: new Set([
+          'tjsp_civeis',
+          'tjsp_criminais',
+          'tjsp_inventarios',
+          'tjsp_falencia',
+        ]),
+      },
+    ],
   },
   {
     titulo: 'CNDs TRF',
