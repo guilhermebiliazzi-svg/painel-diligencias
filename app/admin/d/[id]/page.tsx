@@ -1,8 +1,13 @@
 // app/admin/d/[id]/page.tsx
-// Drill-down da diligencia no painel admin.
-// Visual igual ao /d/[id] do cliente, mas com botoes de acao por card:
-//   - Desvincular PDF (devolve a 'pendente')
-//   - Vincular outro PDF (modal com lista de PDFs disponiveis no Drive)
+// Drill-down da diligencia no painel admin (v2 com categorias).
+//
+// Agrupamento:
+//   - Imovel: 2 categorias (Documentos do imovel | Contas de consumo)
+//   - PF:    5 categorias (Documentos pessoais | CNDs do TJSP [e-SAJ/eproc] |
+//             CNDs TRF | Trabalhistas | Fiscais e protestos)
+//   - PJ:    5 categorias (Documentos cadastrais | CNDs do TJSP | CNDs TRF |
+//             Trabalhistas | Fiscais e protestos)
+// Dentro de cada categoria as certidoes sao numeradas.
 
 import { pool } from '@/lib/db';
 import { listPdfsInFolders, type DriveFile } from '@/lib/drive';
@@ -49,10 +54,147 @@ async function fetchDiligencia(id: string): Promise<AdminRow[] | null> {
 }
 
 // -----------------------------------------------------------------------------
-// Agrupamento (mesma logica do painel cliente)
+// Categorias
 // -----------------------------------------------------------------------------
 
 type GroupTipo = 'imovel' | 'pf' | 'pj';
+
+// Subgrupo opcional dentro de uma categoria (ex: e-SAJ vs eproc dentro de TJSP)
+type Subgrupo = { titulo: string; tipos: Set<string> };
+
+type Categoria = {
+  titulo: string;
+  // Lista ordenada de tipos pertencentes (define a ordem da numeracao)
+  tipos: string[];
+  subgrupos?: Subgrupo[];
+};
+
+const CATEGORIAS_IMOVEL: Categoria[] = [
+  {
+    titulo: 'Documentos do imóvel',
+    tipos: [
+      'matricula_imovel',
+      'dados_cadastrais_imovel',
+      'ata_sindico',
+      'cnd_condominio',
+      'iptu_pref_sp',
+    ],
+  },
+  {
+    titulo: 'Contas de consumo',
+    tipos: [
+      'conta_consumo',
+      'conta_consumo_agua',
+      'conta_consumo_luz',
+      'conta_consumo_gas',
+    ],
+  },
+];
+
+const CATEGORIAS_PF: Categoria[] = [
+  {
+    titulo: 'Documentos pessoais',
+    tipos: [
+      'doc_identidade',
+      'cert_estado_civil',
+      'comp_residencia',
+      'sit_cadastral_rf',
+      'cert_simplificada_jucesp_pf',
+    ],
+  },
+  {
+    titulo: 'CNDs do TJSP',
+    tipos: [
+      // e-SAJ
+      'tjsp_civel_1g',
+      'tjsp_criminais',
+      'tjsp_inventarios',
+      'tjsp_falencia',
+      // eproc
+      'tjsp_civeis',
+    ],
+    subgrupos: [
+      {
+        titulo: 'e-SAJ',
+        tipos: new Set([
+          'tjsp_civel_1g',
+          'tjsp_criminais',
+          'tjsp_inventarios',
+          'tjsp_falencia',
+        ]),
+      },
+      {
+        titulo: 'eproc',
+        tipos: new Set(['tjsp_civeis']),
+      },
+    ],
+  },
+  {
+    titulo: 'CNDs TRF',
+    tipos: ['trf_civel', 'trf_criminal'],
+  },
+  {
+    titulo: 'Trabalhistas',
+    tipos: ['trt2_digital', 'trt2_fisico', 'cndt_tst'],
+  },
+  {
+    titulo: 'Fiscais e protestos',
+    tipos: [
+      'cnd_federal',
+      'pge_sp_inscritos',
+      'sefaz_sp_nao_inscritos',
+      'mobiliaria_pref_sp',
+      'cenprot_pf',
+    ],
+  },
+];
+
+const CATEGORIAS_PJ: Categoria[] = [
+  {
+    titulo: 'Documentos cadastrais',
+    tipos: [
+      'sit_cadastral_rf_pj',
+      'cert_simplificada_jucesp',
+      'contrato_social',
+    ],
+  },
+  {
+    titulo: 'CNDs do TJSP',
+    tipos: ['tjsp_falencia', 'tjsp_civeis'],
+    subgrupos: [
+      { titulo: 'e-SAJ', tipos: new Set(['tjsp_falencia']) },
+      { titulo: 'eproc', tipos: new Set(['tjsp_civeis']) },
+    ],
+  },
+  {
+    titulo: 'CNDs TRF',
+    tipos: ['trf_civel'],
+  },
+  {
+    titulo: 'Trabalhistas',
+    tipos: ['trt2_digital', 'trt2_fisico', 'cndt_tst_pj', 'crf_fgts'],
+  },
+  {
+    titulo: 'Fiscais e protestos',
+    tipos: [
+      'cnd_federal_pj',
+      'pge_sp_inscritos',
+      'sefaz_sp_nao_inscritos',
+      'mobiliaria_pref_sp',
+      'cenprot_pj',
+    ],
+  },
+];
+
+function categoriasFor(tipo: GroupTipo): Categoria[] {
+  if (tipo === 'imovel') return CATEGORIAS_IMOVEL;
+  if (tipo === 'pj') return CATEGORIAS_PJ;
+  return CATEGORIAS_PF;
+}
+
+// -----------------------------------------------------------------------------
+// Agrupamento por titular
+// -----------------------------------------------------------------------------
 
 type Group = {
   key: string;
@@ -115,6 +257,73 @@ function agrupar(rows: AdminRow[], endereco: string): Group[] {
   });
 
   return [...groups, ...pessoas];
+}
+
+/**
+ * Agrupa rows do titular por categoria/subgrupo, mantendo a ordem dos tipos
+ * definida em CATEGORIAS_*. Tipos nao mapeados caem em "Outros".
+ */
+type CategoriaPreenchida = {
+  titulo: string;
+  rows: AdminRow[];
+  subgrupos: { titulo: string | null; rows: AdminRow[] }[];
+};
+
+function preencherCategorias(
+  rowsTitular: AdminRow[],
+  cats: Categoria[]
+): CategoriaPreenchida[] {
+  const usados = new Set<string>();
+  const result: CategoriaPreenchida[] = [];
+
+  for (const cat of cats) {
+    // Filtra rows desta categoria, na ordem dos tipos
+    const rowsDaCategoria: AdminRow[] = [];
+    for (const tipo of cat.tipos) {
+      const rs = rowsTitular.filter((r) => r.tipo === tipo);
+      for (const r of rs) {
+        rowsDaCategoria.push(r);
+        usados.add(r.certidao_id);
+      }
+    }
+    if (rowsDaCategoria.length === 0) continue;
+
+    // Subgrupos (se a categoria tem)
+    if (cat.subgrupos && cat.subgrupos.length > 0) {
+      const subs = cat.subgrupos.map((sg) => ({
+        titulo: sg.titulo,
+        rows: rowsDaCategoria.filter((r) => sg.tipos.has(r.tipo)),
+      }));
+      // Filtra sub-grupos vazios
+      const subsNaoVazios = subs.filter((s) => s.rows.length > 0);
+      result.push({
+        titulo: cat.titulo,
+        rows: rowsDaCategoria,
+        subgrupos: subsNaoVazios.map((s) => ({
+          titulo: s.titulo,
+          rows: s.rows,
+        })),
+      });
+    } else {
+      result.push({
+        titulo: cat.titulo,
+        rows: rowsDaCategoria,
+        subgrupos: [{ titulo: null, rows: rowsDaCategoria }],
+      });
+    }
+  }
+
+  // "Outros" - tipos não mapeados
+  const outros = rowsTitular.filter((r) => !usados.has(r.certidao_id));
+  if (outros.length > 0) {
+    result.push({
+      titulo: 'Outros',
+      rows: outros,
+      subgrupos: [{ titulo: null, rows: outros }],
+    });
+  }
+
+  return result;
 }
 
 // -----------------------------------------------------------------------------
@@ -221,10 +430,12 @@ function formatDate(iso: string | null): string {
 // -----------------------------------------------------------------------------
 
 function CardAdmin({
+  numero,
   r,
   diligencia_id,
   pdfsDisponiveis,
 }: {
+  numero: number;
   r: AdminRow;
   diligencia_id: string;
   pdfsDisponiveis: DriveFile[];
@@ -238,6 +449,9 @@ function CardAdmin({
     >
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm font-medium leading-snug text-slate-900">
+          <span className="mr-1.5 inline-flex size-5 items-center justify-center rounded-full bg-white text-[10px] font-bold text-slate-500 ring-1 ring-slate-200">
+            {numero}
+          </span>
           {r.certidao ?? r.tipo}
         </p>
         <span
@@ -273,7 +487,6 @@ function CardAdmin({
         )}
       </div>
 
-      {/* Linha de acoes do admin */}
       <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-slate-200/70 pt-2">
         {r.drive_file_id && (
           <form
@@ -339,7 +552,7 @@ function CardAdmin({
 
 function IconeTipo({ tipo }: { tipo: GroupTipo }) {
   const cls =
-    'flex size-10 shrink-0 items-center justify-center rounded-full';
+    'flex size-10 shrink-0 items-center justify-center rounded-full text-lg';
   if (tipo === 'imovel')
     return <div className={`${cls} bg-blue-100 text-blue-700`}>🏠</div>;
   if (tipo === 'pj')
@@ -359,6 +572,8 @@ function GrupoAdmin({
   const tot = g.rows.length;
   const concl = g.rows.filter((r) => r.situacao === 'Concluida').length;
   const pct = tot > 0 ? Math.round((concl / tot) * 100) : 0;
+
+  const cats = preencherCategorias(g.rows, categoriasFor(g.tipo));
 
   return (
     <details
@@ -385,17 +600,67 @@ function GrupoAdmin({
               style={{ width: `${pct}%` }}
             />
           </div>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="size-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180"
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
         </div>
       </summary>
-      <div className="grid gap-3 border-t border-slate-100 bg-slate-50/60 p-4 sm:grid-cols-2 sm:p-5">
-        {g.rows.map((r) => (
-          <CardAdmin
-            key={r.certidao_id}
-            r={r}
-            diligencia_id={diligencia_id}
-            pdfsDisponiveis={pdfsDoGrupo}
-          />
-        ))}
+
+      <div className="border-t border-slate-100 bg-slate-50/60 p-4 sm:p-5">
+        <div className="space-y-5">
+          {cats.map((cat) => {
+            const totCat = cat.rows.length;
+            const conclCat = cat.rows.filter((r) => r.situacao === 'Concluida').length;
+            return (
+              <div key={cat.titulo}>
+                <div className="mb-2 flex items-baseline justify-between border-b border-slate-200 pb-1">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+                    {cat.titulo}
+                  </h3>
+                  <span className="text-[10px] font-medium text-slate-500">
+                    {conclCat}/{totCat}
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  {cat.subgrupos.map((sg, sgIdx) => (
+                    <div key={sgIdx}>
+                      {sg.titulo && (
+                        <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                          {sg.titulo}
+                        </p>
+                      )}
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {sg.rows.map((r, idx) => {
+                          // Numeracao continua dentro da categoria
+                          const numero = cat.rows.indexOf(r) + 1;
+                          return (
+                            <CardAdmin
+                              key={r.certidao_id}
+                              numero={numero}
+                              r={r}
+                              diligencia_id={diligencia_id}
+                              pdfsDisponiveis={pdfsDoGrupo}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </details>
   );
@@ -417,7 +682,6 @@ export default async function AdminDiligenciaPage({
   const { endereco, cliente_nome } = rows[0];
   const grupos = agrupar(rows, endereco);
 
-  // Coleta as pasta_ids unicas pra carregar PDFs do Drive em uma chamada
   const pastaIds = Array.from(
     new Set(
       grupos.map((g) => g.pasta_id).filter((p): p is string => !!p)
@@ -432,7 +696,6 @@ export default async function AdminDiligenciaPage({
     driveErro = e?.message ?? 'Erro ao listar PDFs do Drive';
   }
 
-  // Indexa PDFs por pasta_id pra mostrar so os relevantes em cada grupo
   const pdfsPorPasta = new Map<string, DriveFile[]>();
   for (const f of pdfsTodos) {
     const parents = f.parents ?? [];
@@ -477,13 +740,6 @@ export default async function AdminDiligenciaPage({
           <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
             <p className="font-semibold">Não consegui listar PDFs do Drive.</p>
             <p className="mt-1 text-xs">{driveErro}</p>
-            <p className="mt-2 text-xs">
-              Verifique se a Service Account{' '}
-              <code className="rounded bg-amber-100 px-1">
-                bot-ville@n8n-imobiliaria-ville.iam.gserviceaccount.com
-              </code>{' '}
-              tem acesso de leitor às pastas.
-            </p>
           </div>
         )}
 
