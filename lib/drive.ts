@@ -1,184 +1,234 @@
-// lib/drive.ts
-// Helpers para listar arquivos do Google Drive em uma pasta.
-// Usa fetch + Service Account JWT manual (sem dependencias extras).
+'use client';
 
-import crypto from 'crypto';
+import { useState, useRef, useTransition } from 'react';
+import { criarCertidaoExtra, excluirCertidaoExtra } from './actions';
 
-let cachedToken: { token: string; expiresAt: number } | null = null;
-
-function base64UrlEncode(data: Buffer | string): string {
-  const buf = typeof data === 'string' ? Buffer.from(data) : data;
-  return buf
-    .toString('base64')
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
-}
-
-async function getAccessToken(): Promise<string> {
-  if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) {
-    return cachedToken.token;
-  }
-
-  const credsRaw = process.env.GOOGLE_DRIVE_CREDENTIALS_JSON;
-  if (!credsRaw) {
-    throw new Error('GOOGLE_DRIVE_CREDENTIALS_JSON nao configurado');
-  }
-
-  let creds: { client_email: string; private_key: string };
-  try {
-    creds = JSON.parse(credsRaw);
-  } catch (e) {
-    throw new Error('GOOGLE_DRIVE_CREDENTIALS_JSON invalido (nao eh JSON)');
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const header = base64UrlEncode(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-  const claim = base64UrlEncode(
-    JSON.stringify({
-      iss: creds.client_email,
-      // drive.file: leitura/escrita APENAS dos arquivos criados ou abertos pelo app.
-      // Como precisamos LISTAR PDFs em pastas existentes (criadas pelo n8n) e tambem
-      // FAZER UPLOAD de novos PDFs, usamos o escopo amplo 'drive'.
-      scope: 'https://www.googleapis.com/auth/drive',
-      aud: 'https://oauth2.googleapis.com/token',
-      exp: now + 3600,
-      iat: now,
-    })
-  );
-  const unsigned = `${header}.${claim}`;
-  const signer = crypto.createSign('RSA-SHA256');
-  signer.update(unsigned);
-  const signature = base64UrlEncode(signer.sign(creds.private_key));
-  const jwt = `${unsigned}.${signature}`;
-
-  const resp = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-      assertion: jwt,
-    }),
-  });
-
-  if (!resp.ok) {
-    const t = await resp.text();
-    throw new Error(`OAuth Drive falhou: ${resp.status} ${t}`);
-  }
-  const data = (await resp.json()) as { access_token: string; expires_in: number };
-  cachedToken = {
-    token: data.access_token,
-    expiresAt: Date.now() + data.expires_in * 1000,
-  };
-  return data.access_token;
-}
-
-export type DriveFile = {
+type DriveFile = {
   id: string;
   name: string;
-  parents?: string[];
   webViewLink?: string;
-  createdTime?: string;
-  mimeType?: string;
 };
 
-async function driveList(query: string): Promise<DriveFile[]> {
-  const token = await getAccessToken();
-  const url = new URL('https://www.googleapis.com/drive/v3/files');
-  url.searchParams.set('q', query);
-  url.searchParams.set('fields', 'files(id,name,parents,createdTime,webViewLink,mimeType)');
-  url.searchParams.set('pageSize', '1000');
-  url.searchParams.set('orderBy', 'createdTime desc');
-
-  const resp = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!resp.ok) {
-    const t = await resp.text();
-    throw new Error(`Drive list falhou: ${resp.status} ${t}`);
-  }
-  const data = (await resp.json()) as { files?: DriveFile[] };
-  return data.files ?? [];
-}
+type CardExtraNovoProps = {
+  diligencia_id: string;
+  pasta_id: string;
+  /** Pessoa dona do card. Vazio/null para cards de imovel. */
+  documento_normalizado?: string | null;
+  titular?: string | null;
+  /** Lista de PDFs disponiveis na pasta do grupo (vem do server). */
+  pdfsDisponiveis: DriveFile[];
+};
 
 /**
- * Lista PDFs em uma pasta do Drive.
+ * Botao "+ Adicionar documento" que abre um modal pra criar card extra.
+ * O admin sobe o PDF manualmente no Drive na pasta do grupo, depois aqui
+ * informa a descricao e seleciona o PDF (sem upload no painel).
  */
-export async function listPdfsInFolder(folderId: string): Promise<DriveFile[]> {
-  return driveList(
-    `'${folderId}' in parents and trashed=false and mimeType='application/pdf'`
+export function CardExtraNovo({
+  diligencia_id,
+  pasta_id,
+  documento_normalizado,
+  titular,
+  pdfsDisponiveis,
+}: CardExtraNovoProps) {
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [erro, setErro] = useState<string | null>(null);
+  const [pdfSelecionado, setPdfSelecionado] = useState<string>('');
+  const formRef = useRef<HTMLFormElement>(null);
+
+  function fechar() {
+    if (pending) return;
+    setOpen(false);
+    setErro(null);
+    setPdfSelecionado('');
+    formRef.current?.reset();
+  }
+
+  function submeter(fd: FormData) {
+    setErro(null);
+    const escolhido = pdfsDisponiveis.find((p) => p.id === fd.get('drive_file_id'));
+    if (!escolhido) {
+      setErro('Selecione um PDF da pasta');
+      return;
+    }
+    fd.set('diligencia_id', diligencia_id);
+    fd.set('pasta_id', pasta_id);
+    fd.set('documento_normalizado', documento_normalizado ?? '');
+    fd.set('titular', titular ?? '');
+    fd.set('url_pdf', escolhido.webViewLink ?? '');
+    startTransition(async () => {
+      try {
+        await criarCertidaoExtra(fd);
+        fechar();
+      } catch (e) {
+        setErro(e instanceof Error ? e.message : 'erro desconhecido');
+      }
+    });
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex min-h-[100px] flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-slate-300 bg-white/50 p-3 text-slate-500 transition hover:border-emerald-400 hover:bg-emerald-50/40 hover:text-emerald-700"
+        title="Adicionar documento avulso a este grupo"
+      >
+        <span className="text-2xl leading-none">+</span>
+        <span className="text-xs font-medium">Adicionar documento</span>
+      </button>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          onClick={fechar}
+        >
+          <div
+            className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-start justify-between gap-2">
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">
+                  Adicionar documento
+                </h2>
+                {titular && (
+                  <p className="text-xs text-slate-500">{titular}</p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={fechar}
+                disabled={pending}
+                className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="mb-3 rounded-md bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
+              ℹ Faça upload do PDF diretamente na pasta do Drive deste grupo, depois
+              selecione abaixo.{' '}
+              <a
+                href={`https://drive.google.com/drive/folders/${pasta_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-emerald-700 underline hover:no-underline"
+              >
+                Abrir pasta
+              </a>
+            </p>
+
+            <form ref={formRef} action={submeter} className="space-y-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-700">
+                  Descrição do documento
+                </label>
+                <input
+                  type="text"
+                  name="descricao"
+                  required
+                  maxLength={120}
+                  disabled={pending}
+                  placeholder="Ex.: Comprovante de residência"
+                  className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:bg-slate-50"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-700">
+                  PDF (já enviado ao Drive)
+                </label>
+                {pdfsDisponiveis.length === 0 ? (
+                  <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    Nenhum PDF encontrado na pasta. Faça upload primeiro no Drive
+                    e recarregue a página.
+                  </p>
+                ) : (
+                  <select
+                    name="drive_file_id"
+                    required
+                    disabled={pending}
+                    value={pdfSelecionado}
+                    onChange={(e) => setPdfSelecionado(e.target.value)}
+                    className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:bg-slate-50"
+                  >
+                    <option value="">— selecione um PDF —</option>
+                    {pdfsDisponiveis.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {erro && (
+                <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                  {erro}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={fechar}
+                  disabled={pending}
+                  className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={pending || pdfsDisponiveis.length === 0}
+                  className={`rounded-md px-3 py-1.5 text-xs font-semibold text-white ${
+                    pending || pdfsDisponiveis.length === 0
+                      ? 'cursor-not-allowed bg-slate-400'
+                      : 'bg-emerald-600 hover:bg-emerald-700'
+                  }`}
+                >
+                  {pending ? 'Salvando...' : 'Adicionar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
 /**
- * Lista PDFs em multiplas pastas do Drive numa unica chamada.
+ * Botao pequeno de excluir card extra (X). Pede confirmacao via window.confirm.
  */
-export async function listPdfsInFolders(folderIds: string[]): Promise<DriveFile[]> {
-  if (folderIds.length === 0) return [];
-  const clauses = folderIds.map((id) => `'${id}' in parents`).join(' or ');
-  return driveList(
-    `(${clauses}) and trashed=false and mimeType='application/pdf'`
+export function ExcluirCardExtra({
+  certidao_id,
+  diligencia_id,
+}: {
+  certidao_id: string;
+  diligencia_id: string;
+}) {
+  const [pending, startTransition] = useTransition();
+
+  return (
+    <button
+      type="button"
+      disabled={pending}
+      onClick={() => {
+        if (!confirm('Excluir este documento extra? O PDF do Drive não será removido.')) return;
+        startTransition(async () => {
+          await excluirCertidaoExtra(certidao_id, diligencia_id);
+        });
+      }}
+      title="Excluir card extra (apenas o card; o PDF do Drive permanece)"
+      className={`rounded-md border px-2 py-1 text-xs font-medium ${
+        pending
+          ? 'cursor-not-allowed border-slate-200 text-slate-400'
+          : 'border-rose-300 bg-white text-rose-700 hover:bg-rose-50'
+      }`}
+    >
+      {pending ? 'Excluindo...' : '✕ Excluir card'}
+    </button>
   );
-}
-
-/**
- * Faz upload de um PDF (Buffer) para uma pasta do Drive.
- * Retorna o arquivo criado com id, name e webViewLink.
- *
- * Usa multipart upload da Drive API v3.
- */
-export async function uploadPdfToFolder(opts: {
-  folderId: string;
-  fileName: string;
-  buffer: Buffer;
-}): Promise<DriveFile> {
-  const { folderId, fileName, buffer } = opts;
-  const token = await getAccessToken();
-
-  const metadata = {
-    name: fileName,
-    parents: [folderId],
-    mimeType: 'application/pdf',
-  };
-
-  const boundary = '-------n8n-' + crypto.randomBytes(8).toString('hex');
-  const delimiter = `\r\n--${boundary}\r\n`;
-  const closeDelim = `\r\n--${boundary}--`;
-
-  const metaPart =
-    delimiter +
-    'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-    JSON.stringify(metadata);
-
-  const filePartHeader =
-    delimiter + 'Content-Type: application/pdf\r\n\r\n';
-
-  const body = Buffer.concat([
-    Buffer.from(metaPart, 'utf8'),
-    Buffer.from(filePartHeader, 'utf8'),
-    buffer,
-    Buffer.from(closeDelim, 'utf8'),
-  ]);
-
-  const url = new URL('https://www.googleapis.com/upload/drive/v3/files');
-  url.searchParams.set('uploadType', 'multipart');
-  url.searchParams.set('fields', 'id,name,parents,webViewLink,createdTime,mimeType');
-  url.searchParams.set('supportsAllDrives', 'true');
-
-  const resp = await fetch(url.toString(), {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': `multipart/related; boundary=${boundary}`,
-      'Content-Length': String(body.length),
-    },
-    body,
-  });
-
-  if (!resp.ok) {
-    const t = await resp.text();
-    throw new Error(`Drive upload falhou: ${resp.status} ${t}`);
-  }
-
-  return (await resp.json()) as DriveFile;
 }
