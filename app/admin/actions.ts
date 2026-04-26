@@ -4,7 +4,6 @@
 'use server';
 
 import { pool } from '@/lib/db';
-import { uploadPdfToFolder } from '@/lib/drive';
 import { revalidatePath } from 'next/cache';
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -359,13 +358,14 @@ export async function togglePessoaOculta(
 
 /**
  * Cria um card EXTRA (documento avulso) num grupo da diligencia.
- * Faz upload do PDF na pasta_id informada e insere row em certidoes_status
- * com is_extra=true e status='concluido'.
+ * NAO faz upload — o admin sobe o PDF manualmente no Drive (na pasta do grupo)
+ * e seleciona ele aqui pelo dropdown. Apenas vincula no banco.
  *
  * - documento_normalizado e titular: identificam a pessoa dona do card
  *   (NULL pra cards de imovel — nao tem pessoa).
- * - pasta_id: pasta do Drive onde salvar o PDF (mesma pasta usada pelo
+ * - pasta_id: pasta do Drive onde o PDF ja esta (mesma pasta usada pelo
  *   grupo onde o card sera inserido).
+ * - drive_file_id e url_pdf: do PDF ja existente no Drive.
  */
 export async function criarCertidaoExtra(formData: FormData) {
   const diligencia_id = String(formData.get('diligencia_id') || '');
@@ -373,34 +373,14 @@ export async function criarCertidaoExtra(formData: FormData) {
   const titular = String(formData.get('titular') || '');
   const pasta_id = String(formData.get('pasta_id') || '');
   const descricao = String(formData.get('descricao') || '').trim();
-  const file = formData.get('arquivo') as File | null;
+  const drive_file_id = String(formData.get('drive_file_id') || '');
+  const url_pdf = String(formData.get('url_pdf') || '');
 
   if (!diligencia_id) throw new Error('diligencia_id obrigatorio');
   if (!pasta_id) throw new Error('pasta_id obrigatoria');
   if (!descricao) throw new Error('descricao obrigatoria');
-  if (!file || file.size === 0) throw new Error('arquivo obrigatorio');
-  if (file.size > 25 * 1024 * 1024) throw new Error('arquivo maior que 25MB');
+  if (!drive_file_id) throw new Error('selecione um PDF da pasta');
 
-  // Sanitiza nome do arquivo
-  const safeDesc = descricao
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9_.\- ]/g, '')
-    .slice(0, 80)
-    .trim()
-    .replace(/\s+/g, '_');
-  const dataHoje = new Date().toLocaleDateString('pt-BR').replace(/\//g, '-');
-  const nomeArquivo = `EXTRA_${safeDesc}_${dataHoje}.pdf`;
-
-  // Upload pro Drive
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const driveFile = await uploadPdfToFolder({
-    folderId: pasta_id,
-    fileName: nomeArquivo,
-    buffer,
-  });
-
-  // Insere card no banco
   const insert = await pool.query(
     `INSERT INTO certidoes_status (
        diligencia_id, tipo, titular, documento, pasta_id,
@@ -422,8 +402,8 @@ export async function criarCertidaoExtra(formData: FormData) {
       documento_normalizado,
       pasta_id,
       descricao,
-      driveFile.id,
-      driveFile.webViewLink ?? '',
+      drive_file_id,
+      url_pdf,
     ]
   );
 
@@ -432,7 +412,7 @@ export async function criarCertidaoExtra(formData: FormData) {
   await logAcao({
     acao: 'criar_extra',
     certidao_id,
-    drive_file_id_novo: driveFile.id,
+    drive_file_id_novo: drive_file_id,
     detalhe: { diligencia_id, descricao, pasta_id, documento_normalizado, titular },
   });
 
