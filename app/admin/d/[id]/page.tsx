@@ -14,6 +14,9 @@ import { listPdfsInFolders, type DriveFile } from '@/lib/drive';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { desvincularPDF, vincularPDF, reemitirCertidao, auditarDiligencia, logoutAction } from '../../actions';
+import { SubmitButtonAsync } from '../../SubmitButtonAsync';
+import { ToggleCardVisivel, TogglePessoaVisivel } from '../../ToggleVisibilidade';
+import { CopiarLinkCliente } from '../../CopiarLinkCliente';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -46,6 +49,9 @@ type AdminRow = {
   cs_atualizado_em: string | null;
   cs_numero_pedido: string | null;
   cs_pedido_data: string | null;
+  // visibilidade
+  card_oculto: boolean;
+  titular_oculto: boolean;
 };
 
 async function fetchDiligencia(id: string): Promise<AdminRow[] | null> {
@@ -579,13 +585,13 @@ function CardAdmin({
               await reemitirCertidao(r.certidao_id, diligencia_id);
             }}
           >
-            <button
-              type="submit"
+            <SubmitButtonAsync
+              pendingLabel="Disparando..."
               className="rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
               title="Dispara o workflow de emissão dessa certidão agora"
             >
               ↻ Reemitir
-            </button>
+            </SubmitButtonAsync>
           </form>
         )}
         {r.drive_file_id && (
@@ -645,6 +651,15 @@ function CardAdmin({
             )}
           </div>
         </details>
+
+        {/* v3: toggle de visibilidade do card no painel cliente */}
+        <div className="ml-auto">
+          <ToggleCardVisivel
+            certidao_id={r.certidao_id}
+            diligencia_id={diligencia_id}
+            oculto={r.card_oculto}
+          />
+        </div>
       </div>
     </div>
   );
@@ -688,6 +703,16 @@ function GrupoAdmin({
           </p>
           {g.subtitulo && (
             <p className="truncate text-xs text-slate-500">{g.subtitulo}</p>
+          )}
+          {/* v3: toggle visibilidade da PESSOA (apenas PF/PJ) */}
+          {g.tipo !== 'imovel' && g.rows[0]?.documento_normalizado && (
+            <div className="mt-1.5">
+              <TogglePessoaVisivel
+                diligencia_id={diligencia_id}
+                documento_normalizado={g.rows[0].documento_normalizado}
+                oculta={g.rows[0].titular_oculto}
+              />
+            </div>
           )}
         </div>
         <div className="flex items-center gap-3">
@@ -827,19 +852,20 @@ export default async function AdminDiligenciaPage({
             )}
           </div>
           <div className="flex items-center gap-2">
+            <CopiarLinkCliente diligencia_id={id} />
             <form
               action={async () => {
                 'use server';
                 await auditarDiligencia(id);
               }}
             >
-              <button
-                type="submit"
+              <SubmitButtonAsync
+                pendingLabel="Auditando..."
                 className="rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
                 title="Dispara o WF-07 (auditoria) para varrer todos os PDFs nas pastas dessa diligência e tentar vincular nos cards pendentes"
               >
                 ↻ Auditar diligência
-              </button>
+              </SubmitButtonAsync>
             </form>
             <form action={logoutAction}>
               <button
