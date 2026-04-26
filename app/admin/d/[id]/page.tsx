@@ -807,6 +807,7 @@ function GrupoAdmin({
                   g.tipo === 'imovel' ? null : g.rows[0]?.documento_normalizado ?? null
                 }
                 titular={g.tipo === 'imovel' ? null : g.titulo}
+                pdfsDisponiveis={pdfsDoGrupo}
               />
             </div>
           </div>
