@@ -37,7 +37,10 @@ async function getAccessToken(): Promise<string> {
   const claim = base64UrlEncode(
     JSON.stringify({
       iss: creds.client_email,
-      scope: 'https://www.googleapis.com/auth/drive.readonly',
+      // drive.file: leitura/escrita APENAS dos arquivos criados ou abertos pelo app.
+      // Como precisamos LISTAR PDFs em pastas existentes (criadas pelo n8n) e tambem
+      // FAZER UPLOAD de novos PDFs, usamos o escopo amplo 'drive'.
+      scope: 'https://www.googleapis.com/auth/drive',
       aud: 'https://oauth2.googleapis.com/token',
       exp: now + 3600,
       iat: now,
@@ -116,4 +119,66 @@ export async function listPdfsInFolders(folderIds: string[]): Promise<DriveFile[
   return driveList(
     `(${clauses}) and trashed=false and mimeType='application/pdf'`
   );
+}
+
+/**
+ * Faz upload de um PDF (Buffer) para uma pasta do Drive.
+ * Retorna o arquivo criado com id, name e webViewLink.
+ *
+ * Usa multipart upload da Drive API v3.
+ */
+export async function uploadPdfToFolder(opts: {
+  folderId: string;
+  fileName: string;
+  buffer: Buffer;
+}): Promise<DriveFile> {
+  const { folderId, fileName, buffer } = opts;
+  const token = await getAccessToken();
+
+  const metadata = {
+    name: fileName,
+    parents: [folderId],
+    mimeType: 'application/pdf',
+  };
+
+  const boundary = '-------n8n-' + crypto.randomBytes(8).toString('hex');
+  const delimiter = `\r\n--${boundary}\r\n`;
+  const closeDelim = `\r\n--${boundary}--`;
+
+  const metaPart =
+    delimiter +
+    'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+    JSON.stringify(metadata);
+
+  const filePartHeader =
+    delimiter + 'Content-Type: application/pdf\r\n\r\n';
+
+  const body = Buffer.concat([
+    Buffer.from(metaPart, 'utf8'),
+    Buffer.from(filePartHeader, 'utf8'),
+    buffer,
+    Buffer.from(closeDelim, 'utf8'),
+  ]);
+
+  const url = new URL('https://www.googleapis.com/upload/drive/v3/files');
+  url.searchParams.set('uploadType', 'multipart');
+  url.searchParams.set('fields', 'id,name,parents,webViewLink,createdTime,mimeType');
+  url.searchParams.set('supportsAllDrives', 'true');
+
+  const resp = await fetch(url.toString(), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': `multipart/related; boundary=${boundary}`,
+      'Content-Length': String(body.length),
+    },
+    body,
+  });
+
+  if (!resp.ok) {
+    const t = await resp.text();
+    throw new Error(`Drive upload falhou: ${resp.status} ${t}`);
+  }
+
+  return (await resp.json()) as DriveFile;
 }
