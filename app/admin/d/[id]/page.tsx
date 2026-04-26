@@ -17,6 +17,7 @@ import { desvincularPDF, vincularPDF, reemitirCertidao, auditarDiligencia, logou
 import { SubmitButtonAsync } from '../../SubmitButtonAsync';
 import { ToggleCardVisivel, TogglePessoaVisivel } from '../../ToggleVisibilidade';
 import { CopiarLinkCliente } from '../../CopiarLinkCliente';
+import { CardExtraNovo, ExcluirCardExtra } from '../../CardExtra';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -52,6 +53,8 @@ type AdminRow = {
   // visibilidade
   card_oculto: boolean;
   titular_oculto: boolean;
+  // extras
+  is_extra: boolean;
 };
 
 async function fetchDiligencia(id: string): Promise<AdminRow[] | null> {
@@ -653,7 +656,13 @@ function CardAdmin({
         </details>
 
         {/* v3: toggle de visibilidade do card no painel cliente */}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {r.is_extra && (
+            <ExcluirCardExtra
+              certidao_id={r.certidao_id}
+              diligencia_id={diligencia_id}
+            />
+          )}
           <ToggleCardVisivel
             certidao_id={r.certidao_id}
             diligencia_id={diligencia_id}
@@ -785,6 +794,22 @@ function GrupoAdmin({
               </div>
             );
           })}
+
+          {/* v3: card "+" pra adicionar documento avulso ao grupo */}
+          <div className="border-t border-dashed border-slate-200 pt-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <CardExtraNovo
+                diligencia_id={diligencia_id}
+                pasta_id={
+                  g.rows.find((r) => r.pasta_id)?.pasta_id ?? ''
+                }
+                documento_normalizado={
+                  g.tipo === 'imovel' ? null : g.rows[0]?.documento_normalizado ?? null
+                }
+                titular={g.tipo === 'imovel' ? null : g.titulo}
+              />
+            </div>
+          </div>
         </div>
       </div>
     </details>
