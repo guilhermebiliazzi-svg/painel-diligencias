@@ -13,7 +13,7 @@ import { pool } from '@/lib/db';
 import { listPdfsInFolders, type DriveFile } from '@/lib/drive';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { desvincularPDF, vincularPDF, logoutAction } from '../../actions';
+import { desvincularPDF, vincularPDF, reemitirCertidao, auditarDiligencia, logoutAction } from '../../actions';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -38,6 +38,14 @@ type AdminRow = {
   drive_file_id: string | null;
   pasta_id: string | null;
   url_pdf: string | null;
+  // v2: log de processamento
+  cs_status: string | null;
+  cs_erro: string | null;
+  cs_tentativas: number | null;
+  cs_tentativas_obter: number | null;
+  cs_atualizado_em: string | null;
+  cs_numero_pedido: string | null;
+  cs_pedido_data: string | null;
 };
 
 async function fetchDiligencia(id: string): Promise<AdminRow[] | null> {
@@ -444,6 +452,59 @@ function formatDate(iso: string | null): string {
   });
 }
 
+// v2: formato data + hora pra log de processamento
+function formatDateTime(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+// v2: bloco de log de processamento. So aparece em cards sem PDF vinculado.
+function LogProcessamento({ r }: { r: AdminRow }) {
+  const tentativas = (r.cs_tentativas ?? 0) + (r.cs_tentativas_obter ?? 0);
+  const dataAtu = formatDateTime(r.cs_atualizado_em);
+  const erro = r.cs_erro?.trim();
+
+  // Caso 1: tem erro registrado
+  if (erro) {
+    return (
+      <div className="rounded-md border border-rose-200 bg-rose-50/60 px-2 py-1.5 text-xs text-rose-800">
+        <div className="font-semibold">
+          ⚠ Última tentativa: {dataAtu || 'data desconhecida'}
+        </div>
+        <div className="mt-0.5 leading-snug break-words">{erro}</div>
+      </div>
+    );
+  }
+
+  // Caso 2: já houve tentativas mas sem erro registrado (em processamento normal)
+  if (tentativas > 0) {
+    return (
+      <div className="rounded-md border border-slate-200 bg-slate-50/60 px-2 py-1.5 text-xs text-slate-600">
+        <span className="font-medium">⏳ Em processamento.</span>{' '}
+        {dataAtu && <>Última atualização: {dataAtu}</>}
+        {r.cs_numero_pedido && (
+          <> · pedido <span className="font-mono">{r.cs_numero_pedido}</span></>
+        )}
+      </div>
+    );
+  }
+
+  // Caso 3: nenhuma tentativa ainda
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50/60 px-2 py-1.5 text-xs text-slate-500">
+      Aguardando primeiro processamento.
+    </div>
+  );
+}
+
 // -----------------------------------------------------------------------------
 // Componentes visuais
 // -----------------------------------------------------------------------------
@@ -488,6 +549,9 @@ function CardAdmin({
         </p>
       )}
 
+      {/* v2: Log de processamento — so aparece se nao tem PDF vinculado */}
+      {!r.drive_file_id && <LogProcessamento r={r} />}
+
       <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
         <span>
           {r.data_emissao
@@ -507,6 +571,23 @@ function CardAdmin({
       </div>
 
       <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-slate-200/70 pt-2">
+        {/* v2: Reemitir - so aparece quando nao tem PDF vinculado */}
+        {!r.drive_file_id && (
+          <form
+            action={async () => {
+              'use server';
+              await reemitirCertidao(r.certidao_id, diligencia_id);
+            }}
+          >
+            <button
+              type="submit"
+              className="rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+              title="Dispara o workflow de emissão dessa certidão agora"
+            >
+              ↻ Reemitir
+            </button>
+          </form>
+        )}
         {r.drive_file_id && (
           <form
             action={async () => {
@@ -745,14 +826,30 @@ export default async function AdminDiligenciaPage({
               </p>
             )}
           </div>
-          <form action={logoutAction}>
-            <button
-              type="submit"
-              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          <div className="flex items-center gap-2">
+            <form
+              action={async () => {
+                'use server';
+                await auditarDiligencia(id);
+              }}
             >
-              Sair
-            </button>
-          </form>
+              <button
+                type="submit"
+                className="rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+                title="Dispara o WF-07 (auditoria) para varrer todos os PDFs nas pastas dessa diligência e tentar vincular nos cards pendentes"
+              >
+                ↻ Auditar diligência
+              </button>
+            </form>
+            <form action={logoutAction}>
+              <button
+                type="submit"
+                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Sair
+              </button>
+            </form>
+          </div>
         </header>
 
         {driveErro && (
