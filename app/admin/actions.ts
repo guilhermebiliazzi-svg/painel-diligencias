@@ -4,6 +4,7 @@
 'use server';
 
 import { pool } from '@/lib/db';
+import { uploadPdfToFolder } from '@/lib/drive';
 import { revalidatePath } from 'next/cache';
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -351,6 +352,117 @@ export async function togglePessoaOculta(
   await logAcao({
     acao: novoOculto ? 'ocultar_pessoa' : 'mostrar_pessoa',
     detalhe: { diligencia_id, documento_normalizado },
+  });
+
+  revalidatePath(`/admin/d/${diligencia_id}`);
+}
+
+/**
+ * Cria um card EXTRA (documento avulso) num grupo da diligencia.
+ * Faz upload do PDF na pasta_id informada e insere row em certidoes_status
+ * com is_extra=true e status='concluido'.
+ *
+ * - documento_normalizado e titular: identificam a pessoa dona do card
+ *   (NULL pra cards de imovel — nao tem pessoa).
+ * - pasta_id: pasta do Drive onde salvar o PDF (mesma pasta usada pelo
+ *   grupo onde o card sera inserido).
+ */
+export async function criarCertidaoExtra(formData: FormData) {
+  const diligencia_id = String(formData.get('diligencia_id') || '');
+  const documento_normalizado = String(formData.get('documento_normalizado') || '');
+  const titular = String(formData.get('titular') || '');
+  const pasta_id = String(formData.get('pasta_id') || '');
+  const descricao = String(formData.get('descricao') || '').trim();
+  const file = formData.get('arquivo') as File | null;
+
+  if (!diligencia_id) throw new Error('diligencia_id obrigatorio');
+  if (!pasta_id) throw new Error('pasta_id obrigatoria');
+  if (!descricao) throw new Error('descricao obrigatoria');
+  if (!file || file.size === 0) throw new Error('arquivo obrigatorio');
+  if (file.size > 25 * 1024 * 1024) throw new Error('arquivo maior que 25MB');
+
+  // Sanitiza nome do arquivo
+  const safeDesc = descricao
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9_.\- ]/g, '')
+    .slice(0, 80)
+    .trim()
+    .replace(/\s+/g, '_');
+  const dataHoje = new Date().toLocaleDateString('pt-BR').replace(/\//g, '-');
+  const nomeArquivo = `EXTRA_${safeDesc}_${dataHoje}.pdf`;
+
+  // Upload pro Drive
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const driveFile = await uploadPdfToFolder({
+    folderId: pasta_id,
+    fileName: nomeArquivo,
+    buffer,
+  });
+
+  // Insere card no banco
+  const insert = await pool.query(
+    `INSERT INTO certidoes_status (
+       diligencia_id, tipo, titular, documento, pasta_id,
+       sheet_label, descricao_extra, is_extra,
+       status, validacao_status, resultado_certidao,
+       drive_file_id, url_pdf,
+       emitida_em, atualizado_em, manual
+     ) VALUES (
+       $1, 'extra', NULLIF($2,''), NULLIF($3,''), $4,
+       $5, $5, TRUE,
+       'concluido', 'validado', NULL,
+       $6, $7,
+       NOW(), NOW(), TRUE
+     )
+     RETURNING id`,
+    [
+      diligencia_id,
+      titular,
+      documento_normalizado,
+      pasta_id,
+      descricao,
+      driveFile.id,
+      driveFile.webViewLink ?? '',
+    ]
+  );
+
+  const certidao_id = insert.rows[0].id as string;
+
+  await logAcao({
+    acao: 'criar_extra',
+    certidao_id,
+    drive_file_id_novo: driveFile.id,
+    detalhe: { diligencia_id, descricao, pasta_id, documento_normalizado, titular },
+  });
+
+  revalidatePath(`/admin/d/${diligencia_id}`);
+}
+
+/**
+ * Exclui um card extra. So funciona para is_extra=true (seguranca).
+ * Nao deleta o PDF do Drive (caso queira, exclua manualmente).
+ */
+export async function excluirCertidaoExtra(certidao_id: string, diligencia_id: string) {
+  if (!certidao_id || !diligencia_id) throw new Error('parametros invalidos');
+
+  const before = await pool.query(
+    `SELECT drive_file_id, is_extra FROM certidoes_status WHERE id = $1`,
+    [certidao_id]
+  );
+  const row = before.rows[0];
+  if (!row) throw new Error('certidao nao encontrada');
+  if (!row.is_extra) throw new Error('apenas cards extras podem ser excluidos por aqui');
+
+  await pool.query(`DELETE FROM certidoes_status WHERE id = $1 AND is_extra = TRUE`, [
+    certidao_id,
+  ]);
+
+  await logAcao({
+    acao: 'excluir_extra',
+    certidao_id,
+    drive_file_id_antigo: row.drive_file_id,
+    detalhe: { diligencia_id },
   });
 
   revalidatePath(`/admin/d/${diligencia_id}`);
