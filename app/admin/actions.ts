@@ -158,6 +158,8 @@ function rotaDoTipo(tipo: string): 'wf03' | 'wf04' | 'wf08' | null {
 export async function reemitirCertidao(certidao_id: string, diligencia_id: string) {
   if (!certidao_id || !diligencia_id) throw new Error('parametros invalidos');
 
+  console.log('[reemitirCertidao] inicio', { certidao_id, diligencia_id });
+
   // Carrega dados da certidao (mesmo SELECT que o WF-09 faz)
   const { rows } = await pool.query(
     `SELECT cs.id AS certidao_id,
@@ -175,8 +177,17 @@ export async function reemitirCertidao(certidao_id: string, diligencia_id: strin
      WHERE cs.id = $1`,
     [certidao_id]
   );
+  console.log('[reemitirCertidao] query retornou', rows.length, 'linhas');
   const c = rows[0];
-  if (!c) throw new Error('certidao nao encontrada');
+  if (!c) {
+    // Tenta sem JOIN pra ver se eh problema de permissao em diligencias
+    const fallback = await pool.query(
+      `SELECT id, diligencia_id, tipo FROM certidoes_status WHERE id = $1`,
+      [certidao_id]
+    );
+    console.log('[reemitirCertidao] fallback sem JOIN retornou', fallback.rows.length, 'linhas:', fallback.rows[0] ?? '(nada)');
+    throw new Error('certidao nao encontrada');
+  }
 
   const rota = rotaDoTipo(c.tipo);
   if (!rota) throw new Error(`tipo nao roteavel: ${c.tipo}`);
@@ -282,6 +293,64 @@ export async function auditarDiligencia(diligencia_id: string) {
       http_status: httpStatus,
       erro_disparo: erroDisparo,
     },
+  });
+
+  revalidatePath(`/admin/d/${diligencia_id}`);
+}
+
+/**
+ * Alterna visibilidade de UM card no painel cliente.
+ * Atualiza certidoes_status.oculta_cliente.
+ */
+export async function toggleCardOculto(certidao_id: string, diligencia_id: string, novoOculto: boolean) {
+  if (!certidao_id || !diligencia_id) throw new Error('parametros invalidos');
+
+  await pool.query(
+    `UPDATE certidoes_status SET oculta_cliente = $2, atualizado_em = NOW() WHERE id = $1`,
+    [certidao_id, novoOculto]
+  );
+
+  await logAcao({
+    acao: novoOculto ? 'ocultar_card' : 'mostrar_card',
+    certidao_id,
+    detalhe: { diligencia_id },
+  });
+
+  revalidatePath(`/admin/d/${diligencia_id}`);
+}
+
+/**
+ * Alterna visibilidade de uma PESSOA inteira (todos os cards do mesmo
+ * documento_normalizado naquela diligencia) no painel cliente.
+ * Insere/remove em painel.titulares_ocultos.
+ */
+export async function togglePessoaOculta(
+  diligencia_id: string,
+  documento_normalizado: string,
+  novoOculto: boolean
+) {
+  if (!diligencia_id || !documento_normalizado) {
+    throw new Error('parametros invalidos');
+  }
+
+  if (novoOculto) {
+    await pool.query(
+      `INSERT INTO painel.titulares_ocultos (diligencia_id, documento_normalizado, criado_em)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (diligencia_id, documento_normalizado) DO NOTHING`,
+      [diligencia_id, documento_normalizado]
+    );
+  } else {
+    await pool.query(
+      `DELETE FROM painel.titulares_ocultos
+       WHERE diligencia_id = $1 AND documento_normalizado = $2`,
+      [diligencia_id, documento_normalizado]
+    );
+  }
+
+  await logAcao({
+    acao: novoOculto ? 'ocultar_pessoa' : 'mostrar_pessoa',
+    detalhe: { diligencia_id, documento_normalizado },
   });
 
   revalidatePath(`/admin/d/${diligencia_id}`);
