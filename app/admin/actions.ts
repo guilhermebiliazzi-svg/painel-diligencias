@@ -460,13 +460,17 @@ export async function gerarParecer(fd: FormData) {
   const diligencia_id = String(fd.get('diligencia_id') || '');
   if (!diligencia_id) throw new Error('diligencia_id ausente');
 
+  let compradores: unknown = [];
+  try {
+    compradores = JSON.parse(String(fd.get('compradores') || '[]'));
+  } catch {
+    compradores = [];
+  }
+
   const payload = {
     diligencia_id,
-    comprador_nome: (fd.get('comprador_nome') as string) || null,
-    comprador_cpf: (fd.get('comprador_cpf') as string) || null,
-    comprador_qualificacao: (fd.get('comprador_qualificacao') as string) || null,
+    compradores,
     preco: (fd.get('preco') as string) || null,
-    forma_pagamento: (fd.get('forma_pagamento') as string) || null,
   };
 
   let httpStatus = 0;
