@@ -460,17 +460,13 @@ export async function gerarParecer(fd: FormData) {
   const diligencia_id = String(fd.get('diligencia_id') || '');
   if (!diligencia_id) throw new Error('diligencia_id ausente');
 
-  let compradores: unknown = [];
-  try {
-    compradores = JSON.parse(String(fd.get('compradores') || '[]'));
-  } catch {
-    compradores = [];
-  }
-
   const payload = {
     diligencia_id,
-    compradores,
+    comprador_nome: (fd.get('comprador_nome') as string) || null,
+    comprador_cpf: (fd.get('comprador_cpf') as string) || null,
+    comprador_qualificacao: (fd.get('comprador_qualificacao') as string) || null,
     preco: (fd.get('preco') as string) || null,
+    forma_pagamento: (fd.get('forma_pagamento') as string) || null,
   };
 
   let httpStatus = 0;
@@ -503,4 +499,42 @@ export async function logoutAction() {
   const cookieStore = await cookies();
   cookieStore.delete('admin_session');
   redirect('/admin/login');
+}
+
+/**
+ * Liberar parecer: congela o rascunho como aprovado, registrando quem e quando.
+ * Atômico — demove qualquer parecer já aprovado desta diligência (mantém histórico
+ * como 'substituido') antes de aprovar este, respeitando o índice único de
+ * 1-aprovado-por-diligência.
+ */
+export async function liberarParecer(fd: FormData) {
+  const parecer_id = String(fd.get('parecer_id') || '');
+  const diligencia_id = String(fd.get('diligencia_id') || '');
+  if (!parecer_id || !diligencia_id) throw new Error('parecer_id/diligencia_id ausente');
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE pareceres SET status = 'substituido'
+         WHERE diligencia_id = $1 AND status = 'aprovado' AND id <> $2`,
+      [diligencia_id, parecer_id]
+    );
+    const r = await client.query(
+      `UPDATE pareceres
+          SET status = 'aprovado', aprovado_por = $2, aprovado_em = NOW()
+        WHERE id = $1 AND diligencia_id = $3`,
+      [parecer_id, 'admin', diligencia_id]
+    );
+    if (r.rowCount === 0) throw new Error('Parecer não encontrado para esta diligência.');
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  await logAcao({ acao: 'liberar_parecer', detalhe: { diligencia_id, parecer_id } });
+  revalidatePath(`/admin/d/${diligencia_id}`);
 }
