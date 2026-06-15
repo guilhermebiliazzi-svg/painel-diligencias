@@ -18,6 +18,7 @@ import { SubmitButtonAsync } from '../../SubmitButtonAsync';
 import { ToggleCardVisivel, TogglePessoaVisivel } from '../../ToggleVisibilidade';
 import { CopiarLinkCliente } from '../../CopiarLinkCliente';
 import { CardExtraNovo, ExcluirCardExtra } from '../../CardExtra';
+import { GerarParecer } from '../../GerarParecer';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -776,7 +777,7 @@ function GrupoAdmin({
                         </p>
                       )}
                       <div className="grid gap-3 sm:grid-cols-2">
-                        {sg.rows.map((r, idx) => {
+                        {sg.rows.map((r) => {
                           // Numeracao continua dentro da categoria
                           const numero = cat.rows.indexOf(r) + 1;
                           return (
@@ -845,8 +846,8 @@ export default async function AdminDiligenciaPage({
   let driveErro: string | null = null;
   try {
     pdfsTodos = await listPdfsInFolders(pastaIds);
-  } catch (e: any) {
-    driveErro = e?.message ?? 'Erro ao listar PDFs do Drive';
+  } catch (e) {
+    driveErro = e instanceof Error ? e.message : 'Erro ao listar PDFs do Drive';
   }
 
   const pdfsPorPasta = new Map<string, DriveFile[]>();
@@ -895,6 +896,7 @@ export default async function AdminDiligenciaPage({
                 ↻ Auditar diligência
               </SubmitButtonAsync>
             </form>
+            <GerarParecer diligenciaId={id} />
             <form action={logoutAction}>
               <button
                 type="submit"
