@@ -39,6 +39,7 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
   }, [diligenciaId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     carregar();
   }, [carregar]);
 
