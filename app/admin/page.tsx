@@ -777,7 +777,7 @@ function GrupoAdmin({
                         </p>
                       )}
                       <div className="grid gap-3 sm:grid-cols-2">
-                        {sg.rows.map((r, idx) => {
+                        {sg.rows.map((r) => {
                           // Numeracao continua dentro da categoria
                           const numero = cat.rows.indexOf(r) + 1;
                           return (
@@ -846,8 +846,8 @@ export default async function AdminDiligenciaPage({
   let driveErro: string | null = null;
   try {
     pdfsTodos = await listPdfsInFolders(pastaIds);
-  } catch (e: any) {
-    driveErro = e?.message ?? 'Erro ao listar PDFs do Drive';
+  } catch (e) {
+    driveErro = e instanceof Error ? e.message : 'Erro ao listar PDFs do Drive';
   }
 
   const pdfsPorPasta = new Map<string, DriveFile[]>();
