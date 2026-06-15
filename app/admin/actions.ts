@@ -448,6 +448,53 @@ export async function excluirCertidaoExtra(certidao_id: string, diligencia_id: s
   revalidatePath(`/admin/d/${diligencia_id}`);
 }
 
+/**
+ * Gerar parecer: dispara o workflow B (montagem dos fatos -> motor no Render).
+ * Fire-and-forget — o motor (Opus) demora, então o fetch pode expirar; o B segue
+ * rodando no n8n, gera o HTML, sobe no Storage e grava a URL em pareceres.
+ * O painel acompanha pelo /api/parecer-status.
+ */
+const WEBHOOK_PARECER = 'https://villejds.app.n8n.cloud/webhook/gerar-parecer';
+
+export async function gerarParecer(fd: FormData) {
+  const diligencia_id = String(fd.get('diligencia_id') || '');
+  if (!diligencia_id) throw new Error('diligencia_id ausente');
+
+  const payload = {
+    diligencia_id,
+    comprador_nome: (fd.get('comprador_nome') as string) || null,
+    comprador_cpf: (fd.get('comprador_cpf') as string) || null,
+    comprador_qualificacao: (fd.get('comprador_qualificacao') as string) || null,
+    preco: (fd.get('preco') as string) || null,
+    forma_pagamento: (fd.get('forma_pagamento') as string) || null,
+  };
+
+  let httpStatus = 0;
+  let erroDisparo: string | null = null;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 10000);
+    const resp = await fetch(WEBHOOK_PARECER, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    httpStatus = resp.status;
+    if (!resp.ok) erroDisparo = `http_${resp.status}`;
+  } catch (e) {
+    erroDisparo = e instanceof Error ? e.message : String(e);
+  }
+
+  await logAcao({
+    acao: 'gerar_parecer',
+    detalhe: { diligencia_id, http_status: httpStatus, erro_disparo: erroDisparo },
+  });
+
+  revalidatePath(`/admin/d/${diligencia_id}`);
+}
+
 export async function logoutAction() {
   const cookieStore = await cookies();
   cookieStore.delete('admin_session');
