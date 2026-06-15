@@ -507,10 +507,12 @@ export async function logoutAction() {
  * como 'substituido') antes de aprovar este, respeitando o índice único de
  * 1-aprovado-por-diligência.
  */
-export async function liberarParecer(fd: FormData) {
+export async function liberarParecer(
+  fd: FormData
+): Promise<{ ok: boolean; error?: string }> {
   const parecer_id = String(fd.get('parecer_id') || '');
   const diligencia_id = String(fd.get('diligencia_id') || '');
-  if (!parecer_id || !diligencia_id) throw new Error('parecer_id/diligencia_id ausente');
+  if (!parecer_id || !diligencia_id) return { ok: false, error: 'parecer_id/diligencia_id ausente' };
 
   const client = await pool.connect();
   try {
@@ -526,15 +528,20 @@ export async function liberarParecer(fd: FormData) {
         WHERE id = $1 AND diligencia_id = $3`,
       [parecer_id, 'admin', diligencia_id]
     );
-    if (r.rowCount === 0) throw new Error('Parecer não encontrado para esta diligência.');
+    if (r.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return { ok: false, error: 'Parecer não encontrado para esta diligência.' };
+    }
     await client.query('COMMIT');
   } catch (e) {
-    await client.query('ROLLBACK');
-    throw e;
+    try { await client.query('ROLLBACK'); } catch {}
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
   } finally {
     client.release();
   }
 
   await logAcao({ acao: 'liberar_parecer', detalhe: { diligencia_id, parecer_id } });
   revalidatePath(`/admin/d/${diligencia_id}`);
+  return { ok: true };
 }
