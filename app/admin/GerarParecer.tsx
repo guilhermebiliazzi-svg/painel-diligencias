@@ -95,10 +95,17 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
         const fd = new FormData();
         fd.set('parecer_id', parecer.id);
         fd.set('diligencia_id', diligenciaId);
-        await liberarParecer(fd);
+        const r = await liberarParecer(fd);
+        if (r && r.ok === false) {
+          setErro(r.error || 'erro ao liberar');
+          alert('Não foi possível liberar o parecer:\n\n' + (r.error || 'erro desconhecido'));
+          return;
+        }
         await carregar();
       } catch (e) {
-        setErro(e instanceof Error ? e.message : 'erro ao liberar');
+        const msg = e instanceof Error ? e.message : 'erro ao liberar';
+        setErro(msg);
+        alert('Não foi possível liberar o parecer:\n\n' + msg);
       } finally {
         setLiberando(false);
       }
