@@ -6,7 +6,7 @@
 // (fire-and-forget) e acompanha o resultado pelo /api/parecer-status.
 
 import { useState, useEffect, useRef, useTransition, useCallback } from 'react';
-import { gerarParecer } from './actions';
+import { gerarParecer, liberarParecer } from './actions';
 
 type ParecerStatus = {
   id: string;
@@ -22,6 +22,7 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
   const [pending, startTransition] = useTransition();
   const [erro, setErro] = useState<string | null>(null);
   const [gerando, setGerando] = useState(false);
+  const [liberando, setLiberando] = useState(false);
   const [parecer, setParecer] = useState<ParecerStatus>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -81,6 +82,38 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
     });
   }
 
+  function liberar() {
+    if (!parecer?.id) return;
+    if (
+      !confirm(
+        'Liberar este parecer como versão final aprovada? A versão pública deixa de exibir a tarja de RASCUNHO e o painel de revisão interno.'
+      )
+    )
+      return;
+    setErro(null);
+    setLiberando(true);
+    startTransition(async () => {
+      try {
+        const fd = new FormData();
+        fd.set('parecer_id', parecer.id);
+        fd.set('diligencia_id', diligenciaId);
+        const r = await liberarParecer(fd);
+        if (r && r.ok === false) {
+          setErro(r.error || 'erro ao liberar');
+          alert('Não foi possível liberar o parecer:\n\n' + (r.error || 'erro desconhecido'));
+          return;
+        }
+        await carregar();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'erro ao liberar';
+        setErro(msg);
+        alert('Não foi possível liberar o parecer:\n\n' + msg);
+      } finally {
+        setLiberando(false);
+      }
+    });
+  }
+
   const ineditavel = pending || gerando;
 
   return (
@@ -96,6 +129,26 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
           >
             Ver parecer{parecer.status === 'aprovado' ? '' : ' (rascunho)'}
           </a>
+        )}
+        {parecer && parecer.status === 'aprovado' && (
+          <span className="rounded-md border border-green-300 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700">
+            ✓ Liberado
+          </span>
+        )}
+        {parecer && parecer.id && parecer.status !== 'aprovado' && (
+          <button
+            type="button"
+            onClick={liberar}
+            disabled={ineditavel || liberando}
+            className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+              ineditavel || liberando
+                ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
+                : 'border-green-600 bg-green-600 text-white hover:bg-green-700'
+            }`}
+            title="Congela este rascunho como versão final aprovada e remove a tarja de rascunho da versão pública"
+          >
+            {liberando ? 'Liberando…' : '✓ Liberar'}
+          </button>
         )}
         <button
           type="button"
