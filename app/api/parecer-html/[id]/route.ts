@@ -18,18 +18,31 @@ export async function GET(
   }
   try {
     const r = await pool.query(
-      `SELECT saida
+      `SELECT saida, status
        FROM pareceres
        WHERE diligencia_id = $1
        ORDER BY criado_em DESC
        LIMIT 1`,
       [id]
     );
-    const saida = r.rows[0]?.saida as { _html?: string; html?: string } | undefined;
-    const html = saida?._html ?? saida?.html;
+    const row = r.rows[0];
+    const saida = row?.saida as { _html?: string; html?: string } | undefined;
+    let html = saida?._html ?? saida?.html;
     if (!html) {
       return new Response('parecer ainda nao disponivel', { status: 404 });
     }
+
+    // O _html é renderizado uma única vez, na geração (quando ainda é rascunho),
+    // e guardado pronto. Liberar muda só a coluna `status`, não o HTML guardado.
+    // Por isso, quando o parecer já está liberado ('aprovado'), removemos aqui os
+    // dois blocos que só fazem sentido durante a revisão: a tarja "RASCUNHO"
+    // (<div class="draft">…</div>) e o quadro "Para sua revisão" (<div class="review">…</div>).
+    if (String(row?.status).toLowerCase() === 'aprovado') {
+      html = html
+        .replace(/<div class="draft">[\s\S]*?<\/div>/, '')
+        .replace(/<div class="review">[\s\S]*?<\/ul><\/div>/, '');
+    }
+
     return new Response(html, {
       status: 200,
       headers: { 'content-type': 'text/html; charset=utf-8' },
