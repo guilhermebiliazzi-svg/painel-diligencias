@@ -19,6 +19,7 @@ import { ToggleCardVisivel, TogglePessoaVisivel } from '../../ToggleVisibilidade
 import { CopiarLinkCliente } from '../../CopiarLinkCliente';
 import { CardExtraNovo, ExcluirCardExtra } from '../../CardExtra';
 import { GerarParecer } from '../../GerarParecer';
+import { GerarCCV } from '../../GerarCCV';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -897,6 +898,7 @@ export default async function AdminDiligenciaPage({
               </SubmitButtonAsync>
             </form>
             <GerarParecer diligenciaId={id} />
+            <GerarCCV diligenciaId={id} />
             <form action={logoutAction}>
               <button
                 type="submit"
