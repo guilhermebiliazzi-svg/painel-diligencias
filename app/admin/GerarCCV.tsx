@@ -88,9 +88,9 @@ export function GerarCCV({ diligenciaId }: { diligenciaId: string }) {
 
   return (
     <div className="flex items-center gap-2">
-      {ccv?.docx_url && (
+      {ccv && (
         <a
-          href={ccv.docx_url}
+          href={`/api/ccv-html/${diligenciaId}`}
           target="_blank"
           rel="noopener noreferrer"
           className="rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
@@ -98,11 +98,6 @@ export function GerarCCV({ diligenciaId }: { diligenciaId: string }) {
         >
           Ver CCV{ccv.status === 'aprovado' ? '' : ' (rascunho)'}
         </a>
-      )}
-      {ccv && !ccv.docx_url && (
-        <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-500">
-          CCV {ccv.status === 'aprovado' ? 'liberado' : 'rascunho'} gerado
-        </span>
       )}
       <button
         type="button"
