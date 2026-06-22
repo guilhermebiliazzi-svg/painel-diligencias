@@ -545,3 +545,37 @@ export async function liberarParecer(
   revalidatePath(`/admin/d/${diligencia_id}`);
   return { ok: true };
 }
+// ====== ACRESCENTAR AO FINAL DO app/admin/actions.ts ======
+// Dispara o webhook gerar-ccv (fire-and-forget). O negócio vem do dados_completos
+// da diligência e a parte registral do parecer liberado — por isso só precisa do id.
+
+const WEBHOOK_CCV = 'https://villejds.app.n8n.cloud/webhook/gerar-ccv';
+
+export async function gerarCCV(diligencia_id: string) {
+  if (!diligencia_id) throw new Error('diligencia_id ausente');
+
+  let httpStatus = 0;
+  let erroDisparo: string | null = null;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 10000);
+    const resp = await fetch(WEBHOOK_CCV, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ diligencia_id }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    httpStatus = resp.status;
+    if (!resp.ok) erroDisparo = `http_${resp.status}`;
+  } catch (e) {
+    erroDisparo = e instanceof Error ? e.message : String(e);
+  }
+
+  await logAcao({
+    acao: 'gerar_ccv',
+    detalhe: { diligencia_id, http_status: httpStatus, erro_disparo: erroDisparo },
+  });
+
+  revalidatePath(`/admin/d/${diligencia_id}`);
+}
