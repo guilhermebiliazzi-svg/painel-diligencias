@@ -51,11 +51,13 @@ export async function GET(
 
     const buffer = await HTMLtoDOCX(html, null, { footer: false, pageNumber: false });
     const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer as ArrayBuffer);
+    // Blob evita o erro de tipo do Next (Uint8Array não é aceito direto como BodyInit).
+    const blob = new Blob([bytes], {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
 
-    return new Response(bytes, {
+    return new Response(blob, {
       headers: {
-        'content-type':
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'content-disposition': `attachment; filename="${nomeArquivo(row.endereco)}"`,
       },
     });
