@@ -16,14 +16,14 @@ const SZ_SEC = 23;    // 11.5pt
 const NAVY = '0E2545';
 const RED = 'B22222';
 
-function runs(text: string, base: Record<string, unknown> = {}): TextRun[] {
+function runs(text: string, size: number = SZ_BODY): TextRun[] {
   const out: TextRun[] = [];
   const parts = String(text).split(/\*\*([^*]+?)\*\*/g);
   parts.forEach((p, i) => {
     if (p === '') return;
-    out.push(new TextRun({ text: p, bold: i % 2 === 1, font: FONT, size: SZ_BODY, ...base }));
+    out.push(new TextRun({ text: p, bold: i % 2 === 1, font: FONT, size }));
   });
-  return out.length ? out : [new TextRun({ text: '', font: FONT, size: SZ_BODY })];
+  return out.length ? out : [new TextRun({ text: '', font: FONT, size })];
 }
 
 export async function gerarCcvDocx(
@@ -89,7 +89,7 @@ export async function gerarCcvDocx(
     if (ehCargo) {
       children.push(new Paragraph({
         alignment: AlignmentType.CENTER, spacing: { before: 0, after: 80 },
-        children: runs(b, { size: 20 }),
+        children: runs(b, 20),
       }));
       continue;
     }
