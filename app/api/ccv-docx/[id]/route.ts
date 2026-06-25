@@ -49,10 +49,10 @@ export async function GET(
       });
     }
 
+    // html-to-docx devolve um Buffer (Node). Buffer já é um BlobPart válido,
+    // então embrulhamos direto num Blob — sem Uint8Array, que o build do Next recusa.
     const buffer = await HTMLtoDOCX(html, null, { footer: false, pageNumber: false });
-    const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer as ArrayBuffer);
-    // Blob evita o erro de tipo do Next (Uint8Array não é aceito direto como BodyInit).
-    const blob = new Blob([bytes], {
+    const blob = new Blob([buffer], {
       type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     });
 
