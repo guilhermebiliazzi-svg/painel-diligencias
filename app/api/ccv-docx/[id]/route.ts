@@ -48,7 +48,7 @@ export async function GET(
     }
 
     const buffer = await gerarCcvDocx({ documento_md: row.documento_md, status: row.status });
-    const blob = new Blob([buffer], {
+    const blob = new Blob([buffer as unknown as BlobPart], {
       type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     });
 
