@@ -99,6 +99,15 @@ export function GerarCCV({ diligenciaId }: { diligenciaId: string }) {
           Ver CCV{ccv.status === 'aprovado' ? '' : ' (rascunho)'}
         </a>
       )}
+      {ccv && (
+        <a
+          href={`/api/ccv-docx/${diligenciaId}`}
+          className="rounded-md border border-sky-300 bg-white px-3 py-1.5 text-xs font-medium text-sky-700 hover:bg-sky-50"
+          title="Baixar o CCV em Word (.docx)"
+        >
+          Baixar .docx
+        </a>
+      )}
       <button
         type="button"
         onClick={disparar}
