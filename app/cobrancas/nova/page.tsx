@@ -12,6 +12,7 @@ type Contrato = {
   avulso: boolean;
 };
 type Item = { descricao: string; valor: number; categoria: string };
+type Ajuste = { descricao: string; valor: number | string; tipo: "desconto" | "acrescimo" };
 type Despesa = {
   condominio?: number | string;
   extraordinaria?: number | string;
@@ -27,6 +28,8 @@ type Previa = {
   vencimento?: string;
   status?: string;
   modo?: string;
+  multa_percentual?: number;
+  mora_percentual?: number;
 };
 
 /* ---------- helpers ---------- */
@@ -57,7 +60,10 @@ export default function ConferenciaCobranca() {
   });
   const [arquivos, setArquivos] = useState<File[]>([]);
   const [despesa, setDespesa] = useState<Despesa>({});
+  const [ajustes, setAjustes] = useState<Ajuste[]>([]);
   const [diaVenc, setDiaVenc] = useState<number | "">("");
+  const [multa, setMulta] = useState<number | "">("");
+  const [mora, setMora] = useState<number | "">("");
   const [previa, setPrevia] = useState<Previa | null>(null);
   const [gravado, setGravado] = useState<Previa | null>(null);
   const [carregando, setCarregando] = useState(false);
@@ -136,6 +142,8 @@ export default function ConferenciaCobranca() {
     if (p) {
       setPrevia(p);
       setDespesa(p.despesa || {});
+      setMulta(p.multa_percentual ?? 10);
+      setMora(p.mora_percentual ?? 1);
     }
   }
 
@@ -152,6 +160,8 @@ export default function ConferenciaCobranca() {
     if (p) {
       setPrevia(p);
       setDespesa(p.despesa || despesa);
+      setMulta(p.multa_percentual ?? 10);
+      setMora(p.mora_percentual ?? 1);
     }
   }
 
@@ -187,7 +197,22 @@ export default function ConferenciaCobranca() {
       iptu: num(d.iptu) ?? 0,
       valor_avulso: num(d.valor_avulso),
       descricao_avulso: d.descricao_avulso,
+      multa_percentual: num(multa),
+      mora_percentual: num(mora),
+      ajustes: ajustes
+        .filter((a) => num(a.valor) && num(a.valor)! > 0)
+        .map((a) => ({ descricao: a.descricao, valor: num(a.valor), tipo: a.tipo })),
     };
+  }
+
+  function addAjuste() {
+    setAjustes([...ajustes, { descricao: "", valor: "", tipo: "desconto" }]);
+  }
+  function setAjuste(i: number, patch: Partial<Ajuste>) {
+    setAjustes(ajustes.map((a, idx) => (idx === i ? { ...a, ...patch } : a)));
+  }
+  function delAjuste(i: number) {
+    setAjustes(ajustes.filter((_, idx) => idx !== i));
   }
 
   // monta o vencimento a partir do dia escolhido (clampado ao último dia do mês)
@@ -230,6 +255,7 @@ export default function ConferenciaCobranca() {
                   setContratoId(e.target.value ? Number(e.target.value) : null);
                   reset();
                   setDespesa({});
+                  setAjustes([]);
                   setArquivos([]);
                 }}
               >
@@ -331,6 +357,39 @@ export default function ConferenciaCobranca() {
                 </>
               )}
 
+              <div className="vj-ajustes">
+                <div className="vj-ajhead">
+                  <span>Ajustes (descontos / acréscimos)</span>
+                  <button type="button" className="vj-addaj" onClick={addAjuste}>+ adicionar</button>
+                </div>
+                {ajustes.length === 0 && <p className="vj-ajnote">Nenhum ajuste neste mês.</p>}
+                {ajustes.map((a, i) => (
+                  <div className="vj-ajrow" key={i}>
+                    <select
+                      value={a.tipo}
+                      onChange={(e) => setAjuste(i, { tipo: e.target.value as Ajuste["tipo"] })}
+                    >
+                      <option value="desconto">Desconto</option>
+                      <option value="acrescimo">Acréscimo</option>
+                    </select>
+                    <input
+                      className="vj-ajdesc"
+                      placeholder="Descrição (ex.: reembolso fechadura)"
+                      value={a.descricao}
+                      onChange={(e) => setAjuste(i, { descricao: e.target.value })}
+                    />
+                    <input
+                      className="vj-ajval"
+                      inputMode="decimal"
+                      placeholder="0,00"
+                      value={a.valor}
+                      onChange={(e) => setAjuste(i, { valor: e.target.value })}
+                    />
+                    <button type="button" className="vj-ajdel" onClick={() => delAjuste(i)} title="Remover">×</button>
+                  </div>
+                ))}
+              </div>
+
               <button className="vj-btn vj-ghost" disabled={carregando} onClick={recalcular}>
                 Recalcular
               </button>
@@ -356,16 +415,36 @@ export default function ConferenciaCobranca() {
                 </tfoot>
               </table>
 
-              <label className="vj-field vj-venc">
-                <span>Vencimento (dia)</span>
-                <input
-                  inputMode="numeric"
-                  value={diaVenc}
-                  onChange={(e) => setDiaVenc(e.target.value === "" ? "" : Number(e.target.value))}
-                />
-              </label>
+              <div className="vj-venc-row">
+                <label className="vj-field vj-venc">
+                  <span>Vencimento (dia)</span>
+                  <input
+                    inputMode="numeric"
+                    value={diaVenc}
+                    onChange={(e) => setDiaVenc(e.target.value === "" ? "" : Number(e.target.value))}
+                  />
+                </label>
+                <label className="vj-field vj-venc">
+                  <span>Multa (%)</span>
+                  <input
+                    inputMode="decimal"
+                    value={multa}
+                    onChange={(e) => setMulta(e.target.value === "" ? "" : Number(e.target.value))}
+                  />
+                </label>
+                <label className="vj-field vj-venc">
+                  <span>Juros ao mês (%)</span>
+                  <input
+                    inputMode="decimal"
+                    value={mora}
+                    onChange={(e) => setMora(e.target.value === "" ? "" : Number(e.target.value))}
+                  />
+                </label>
+              </div>
               {buildVenc() && (
-                <div className="vj-venclbl">Vence em {buildVenc()!.split("-").reverse().join("/")}</div>
+                <div className="vj-venclbl">
+                  Vence em {buildVenc()!.split("-").reverse().join("/")} · após vencimento: multa {multa || 0}% + juros {mora || 0}%/mês
+                </div>
               )}
 
               <button className="vj-btn vj-confirm" disabled={carregando} onClick={confirmar}>
@@ -386,7 +465,7 @@ export default function ConferenciaCobranca() {
               <div><span>Status</span><b>{gravado.status}</b></div>
             </div>
             <p className="vj-note">Pronta para emissão no Banco Inter.</p>
-            <button className="vj-btn vj-ghost" onClick={() => { reset(); setDespesa({}); setArquivos([]); }}>
+            <button className="vj-btn vj-ghost" onClick={() => { reset(); setDespesa({}); setAjustes([]); setArquivos([]); }}>
               Nova cobrança
             </button>
           </section>
@@ -443,12 +522,27 @@ const CSS = `
 .vj-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
 .vj-h2{font-family:Fraunces,Georgia,serif;font-size:19px;font-weight:600;margin:0 0 4px}
 .vj-note{font-size:13px;color:var(--mut);margin:0 0 16px}
+.vj-ajustes{margin:6px 0 16px;border-top:1px solid var(--linha);padding-top:14px}
+.vj-ajhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.vj-ajhead>span{font-size:12px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
+.vj-addaj{background:none;border:1px solid var(--linha);color:var(--azul);font:inherit;font-weight:600;font-size:13px;padding:5px 12px;border-radius:8px;cursor:pointer}
+.vj-addaj:hover{background:#F2F7FF}
+.vj-ajnote{font-size:13px;color:var(--mut);margin:4px 0}
+.vj-ajrow{display:flex;gap:8px;margin-bottom:8px;align-items:center}
+.vj-ajrow select,.vj-ajrow input{font:inherit;padding:9px 10px;border:1px solid var(--linha);border-radius:8px;background:#fff;color:var(--txt)}
+.vj-ajrow select:focus,.vj-ajrow input:focus{outline:2px solid var(--azul);outline-offset:1px;border-color:var(--azul)}
+.vj-ajdesc{flex:1;min-width:0}
+.vj-ajval{width:90px;text-align:right}
+.vj-ajdel{background:none;border:none;color:var(--verm);font-size:20px;line-height:1;cursor:pointer;padding:0 4px}
+.vj-ajdel:hover{color:#B4131F}
 .vj-tab{width:100%;border-collapse:collapse;margin-bottom:8px}
 .vj-tab td{padding:11px 0;border-bottom:1px solid var(--linha);font-size:15px}
 .vj-tab .vj-val{text-align:right;font-variant-numeric:tabular-nums}
 .vj-tab tfoot td{border:0;padding-top:14px;font-weight:700}
 .vj-total{text-align:right;font-size:22px;color:var(--azul);font-variant-numeric:tabular-nums}
 .vj-venc{margin-top:16px;max-width:160px}
+.vj-venc-row{display:flex;gap:12px;flex-wrap:wrap}
+.vj-venc-row .vj-venc{max-width:130px}
 .vj-venclbl{font-size:13px;color:var(--mut);margin:-6px 0 4px}
 .vj-ok{border-color:#B7E3CE;background:#F1FBF6}
 .vj-okmark{color:var(--ok);font-weight:700;font-size:17px;margin-bottom:14px}
