@@ -17,6 +17,7 @@ type Despesa = {
   condominio?: number | string;
   extraordinaria?: number | string;
   iptu?: number | string;
+  extra_desc?: string;
   valor_avulso?: number | string;
   descricao_avulso?: string;
 };
@@ -197,6 +198,7 @@ export default function ConferenciaCobranca() {
       iptu: num(d.iptu) ?? 0,
       valor_avulso: num(d.valor_avulso),
       descricao_avulso: d.descricao_avulso,
+      extra_desc: d.extra_desc,
       multa_percentual: num(multa),
       mora_percentual: num(mora),
       ajustes: ajustes
@@ -350,6 +352,12 @@ export default function ConferenciaCobranca() {
                     <span>Despesas extraordinárias</span>
                     <input inputMode="decimal" value={despesa.extraordinaria ?? ""} onChange={(e) => setDespesa({ ...despesa, extraordinaria: e.target.value })} />
                   </label>
+                  {despesa.extra_desc ? (
+                    <div className="vj-extradesc">
+                      <b>Não é do inquilino (o Gemini identificou):</b> {despesa.extra_desc}
+                      <span className="vj-extrahint">Confira contra o boleto e ajuste o valor acima se algo estiver errado.</span>
+                    </div>
+                  ) : null}
                   <label className="vj-field">
                     <span>IPTU</span>
                     <input inputMode="decimal" value={despesa.iptu ?? ""} onChange={(e) => setDespesa({ ...despesa, iptu: e.target.value })} />
@@ -364,28 +372,37 @@ export default function ConferenciaCobranca() {
                 </div>
                 {ajustes.length === 0 && <p className="vj-ajnote">Nenhum ajuste neste mês.</p>}
                 {ajustes.map((a, i) => (
-                  <div className="vj-ajrow" key={i}>
-                    <select
-                      value={a.tipo}
-                      onChange={(e) => setAjuste(i, { tipo: e.target.value as Ajuste["tipo"] })}
-                    >
-                      <option value="desconto">Desconto</option>
-                      <option value="acrescimo">Acréscimo</option>
-                    </select>
-                    <input
-                      className="vj-ajdesc"
-                      placeholder="Descrição (ex.: reembolso fechadura)"
-                      value={a.descricao}
-                      onChange={(e) => setAjuste(i, { descricao: e.target.value })}
-                    />
-                    <input
-                      className="vj-ajval"
-                      inputMode="decimal"
-                      placeholder="0,00"
-                      value={a.valor}
-                      onChange={(e) => setAjuste(i, { valor: e.target.value })}
-                    />
-                    <button type="button" className="vj-ajdel" onClick={() => delAjuste(i)} title="Remover">×</button>
+                  <div className="vj-ajcard" key={i}>
+                    <div className="vj-ajgrid">
+                      <label className="vj-ajfield">
+                        <span>Tipo</span>
+                        <select
+                          value={a.tipo}
+                          onChange={(e) => setAjuste(i, { tipo: e.target.value as Ajuste["tipo"] })}
+                        >
+                          <option value="desconto">Desconto</option>
+                          <option value="acrescimo">Acréscimo</option>
+                        </select>
+                      </label>
+                      <label className="vj-ajfield vj-ajfield-val">
+                        <span>Valor (R$)</span>
+                        <input
+                          inputMode="decimal"
+                          placeholder="0,00"
+                          value={a.valor}
+                          onChange={(e) => setAjuste(i, { valor: e.target.value })}
+                        />
+                      </label>
+                      <button type="button" className="vj-ajdel" onClick={() => delAjuste(i)} title="Remover ajuste">×</button>
+                    </div>
+                    <label className="vj-ajfield">
+                      <span>Descrição</span>
+                      <input
+                        placeholder="ex.: reembolso troca de fechadura"
+                        value={a.descricao}
+                        onChange={(e) => setAjuste(i, { descricao: e.target.value })}
+                      />
+                    </label>
                   </div>
                 ))}
               </div>
@@ -522,18 +539,23 @@ const CSS = `
 .vj-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
 .vj-h2{font-family:Fraunces,Georgia,serif;font-size:19px;font-weight:600;margin:0 0 4px}
 .vj-note{font-size:13px;color:var(--mut);margin:0 0 16px}
+.vj-extradesc{background:#FBF3E2;border:1px solid #F0DFB8;border-radius:9px;padding:10px 12px;margin:-6px 0 14px;font-size:13px;color:#6B5410;line-height:1.5}
+.vj-extradesc b{color:#5A4300}
+.vj-extrahint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
 .vj-ajustes{margin:6px 0 16px;border-top:1px solid var(--linha);padding-top:14px}
 .vj-ajhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .vj-ajhead>span{font-size:12px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
 .vj-addaj{background:none;border:1px solid var(--linha);color:var(--azul);font:inherit;font-weight:600;font-size:13px;padding:5px 12px;border-radius:8px;cursor:pointer}
 .vj-addaj:hover{background:#F2F7FF}
 .vj-ajnote{font-size:13px;color:var(--mut);margin:4px 0}
-.vj-ajrow{display:flex;gap:8px;margin-bottom:8px;align-items:center}
-.vj-ajrow select,.vj-ajrow input{font:inherit;padding:9px 10px;border:1px solid var(--linha);border-radius:8px;background:#fff;color:var(--txt)}
-.vj-ajrow select:focus,.vj-ajrow input:focus{outline:2px solid var(--azul);outline-offset:1px;border-color:var(--azul)}
-.vj-ajdesc{flex:1;min-width:0}
-.vj-ajval{width:90px;text-align:right}
-.vj-ajdel{background:none;border:none;color:var(--verm);font-size:20px;line-height:1;cursor:pointer;padding:0 4px}
+.vj-ajcard{border:1px solid var(--linha);border-radius:10px;padding:12px;margin-bottom:10px;background:#FAFCFF}
+.vj-ajgrid{display:flex;gap:10px;align-items:flex-end;margin-bottom:10px}
+.vj-ajfield{display:flex;flex-direction:column;gap:5px;flex:1}
+.vj-ajfield>span{font-size:11px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
+.vj-ajfield select,.vj-ajfield input{font:inherit;padding:9px 10px;border:1px solid var(--linha);border-radius:8px;background:#fff;color:var(--txt);width:100%}
+.vj-ajfield select:focus,.vj-ajfield input:focus{outline:2px solid var(--azul);outline-offset:1px;border-color:var(--azul)}
+.vj-ajfield-val input{text-align:right;font-variant-numeric:tabular-nums}
+.vj-ajdel{background:none;border:none;color:var(--verm);font-size:22px;line-height:1;cursor:pointer;padding:0 2px 6px}
 .vj-ajdel:hover{color:#B4131F}
 .vj-tab{width:100%;border-collapse:collapse;margin-bottom:8px}
 .vj-tab td{padding:11px 0;border-bottom:1px solid var(--linha);font-size:15px}
