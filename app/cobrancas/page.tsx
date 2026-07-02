@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 
 type Linha = {
   contrato_id: number;
@@ -19,7 +18,6 @@ const brl = (n: number | null) =>
   n == null ? "—" : Number(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
 export default function FechamentoMes() {
-  const router = useRouter();
   const [competencia, setCompetencia] = useState<string>(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -59,16 +57,12 @@ export default function FechamentoMes() {
   const gravadas = useMemo(() => linhas.filter((l) => l.estado === "gravada"), [linhas]);
   const pct = resumo && resumo.total ? Math.round((resumo.gravadas / resumo.total) * 100) : 0;
 
-  function abrir(l: Linha) {
-    router.push(`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`);
-  }
-
   return (
     <div className="vj-wrap">
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
       <header className="vj-top">
-        <div className="vj-mark">RE/MAX <span>Ville</span></div>
+        <a href="/cobrancas" className="vj-mark vj-marklink">RE/MAX <span>Ville</span></a>
         <div className="vj-crumb">Administração · Fechamento do mês</div>
       </header>
 
@@ -110,11 +104,15 @@ export default function FechamentoMes() {
               <thead><tr><th>Contrato</th><th>Locatário</th><th>Situação</th><th></th></tr></thead>
               <tbody>
                 {aGravar.map((l) => (
-                  <tr key={l.contrato_id} className="vj-click" onClick={() => abrir(l)}>
-                    <td className="vj-id">#{l.contrato_id}</td>
+                  <tr key={l.contrato_id} className="vj-click">
+                    <td className="vj-id">
+                      <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>#{l.contrato_id}</a>
+                    </td>
                     <td>
-                      <div className="vj-nome">{l.locatario}</div>
-                      <div className="vj-end">{l.endereco}</div>
+                      <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>
+                        <div className="vj-nome">{l.locatario}</div>
+                        <div className="vj-end">{l.endereco}</div>
+                      </a>
                     </td>
                     <td>
                       {l.estado === "pronto" ? (
@@ -123,7 +121,9 @@ export default function FechamentoMes() {
                         <span className="vj-tag vj-tag-wait">Falta informar condomínio</span>
                       )}
                     </td>
-                    <td className="vj-go">Conferir →</td>
+                    <td className="vj-go">
+                      <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>Conferir →</a>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -141,12 +141,20 @@ export default function FechamentoMes() {
               <thead><tr><th>Contrato</th><th>Locatário</th><th>Vencimento</th><th className="vj-r">Total</th><th></th></tr></thead>
               <tbody>
                 {gravadas.map((l) => (
-                  <tr key={l.contrato_id} className="vj-click" onClick={() => abrir(l)}>
-                    <td className="vj-id">#{l.contrato_id}</td>
-                    <td><div className="vj-nome">{l.locatario}</div></td>
+                  <tr key={l.contrato_id} className="vj-click">
+                    <td className="vj-id">
+                      <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>#{l.contrato_id}</a>
+                    </td>
+                    <td>
+                      <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>
+                        <div className="vj-nome">{l.locatario}</div>
+                      </a>
+                    </td>
                     <td>{l.vencimento}</td>
                     <td className="vj-r vj-money">{brl(l.total)}</td>
-                    <td className="vj-go">Revisar →</td>
+                    <td className="vj-go">
+                      <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>Revisar →</a>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -166,6 +174,7 @@ const CSS = `
   font-family:Archivo,"Segoe UI",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;}
 .vj-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 28px;background:var(--azul);color:#fff}
 .vj-mark{font-weight:800;letter-spacing:.5px;font-size:18px}.vj-mark span{color:#BFD3FF;font-weight:600}
+.vj-marklink{color:#fff;text-decoration:none}
 .vj-crumb{font-size:13px;color:#C9D8F5}
 .vj-main{max-width:960px;margin:0 auto;padding:32px 20px 80px}
 .vj-head{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap;margin-bottom:22px}
@@ -193,6 +202,7 @@ const CSS = `
 .vj-r{text-align:right}
 .vj-click{cursor:pointer;transition:background .12s}
 .vj-click:hover{background:#F5F9FF}
+.vj-rowlink{display:block;color:inherit;text-decoration:none}
 .vj-id{font-weight:700;color:var(--azul);font-variant-numeric:tabular-nums}
 .vj-nome{font-weight:600}
 .vj-end{font-size:12px;color:var(--mut);margin-top:2px}
