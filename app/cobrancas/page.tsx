@@ -11,6 +11,7 @@ type Linha = {
   total: number | null;
   vencimento: string | null;
   cobranca_id: number | null;
+  status_cobranca?: string | null;
 };
 type Resumo = { total: number; gravadas: number; prontas: number; aguardando: number };
 
@@ -55,7 +56,42 @@ export default function FechamentoMes() {
 
   const aGravar = useMemo(() => linhas.filter((l) => l.estado !== "gravada"), [linhas]);
   const gravadas = useMemo(() => linhas.filter((l) => l.estado === "gravada"), [linhas]);
+  const pendentesEmissao = useMemo(
+    () => gravadas.filter((l) => l.status_cobranca === "a_emitir" && l.cobranca_id),
+    [gravadas]
+  );
   const pct = resumo && resumo.total ? Math.round((resumo.gravadas / resumo.total) * 100) : 0;
+
+  const [emitindo, setEmitindo] = useState(false);
+  const [msgEmissao, setMsgEmissao] = useState<string | null>(null);
+
+  async function emitir(ids: number[]) {
+    if (ids.length === 0 || emitindo) return;
+    const qtd = ids.length;
+    if (!confirm(`Emitir ${qtd} boleto(s) no Banco Inter? Isso gera cobrança real.`)) return;
+    setEmitindo(true);
+    setMsgEmissao(`Emitindo ${qtd} boleto(s)… isso pode levar alguns minutos.`);
+    try {
+      const res = await fetch("/api/adm/emitir", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cobranca_ids: ids }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setMsgEmissao(`Erro: ${d?.error || "falha na emissão"}.`);
+      } else {
+        const ok = d?.emitidos ?? 0;
+        const fal = d?.falhas ?? 0;
+        setMsgEmissao(`Emitidos: ${ok}${fal ? ` · Falhas: ${fal}` : ""}.`);
+        carregar(competencia);
+      }
+    } catch {
+      setMsgEmissao("Erro de rede ao emitir.");
+    } finally {
+      setEmitindo(false);
+    }
+  }
 
   return (
     <div className="vj-wrap">
@@ -133,12 +169,24 @@ export default function FechamentoMes() {
 
         {/* GRAVADAS */}
         <section className="vj-card">
-          <h2 className="vj-h2">Gravadas <span className="vj-count">{gravadas.length}</span></h2>
+          <div className="vj-ajhead">
+            <h2 className="vj-h2">Gravadas <span className="vj-count">{gravadas.length}</span></h2>
+            {pendentesEmissao.length > 0 && (
+              <button
+                className="vj-btn-emitir"
+                disabled={emitindo}
+                onClick={() => emitir(pendentesEmissao.map((l) => l.cobranca_id as number))}
+              >
+                Emitir {pendentesEmissao.length} pendente(s) no Inter
+              </button>
+            )}
+          </div>
+          {msgEmissao && <div className="vj-msgemissao">{msgEmissao}</div>}
           {gravadas.length === 0 ? (
             <p className="vj-empty">Nenhuma cobrança gravada ainda.</p>
           ) : (
             <table className="vj-tab">
-              <thead><tr><th>Contrato</th><th>Locatário</th><th>Vencimento</th><th className="vj-r">Total</th><th></th></tr></thead>
+              <thead><tr><th>Contrato</th><th>Locatário</th><th>Vencimento</th><th className="vj-r">Total</th><th>Boleto</th><th></th></tr></thead>
               <tbody>
                 {gravadas.map((l) => (
                   <tr key={l.contrato_id} className="vj-click">
@@ -152,6 +200,19 @@ export default function FechamentoMes() {
                     </td>
                     <td>{l.vencimento}</td>
                     <td className="vj-r vj-money">{brl(l.total)}</td>
+                    <td>
+                      {l.status_cobranca === "a_emitir" ? (
+                        <button
+                          className="vj-btn-emitir vj-btn-emitir-sm"
+                          disabled={emitindo || !l.cobranca_id}
+                          onClick={() => emitir([l.cobranca_id as number])}
+                        >
+                          Emitir
+                        </button>
+                      ) : (
+                        <span className="vj-emitido">✓ emitido</span>
+                      )}
+                    </td>
                     <td className="vj-go">
                       <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>Revisar →</a>
                     </td>
@@ -162,7 +223,7 @@ export default function FechamentoMes() {
           )}
         </section>
 
-        {carregando && <div className="vj-load">Carregando…</div>}
+        {(carregando || emitindo) && <div className="vj-load">{emitindo ? "Emitindo no Inter…" : "Carregando…"}</div>}
       </main>
     </div>
   );
@@ -212,6 +273,13 @@ const CSS = `
 .vj-tag-wait{background:#FBF3E2;color:var(--wait)}
 .vj-go{text-align:right;color:var(--azul);font-weight:600;font-size:13px;white-space:nowrap}
 .vj-empty{color:var(--mut);margin:6px 0}
+.vj-ajhead{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.vj-btn-emitir{background:var(--verm);color:#fff;border:none;font:inherit;font-weight:600;font-size:14px;padding:9px 16px;border-radius:9px;cursor:pointer}
+.vj-btn-emitir:hover:not(:disabled){background:#B4131F}
+.vj-btn-emitir:disabled{opacity:.5;cursor:not-allowed}
+.vj-btn-emitir-sm{padding:6px 12px;font-size:13px}
+.vj-emitido{color:var(--ok);font-weight:600;font-size:13px;white-space:nowrap}
+.vj-msgemissao{background:#EAF0FA;border:1px solid #C9D8F5;color:var(--azul);padding:10px 14px;border-radius:9px;font-size:14px;margin:10px 0}
 .vj-erro{background:#FDECEE;border:1px solid #F6C6CC;color:#9B1420;padding:11px 14px;border-radius:9px;font-size:14px;margin-bottom:16px}
 .vj-load{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--azul);color:#fff;padding:10px 20px;border-radius:24px;font-size:14px;box-shadow:0 6px 20px rgba(0,61,165,.3)}
 @media (max-width:720px){.vj-nums{grid-template-columns:1fr 1fr}.vj-end{display:none}}
