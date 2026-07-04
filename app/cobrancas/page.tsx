@@ -64,6 +64,33 @@ export default function FechamentoMes() {
 
   const [emitindo, setEmitindo] = useState(false);
   const [msgEmissao, setMsgEmissao] = useState<string | null>(null);
+  const [conciliando, setConciliando] = useState(false);
+
+  async function conciliar() {
+    if (conciliando) return;
+    setConciliando(true);
+    setMsgEmissao("Consultando o Banco Inter e atualizando os status…");
+    try {
+      const res = await fetch("/api/adm/conciliar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ competencia }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setMsgEmissao(`Erro ao atualizar: ${d?.error || "falha"}.`);
+      } else {
+        setMsgEmissao(
+          `Status atualizado — pagos: ${d?.pago ?? 0} · em aberto: ${d?.em_aberto ?? 0} · atrasados: ${d?.atrasado ?? 0} · cancelados: ${d?.cancelado ?? 0}.`
+        );
+        carregar(competencia);
+      }
+    } catch {
+      setMsgEmissao("Erro de rede ao atualizar status.");
+    } finally {
+      setConciliando(false);
+    }
+  }
 
   async function emitir(ids: number[]) {
     if (ids.length === 0 || emitindo) return;
@@ -180,22 +207,29 @@ export default function FechamentoMes() {
         <section className="vj-card">
           <div className="vj-ajhead">
             <h2 className="vj-h2">Gravadas <span className="vj-count">{gravadas.length}</span></h2>
-            {pendentesEmissao.length > 0 && (
-              <button
-                className="vj-btn-emitir"
-                disabled={emitindo}
-                onClick={() => emitir(pendentesEmissao.map((l) => l.cobranca_id as number))}
-              >
-                Emitir {pendentesEmissao.length} pendente(s) no Inter
-              </button>
-            )}
+            <div className="vj-acoes-cab">
+              {gravadas.length > 0 && (
+                <button className="vj-btn-status" disabled={conciliando || emitindo} onClick={conciliar}>
+                  {conciliando ? "Atualizando…" : "↻ Atualizar status"}
+                </button>
+              )}
+              {pendentesEmissao.length > 0 && (
+                <button
+                  className="vj-btn-emitir"
+                  disabled={emitindo || conciliando}
+                  onClick={() => emitir(pendentesEmissao.map((l) => l.cobranca_id as number))}
+                >
+                  Emitir {pendentesEmissao.length} pendente(s) no Inter
+                </button>
+              )}
+            </div>
           </div>
           {msgEmissao && <div className="vj-msgemissao">{msgEmissao}</div>}
           {gravadas.length === 0 ? (
             <p className="vj-empty">Nenhuma cobrança gravada ainda.</p>
           ) : (
             <table className="vj-tab">
-              <thead><tr><th>Contrato</th><th>Locatário</th><th>Vencimento</th><th className="vj-r">Total</th><th>Boleto</th><th></th></tr></thead>
+              <thead><tr><th>Contrato</th><th>Locatário</th><th>Vencimento</th><th className="vj-r">Total</th><th>Situação</th><th></th></tr></thead>
               <tbody>
                 {gravadas.map((l) => (
                   <tr key={l.contrato_id} className="vj-click">
@@ -220,8 +254,16 @@ export default function FechamentoMes() {
                         </button>
                       ) : l.status_cobranca === "emitindo" ? (
                         <span className="vj-emitindo">emitindo…</span>
+                      ) : l.status_cobranca === "pago" ? (
+                        <span className="vj-tag vj-tag-pago">✓ pago</span>
+                      ) : l.status_cobranca === "atrasado" ? (
+                        <span className="vj-tag vj-tag-atras">⚠ atrasado</span>
+                      ) : l.status_cobranca === "expirado" ? (
+                        <span className="vj-tag vj-tag-exp">vencido</span>
+                      ) : l.status_cobranca === "cancelado" ? (
+                        <span className="vj-tag vj-tag-canc">cancelado</span>
                       ) : (
-                        <span className="vj-emitido">✓ emitido</span>
+                        <span className="vj-tag vj-tag-aberto">em aberto</span>
                       )}
                     </td>
                     <td className="vj-go">
@@ -285,6 +327,15 @@ const CSS = `
 .vj-go{text-align:right;color:var(--azul);font-weight:600;font-size:13px;white-space:nowrap}
 .vj-empty{color:var(--mut);margin:6px 0}
 .vj-ajhead{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.vj-acoes-cab{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.vj-btn-status{background:#fff;border:1px solid var(--azul);color:var(--azul);font:inherit;font-weight:600;font-size:14px;padding:9px 16px;border-radius:9px;cursor:pointer}
+.vj-btn-status:hover:not(:disabled){background:#F2F7FF}
+.vj-btn-status:disabled{opacity:.5;cursor:not-allowed}
+.vj-tag-pago{background:#EAF7F0;color:var(--ok)}
+.vj-tag-aberto{background:#EAF0FA;color:var(--azul)}
+.vj-tag-atras{background:#FBF3E2;color:var(--wait)}
+.vj-tag-exp{background:#FDECEE;color:var(--verm)}
+.vj-tag-canc{background:#EEE;color:#777}
 .vj-btn-emitir{background:var(--verm);color:#fff;border:none;font:inherit;font-weight:600;font-size:14px;padding:9px 16px;border-radius:9px;cursor:pointer}
 .vj-btn-emitir:hover:not(:disabled){background:#B4131F}
 .vj-btn-emitir:disabled{opacity:.5;cursor:not-allowed}
