@@ -364,7 +364,21 @@ export default function FechamentoMes() {
                       )}
                     </td>
                     <td className="vj-go">
-                      <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>Revisar →</a>
+                      {l.cobranca_id &&
+                        l.status_cobranca !== "a_emitir" &&
+                        l.status_cobranca !== "emitindo" &&
+                        l.status_cobranca !== "cancelado" && (
+                          <a
+                            className="vj-boleto"
+                            href={`/api/adm/boleto-pdf?cobranca=${l.cobranca_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Abrir o boleto em PDF"
+                          >
+                            ⭳ Boleto
+                          </a>
+                        )}
+                      <a className="vj-rowlink vj-revisar" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>Revisar →</a>
                     </td>
                   </tr>
                 ))}
@@ -427,6 +441,9 @@ const CSS = `
 .vj-tag-ok{background:#EAF7F0;color:var(--ok)}
 .vj-tag-wait{background:#FBF3E2;color:var(--wait)}
 .vj-go{text-align:right;color:var(--azul);font-weight:600;font-size:13px;white-space:nowrap}
+.vj-boleto{display:inline-block;margin-right:12px;color:var(--azul);text-decoration:none;font-weight:600;font-size:13px;padding:4px 10px;border:1px solid var(--linha);border-radius:8px;background:#fff}
+.vj-boleto:hover{background:#F2F7FF;border-color:var(--azul)}
+.vj-revisar{display:inline-block}
 .vj-empty{color:var(--mut);margin:6px 0}
 .vj-ajhead{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
 .vj-acoes-cab{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
