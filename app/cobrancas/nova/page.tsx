@@ -43,6 +43,13 @@ const num = (v: unknown) => {
   return Number.isFinite(n) ? n : undefined;
 };
 
+// extrai o dia (1..31) de um vencimento que pode vir como ISO ou "YYYY-MM-DD"
+const diaDoVencimento = (v?: string): number | null => {
+  if (!v) return null;
+  const m = String(v).match(/^\d{4}-\d{2}-(\d{2})/);
+  return m ? Number(m[1]) : null;
+};
+
 async function fileToBase64(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
   let binary = "";
@@ -67,6 +74,8 @@ export default function ConferenciaCobranca() {
   const [mora, setMora] = useState<number | "">("");
   const [previa, setPrevia] = useState<Previa | null>(null);
   const [gravado, setGravado] = useState<Previa | null>(null);
+  const [revisandoGravada, setRevisandoGravada] = useState(false);
+  const [diaVencGravado, setDiaVencGravado] = useState<number | null>(null);
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -76,10 +85,15 @@ export default function ConferenciaCobranca() {
   );
   const compData = `${competencia}-01`;
 
-  // vencimento padrão segue o dia do contrato; editável por mês
+  // vencimento padrão segue o dia do contrato; editável por mês.
+  // Ao revisar uma cobrança gravada, mantém o dia gravado (não sobrescreve).
   useEffect(() => {
-    setDiaVenc(contrato?.dia_vencimento ?? "");
-  }, [contrato]);
+    if (revisandoGravada && diaVencGravado != null) {
+      setDiaVenc(diaVencGravado);
+    } else {
+      setDiaVenc(contrato?.dia_vencimento ?? "");
+    }
+  }, [contrato, revisandoGravada, diaVencGravado]);
 
   useEffect(() => {
     fetch("/api/adm/contratos")
@@ -96,12 +110,56 @@ export default function ConferenciaCobranca() {
     const comp = q.get("competencia");
     if (cid && !Number.isNaN(Number(cid))) setContratoId(Number(cid));
     if (comp) setCompetencia(comp);
+    // se veio do "Revisar", tenta abrir com a cobrança já gravada
+    if (cid && !Number.isNaN(Number(cid)) && comp) {
+      carregarGravada(Number(cid), comp);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Busca uma cobrança já gravada e, se existir, monta a prévia preenchida
+  // (mesmo formato de calcular/confirmar) para revisão sem re-subir boleto.
+  async function carregarGravada(cid: number, comp: string) {
+    setCarregando(true);
+    setErro(null);
+    try {
+      const res = await fetch(`/api/adm/cobranca-gravada?contrato=${cid}&competencia=${comp}`);
+      const d = await res.json();
+      if (!res.ok || !d?.gravada) return; // sem cobrança gravada → fluxo normal (vazio)
+      const p: Previa = {
+        itens: d.itens || [],
+        total: d.total,
+        despesa: d.despesa || {},
+        cobranca_id: d.cobranca_id,
+        vencimento: d.vencimento,
+        status: d.status,
+        multa_percentual: d.multa_percentual,
+        mora_percentual: d.mora_percentual,
+      };
+      setPrevia(p);
+      setDespesa(p.despesa || {});
+      setMulta(d.multa_percentual ?? 10);
+      setMora(d.mora_percentual ?? 1);
+      // vencimento vem como data (ISO ou YYYY-MM-DD) → extrai o dia
+      const dia = diaDoVencimento(d.vencimento);
+      if (dia) {
+        setDiaVencGravado(dia);
+        setDiaVenc(dia);
+      }
+      setRevisandoGravada(true);
+    } catch {
+      // silencioso: se falhar, a tela apenas segue no fluxo normal
+    } finally {
+      setCarregando(false);
+    }
+  }
 
   function reset() {
     setPrevia(null);
     setGravado(null);
     setErro(null);
+    setRevisandoGravada(false);
+    setDiaVencGravado(null);
   }
 
   async function chamar(payload: any): Promise<Previa | null> {
@@ -328,6 +386,13 @@ export default function ConferenciaCobranca() {
         {/* prévia */}
         {previa && !gravado && (
           <section className="vj-grid">
+            {revisandoGravada && (
+              <div className="vj-revaviso">
+                Revisando a cobrança <b>#{previa.cobranca_id}</b> já gravada
+                {previa.status ? <> · situação <b>{previa.status}</b></> : null}. Os valores abaixo
+                são os que estão gravados. Recalcular e confirmar de novo <b>substitui</b> esta cobrança.
+              </div>
+            )}
             {/* valores editáveis */}
             <div className="vj-card">
               <h2 className="vj-h2">Valores lidos</h2>
@@ -537,6 +602,7 @@ const CSS = `
 .vj-confirm:not(:disabled):hover{background:#B4131F}
 .vj-erro{margin-top:14px;background:#FDECEE;border:1px solid #F6C6CC;color:#9B1420;padding:11px 14px;border-radius:9px;font-size:14px}
 .vj-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.vj-revaviso{grid-column:1 / -1;background:#EAF0FA;border:1px solid #C9D8F5;color:var(--azul);padding:12px 16px;border-radius:11px;font-size:14px;line-height:1.5}
 .vj-h2{font-family:Fraunces,Georgia,serif;font-size:19px;font-weight:600;margin:0 0 4px}
 .vj-note{font-size:13px;color:var(--mut);margin:0 0 16px}
 .vj-extradesc{background:#FBF3E2;border:1px solid #F0DFB8;border-radius:9px;padding:10px 12px;margin:-6px 0 14px;font-size:13px;color:#6B5410;line-height:1.5}
