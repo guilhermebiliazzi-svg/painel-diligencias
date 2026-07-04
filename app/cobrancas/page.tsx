@@ -70,7 +70,7 @@ export default function FechamentoMes() {
     const qtd = ids.length;
     if (!confirm(`Emitir ${qtd} boleto(s) no Banco Inter? Isso gera cobrança real.`)) return;
     setEmitindo(true);
-    setMsgEmissao(`Emitindo ${qtd} boleto(s)… isso pode levar alguns minutos.`);
+    setMsgEmissao(`Emitindo ${qtd} boleto(s)… pode levar alguns minutos (não feche a página).`);
     try {
       const res = await fetch("/api/adm/emitir", {
         method: "POST",
@@ -79,15 +79,24 @@ export default function FechamentoMes() {
       });
       const d = await res.json();
       if (!res.ok) {
-        setMsgEmissao(`Erro: ${d?.error || "falha na emissão"}.`);
+        setMsgEmissao(`Erro: ${d?.error || "falha na emissão"}. ${d?.detail ? JSON.stringify(d.detail).slice(0, 200) : ""}`);
+      } else if (d?.mensagem) {
+        setMsgEmissao(d.mensagem);
       } else {
         const ok = d?.emitidos ?? 0;
         const fal = d?.falhas ?? 0;
-        setMsgEmissao(`Emitidos: ${ok}${fal ? ` · Falhas: ${fal}` : ""}.`);
-        carregar(competencia);
+        let msg = `✓ ${ok} emitido(s)`;
+        if (fal > 0) {
+          const detalhes = (d.detalhe_falhas || [])
+            .map((f: any) => `#${f.cobranca_id}: ${f.erro}`)
+            .join(" · ");
+          msg += ` · ⚠ ${fal} falha(s) — ${detalhes}`;
+        }
+        setMsgEmissao(msg);
       }
+      carregar(competencia);
     } catch {
-      setMsgEmissao("Erro de rede ao emitir.");
+      setMsgEmissao("Erro de rede ao emitir. Verifique no painel antes de tentar de novo — pode ter emitido parcialmente.");
     } finally {
       setEmitindo(false);
     }
@@ -209,6 +218,8 @@ export default function FechamentoMes() {
                         >
                           Emitir
                         </button>
+                      ) : l.status_cobranca === "emitindo" ? (
+                        <span className="vj-emitindo">emitindo…</span>
                       ) : (
                         <span className="vj-emitido">✓ emitido</span>
                       )}
@@ -279,6 +290,7 @@ const CSS = `
 .vj-btn-emitir:disabled{opacity:.5;cursor:not-allowed}
 .vj-btn-emitir-sm{padding:6px 12px;font-size:13px}
 .vj-emitido{color:var(--ok);font-weight:600;font-size:13px;white-space:nowrap}
+.vj-emitindo{color:var(--wait);font-weight:600;font-size:13px;white-space:nowrap}
 .vj-msgemissao{background:#EAF0FA;border:1px solid #C9D8F5;color:var(--azul);padding:10px 14px;border-radius:9px;font-size:14px;margin:10px 0}
 .vj-erro{background:#FDECEE;border:1px solid #F6C6CC;color:#9B1420;padding:11px 14px;border-radius:9px;font-size:14px;margin-bottom:16px}
 .vj-load{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--azul);color:#fff;padding:10px 20px;border-radius:24px;font-size:14px;box-shadow:0 6px 20px rgba(0,61,165,.3)}
