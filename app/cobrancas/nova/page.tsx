@@ -76,6 +76,8 @@ export default function ConferenciaCobranca() {
   const [gravado, setGravado] = useState<Previa | null>(null);
   const [revisandoGravada, setRevisandoGravada] = useState(false);
   const [diaVencGravado, setDiaVencGravado] = useState<number | null>(null);
+  const [cancelando, setCancelando] = useState(false);
+  const [msgCancel, setMsgCancel] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -151,6 +153,46 @@ export default function ConferenciaCobranca() {
       // silencioso: se falhar, a tela apenas segue no fluxo normal
     } finally {
       setCarregando(false);
+    }
+  }
+
+  // Cancela o boleto emitido no Inter. O backend bloqueia se já estiver pago.
+  // Em caso de sucesso, a cobrança volta para 'a_emitir' (reemitível) — recarrega a tela.
+  async function cancelarBoleto() {
+    const cid = previa?.cobranca_id;
+    if (!cid || cancelando) return;
+    if (
+      !confirm(
+        "Cancelar este boleto no Banco Inter?\n\n" +
+          "O boleto será cancelado e a cobrança voltará para \"a emitir\", " +
+          "mantendo a composição. Você poderá reemitir depois.\n\n" +
+          "Boletos já pagos não podem ser cancelados."
+      )
+    )
+      return;
+    setCancelando(true);
+    setMsgCancel("Consultando o Inter e cancelando o boleto… (pode levar alguns segundos)");
+    try {
+      const res = await fetch("/api/adm/cancelar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cobranca_id: cid }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setMsgCancel(`Erro ao cancelar: ${d?.error || "falha"}.`);
+      } else if (d?.ok) {
+        setMsgCancel(d?.mensagem || "Boleto cancelado. A cobrança voltou para “a emitir”.");
+        // recarrega o estado gravado (agora a_emitir, sem código)
+        if (contratoId) await carregarGravada(contratoId, competencia);
+      } else {
+        // bloqueado (já pago) ou falha controlada
+        setMsgCancel(d?.mensagem || "Não foi possível cancelar este boleto.");
+      }
+    } catch {
+      setMsgCancel("Erro de rede ao cancelar. Confira a situação no painel antes de tentar de novo.");
+    } finally {
+      setCancelando(false);
     }
   }
 
@@ -391,6 +433,22 @@ export default function ConferenciaCobranca() {
                 Revisando a cobrança <b>#{previa.cobranca_id}</b> já gravada
                 {previa.status ? <> · situação <b>{previa.status}</b></> : null}. Os valores abaixo
                 são os que estão gravados. Recalcular e confirmar de novo <b>substitui</b> esta cobrança.
+                {["emitido", "atrasado", "expirado"].includes(String(previa.status)) && (
+                  <div className="vj-cancelrow">
+                    <button
+                      type="button"
+                      className="vj-btn-cancelar"
+                      disabled={cancelando}
+                      onClick={cancelarBoleto}
+                    >
+                      {cancelando ? "Cancelando…" : "Cancelar boleto no Inter"}
+                    </button>
+                    <span className="vj-cancelhint">
+                      Cancela o boleto e devolve a cobrança para “a emitir” (mantém a composição).
+                    </span>
+                  </div>
+                )}
+                {msgCancel && <div className="vj-cancelmsg">{msgCancel}</div>}
               </div>
             )}
             {/* valores editáveis */}
@@ -603,6 +661,12 @@ const CSS = `
 .vj-erro{margin-top:14px;background:#FDECEE;border:1px solid #F6C6CC;color:#9B1420;padding:11px 14px;border-radius:9px;font-size:14px}
 .vj-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
 .vj-revaviso{grid-column:1 / -1;background:#EAF0FA;border:1px solid #C9D8F5;color:var(--azul);padding:12px 16px;border-radius:11px;font-size:14px;line-height:1.5}
+.vj-cancelrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid #C9D8F5}
+.vj-btn-cancelar{background:#fff;border:1px solid var(--verm);color:var(--verm);font:inherit;font-weight:600;font-size:14px;padding:9px 16px;border-radius:9px;cursor:pointer;white-space:nowrap}
+.vj-btn-cancelar:hover:not(:disabled){background:#FDECEE}
+.vj-btn-cancelar:disabled{opacity:.5;cursor:not-allowed}
+.vj-cancelhint{font-size:12px;color:var(--mut)}
+.vj-cancelmsg{margin-top:10px;background:#fff;border:1px solid #C9D8F5;border-radius:9px;padding:9px 12px;font-size:13px;color:var(--txt)}
 .vj-h2{font-family:Fraunces,Georgia,serif;font-size:19px;font-weight:600;margin:0 0 4px}
 .vj-note{font-size:13px;color:var(--mut);margin:0 0 16px}
 .vj-extradesc{background:#FBF3E2;border:1px solid #F0DFB8;border-radius:9px;padding:10px 12px;margin:-6px 0 14px;font-size:13px;color:#6B5410;line-height:1.5}
