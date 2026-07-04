@@ -334,13 +334,13 @@ export default function FechamentoMes() {
                         <div className="vj-nome">{l.locatario}</div>
                       </a>
                     </td>
-                    <td>{l.vencimento}</td>
+                    <td data-label="Vencimento">{l.vencimento}</td>
                     <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.aluguel)}</td>
                     <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.condominio)}</td>
                     <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.iptu)}</td>
                     <td className={`vj-r vj-comp vj-compval${(l.comp?.outros ?? 0) < 0 ? " vj-neg" : ""}`}>{brlComp(l.comp?.outros)}</td>
-                    <td className="vj-r vj-money">{brl(l.total)}</td>
-                    <td>
+                    <td className="vj-r vj-money" data-label="Total">{brl(l.total)}</td>
+                    <td data-label="Situação">
                       {l.status_cobranca === "a_emitir" ? (
                         <button
                           className="vj-btn-emitir vj-btn-emitir-sm"
@@ -473,5 +473,40 @@ const CSS = `
 .vj-erro{background:#FDECEE;border:1px solid #F6C6CC;color:#9B1420;padding:11px 14px;border-radius:9px;font-size:14px;margin-bottom:16px}
 .vj-load{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--azul);color:#fff;padding:10px 20px;border-radius:24px;font-size:14px;box-shadow:0 6px 20px rgba(0,61,165,.3)}
 @media (max-width:720px){.vj-nums{grid-template-columns:1fr 1fr}.vj-end{display:none}}
+
+/* ---- mobile: tabelas viram cartões empilhados (sem scroll lateral) ---- */
+@media (max-width:640px){
+  .vj-tab, .vj-tab tbody, .vj-tab tr, .vj-tab td { display:block; width:100% }
+  .vj-tab thead { display:none }
+  .vj-tab tr {
+    border:1px solid var(--linha); border-radius:12px;
+    padding:12px 14px; margin-bottom:12px; background:#fff;
+  }
+  .vj-tab td {
+    border:0; padding:5px 0; text-align:left !important;
+    display:flex; justify-content:space-between; align-items:center; gap:12px;
+  }
+  /* rótulo à esquerda para as células marcadas */
+  .vj-tab td[data-label]::before {
+    content: attr(data-label);
+    font-size:11px; font-weight:600; color:var(--mut);
+    text-transform:uppercase; letter-spacing:.4px;
+  }
+  /* contrato + nome em destaque no topo do cartão */
+  .vj-tab td.vj-id { font-size:16px; padding-bottom:8px }
+  .vj-tab td.vj-id::after { content:none }
+  .vj-nome { font-size:16px; font-weight:700 }
+  .vj-money { font-size:17px }
+  /* ações ocupam a largura, botões maiores para toque */
+  .vj-go { padding-top:10px !important; border-top:1px solid var(--linha) !important; margin-top:4px;
+           display:flex; gap:10px; justify-content:flex-start }
+  .vj-boleto, .vj-revisar { padding:9px 14px; font-size:14px }
+  .vj-btn-emitir-sm { padding:9px 16px; font-size:14px }
+  /* filtros empilham */
+  .vj-filtros { flex-direction:column; align-items:stretch; gap:10px }
+  .vj-filtro-contagem { margin-left:0; padding-bottom:0 }
+  .vj-acoes-cab { width:100%; }
+  .vj-btn-status, .vj-btn-emitir { width:100% }
+}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 `;
