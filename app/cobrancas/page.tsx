@@ -12,11 +12,15 @@ type Linha = {
   vencimento: string | null;
   cobranca_id: number | null;
   status_cobranca?: string | null;
+  comp?: { aluguel: number; condominio: number; iptu: number; outros: number } | null;
 };
 type Resumo = { total: number; gravadas: number; prontas: number; aguardando: number };
 
 const brl = (n: number | null) =>
   n == null ? "—" : Number(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+const brlComp = (n: number | null | undefined) =>
+  n == null || n === 0 ? "—" : Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function FechamentoMes() {
   const [competencia, setCompetencia] = useState<string>(() => {
@@ -61,6 +65,56 @@ export default function FechamentoMes() {
     [gravadas]
   );
   const pct = resumo && resumo.total ? Math.round((resumo.gravadas / resumo.total) * 100) : 0;
+
+  // ---- filtros / ordenação / busca (só na seção Gravadas) ----
+  const [filtroSit, setFiltroSit] = useState<string>("todas");
+  const [ordenar, setOrdenar] = useState<string>("vencimento");
+  const [busca, setBusca] = useState<string>("");
+
+  // "em aberto" = emitido sem situação de pagamento resolvida (emitido/null)
+  const ehAberto = (s?: string | null) => s === "emitido" || s == null;
+  const contagem = useMemo(() => {
+    const c: Record<string, number> = {
+      todas: gravadas.length, aberto: 0, pago: 0, atrasado: 0, expirado: 0, cancelado: 0, a_emitir: 0,
+    };
+    for (const l of gravadas) {
+      const s = l.status_cobranca;
+      if (s === "pago") c.pago++;
+      else if (s === "atrasado") c.atrasado++;
+      else if (s === "expirado") c.expirado++;
+      else if (s === "cancelado") c.cancelado++;
+      else if (s === "a_emitir") c.a_emitir++;
+      else if (s === "emitindo") {/* em trânsito, não conta */}
+      else c.aberto++;
+    }
+    return c;
+  }, [gravadas]);
+
+  const gravadasView = useMemo(() => {
+    let arr = gravadas;
+    if (filtroSit !== "todas") {
+      arr = arr.filter((l) =>
+        filtroSit === "aberto" ? ehAberto(l.status_cobranca) : l.status_cobranca === filtroSit
+      );
+    }
+    const q = busca.trim().toLowerCase();
+    if (q) {
+      arr = arr.filter(
+        (l) => l.locatario?.toLowerCase().includes(q) || String(l.contrato_id).includes(q)
+      );
+    }
+    const cmp = (a: Linha, b: Linha) => {
+      switch (ordenar) {
+        case "valor": return (b.total ?? 0) - (a.total ?? 0);
+        case "nome": return (a.locatario || "").localeCompare(b.locatario || "", "pt-BR");
+        case "contrato": return a.contrato_id - b.contrato_id;
+        case "vencimento":
+        default:
+          return String(a.vencimento || "").localeCompare(String(b.vencimento || ""));
+      }
+    };
+    return [...arr].sort(cmp);
+  }, [gravadas, filtroSit, ordenar, busca]);
 
   const [emitindo, setEmitindo] = useState(false);
   const [msgEmissao, setMsgEmissao] = useState<string | null>(null);
@@ -228,10 +282,49 @@ export default function FechamentoMes() {
           {gravadas.length === 0 ? (
             <p className="vj-empty">Nenhuma cobrança gravada ainda.</p>
           ) : (
+            <>
+            <div className="vj-filtros">
+              <label className="vj-filtro">
+                <span>Situação</span>
+                <select value={filtroSit} onChange={(e) => setFiltroSit(e.target.value)}>
+                  <option value="todas">Todas ({contagem.todas})</option>
+                  <option value="aberto">Em aberto ({contagem.aberto})</option>
+                  <option value="pago">Pagos ({contagem.pago})</option>
+                  <option value="atrasado">Atrasados ({contagem.atrasado})</option>
+                  <option value="expirado">Vencidos ({contagem.expirado})</option>
+                  <option value="cancelado">Cancelados ({contagem.cancelado})</option>
+                  <option value="a_emitir">A emitir ({contagem.a_emitir})</option>
+                </select>
+              </label>
+              <label className="vj-filtro">
+                <span>Ordenar por</span>
+                <select value={ordenar} onChange={(e) => setOrdenar(e.target.value)}>
+                  <option value="vencimento">Vencimento</option>
+                  <option value="valor">Maior valor</option>
+                  <option value="nome">Nome</option>
+                  <option value="contrato">Nº do contrato</option>
+                </select>
+              </label>
+              <label className="vj-filtro vj-filtro-busca">
+                <span>Buscar</span>
+                <input
+                  type="text"
+                  placeholder="Nome do locatário ou nº do contrato…"
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                />
+              </label>
+              <div className="vj-filtro-contagem">
+                {gravadasView.length} de {gravadas.length}
+              </div>
+            </div>
+            {gravadasView.length === 0 ? (
+              <p className="vj-empty">Nenhuma cobrança com esse filtro.</p>
+            ) : (
             <table className="vj-tab">
-              <thead><tr><th>Contrato</th><th>Locatário</th><th>Vencimento</th><th className="vj-r">Total</th><th>Situação</th><th></th></tr></thead>
+              <thead><tr><th>Contrato</th><th>Locatário</th><th>Vencimento</th><th className="vj-r vj-comp">Aluguel</th><th className="vj-r vj-comp">Cond.</th><th className="vj-r vj-comp">IPTU</th><th className="vj-r vj-comp">Outros</th><th className="vj-r">Total</th><th>Situação</th><th></th></tr></thead>
               <tbody>
-                {gravadas.map((l) => (
+                {gravadasView.map((l) => (
                   <tr key={l.contrato_id} className="vj-click">
                     <td className="vj-id">
                       <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>#{l.contrato_id}</a>
@@ -242,6 +335,10 @@ export default function FechamentoMes() {
                       </a>
                     </td>
                     <td>{l.vencimento}</td>
+                    <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.aluguel)}</td>
+                    <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.condominio)}</td>
+                    <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.iptu)}</td>
+                    <td className={`vj-r vj-comp vj-compval${(l.comp?.outros ?? 0) < 0 ? " vj-neg" : ""}`}>{brlComp(l.comp?.outros)}</td>
                     <td className="vj-r vj-money">{brl(l.total)}</td>
                     <td>
                       {l.status_cobranca === "a_emitir" ? (
@@ -273,6 +370,8 @@ export default function FechamentoMes() {
                 ))}
               </tbody>
             </table>
+            )}
+            </>
           )}
         </section>
 
@@ -321,6 +420,9 @@ const CSS = `
 .vj-nome{font-weight:600}
 .vj-end{font-size:12px;color:var(--mut);margin-top:2px}
 .vj-money{font-variant-numeric:tabular-nums;font-weight:600}
+.vj-compval{font-variant-numeric:tabular-nums;color:var(--mut);font-size:13px;white-space:nowrap}
+.vj-neg{color:var(--verm)}
+@media (max-width:900px){.vj-comp{display:none}}
 .vj-tag{display:inline-block;font-size:12px;font-weight:600;padding:4px 10px;border-radius:20px}
 .vj-tag-ok{background:#EAF7F0;color:var(--ok)}
 .vj-tag-wait{background:#FBF3E2;color:var(--wait)}
@@ -336,6 +438,14 @@ const CSS = `
 .vj-tag-atras{background:#FBF3E2;color:var(--wait)}
 .vj-tag-exp{background:#FDECEE;color:var(--verm)}
 .vj-tag-canc{background:#EEE;color:#777}
+.vj-filtros{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin:4px 0 16px;padding-bottom:14px;border-bottom:1px solid var(--linha)}
+.vj-filtro{display:flex;flex-direction:column;gap:5px}
+.vj-filtro>span{font-size:11px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
+.vj-filtro select,.vj-filtro input{font:inherit;padding:9px 11px;border:1px solid var(--linha);border-radius:8px;background:#fff;color:var(--txt)}
+.vj-filtro select:focus,.vj-filtro input:focus{outline:2px solid var(--azul);outline-offset:1px;border-color:var(--azul)}
+.vj-filtro-busca{flex:1;min-width:180px}
+.vj-filtro-busca input{width:100%}
+.vj-filtro-contagem{font-size:13px;color:var(--mut);padding-bottom:9px;margin-left:auto}
 .vj-btn-emitir{background:var(--verm);color:#fff;border:none;font:inherit;font-weight:600;font-size:14px;padding:9px 16px;border-radius:9px;cursor:pointer}
 .vj-btn-emitir:hover:not(:disabled){background:#B4131F}
 .vj-btn-emitir:disabled{opacity:.5;cursor:not-allowed}
