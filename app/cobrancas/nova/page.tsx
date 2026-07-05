@@ -415,6 +415,11 @@ export default function ConferenciaCobranca() {
                   </option>
                 ))}
               </select>
+              {contratoId && (
+                <a className="vj-editlink" href={`/contratos/editar?id=${contratoId}`}>
+                  Editar contrato →
+                </a>
+              )}
             </label>
 
             <label className="vj-field">
@@ -708,6 +713,8 @@ const CSS = `
 .vj-row{display:flex;gap:16px;flex-wrap:wrap}
 .vj-field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
 .vj-field.vj-grow{flex:1;min-width:260px}
+.vj-editlink{align-self:flex-start;margin-top:6px;font-size:13px;font-weight:600;color:var(--azul);text-decoration:none}
+.vj-editlink:hover{text-decoration:underline}
 .vj-field>span{font-size:12px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
 .vj-field input,.vj-field select{font:inherit;padding:11px 12px;border:1px solid var(--linha);border-radius:9px;background:#fff;color:var(--txt)}
 .vj-field input:focus,.vj-field select:focus{outline:2px solid var(--azul);outline-offset:1px;border-color:var(--azul)}
