@@ -2,379 +2,228 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-/* ---------- tipos ---------- */
-type Contrato = {
-  id: number;
-  aluguel: number;
-  dia_vencimento: number | null;
+type Linha = {
+  contrato_id: number;
   locatario: string;
   endereco: string;
-  avulso: boolean;
+  aluguel: number;
+  estado: "pronto" | "aguardando" | "gravada";
+  total: number | null;
+  vencimento: string | null;
+  cobranca_id: number | null;
+  status_cobranca?: string | null;
+  comp?: { aluguel: number; condominio: number; iptu: number; outros: number } | null;
 };
-type Item = { descricao: string; valor: number; categoria: string };
-type Ajuste = { descricao: string; valor: number | string; tipo: "desconto" | "acrescimo" };
-type Despesa = {
-  condominio?: number | string;
-  extraordinaria?: number | string;
-  iptu?: number | string;
-  extra_desc?: string;
-  valor_avulso?: number | string;
-  descricao_avulso?: string;
+type Resumo = { total: number; gravadas: number; prontas: number; aguardando: number };
+type Aviso = {
+  contrato_id: number;
+  locatario: string;
+  endereco: string;
+  tipo: "reajuste" | "renovacao";
+  cor: "amarelo" | "vermelho";
+  data_evento: string;
+  indice: string | null;
+  detalhe: string;
 };
-type Previa = {
-  itens: Item[];
-  total: number;
-  despesa: Despesa;
-  cobranca_id?: number;
-  vencimento?: string;
-  status?: string;
-  modo?: string;
-  multa_percentual?: number;
-  mora_percentual?: number;
-};
-
-/* ---------- helpers ---------- */
-const brl = (n: number) =>
-  (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-
-const num = (v: unknown) => {
-  if (v === "" || v === null || v === undefined) return undefined;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : undefined;
+type AvisosResp = {
+  resumo: { total: number; vermelhos: number; amarelos: number; reajustes: number; renovacoes: number };
+  avisos: Aviso[];
 };
 
-// extrai o dia (1..31) de um vencimento que pode vir como ISO ou "YYYY-MM-DD"
-const diaDoVencimento = (v?: string): number | null => {
-  if (!v) return null;
-  const m = String(v).match(/^\d{4}-\d{2}-(\d{2})/);
-  return m ? Number(m[1]) : null;
-};
+const brl = (n: number | null) =>
+  n == null ? "—" : Number(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-async function fileToBase64(file: File): Promise<string> {
-  const buf = await file.arrayBuffer();
-  let binary = "";
-  const bytes = new Uint8Array(buf);
-  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
-}
+const brlComp = (n: number | null | undefined) =>
+  n == null || n === 0 ? "—" : Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-/* ---------- página ---------- */
-export default function ConferenciaCobranca() {
-  const [contratos, setContratos] = useState<Contrato[]>([]);
-  const [contratoId, setContratoId] = useState<number | null>(null);
+export default function FechamentoMes() {
   const [competencia, setCompetencia] = useState<string>(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   });
-  const [arquivos, setArquivos] = useState<File[]>([]);
-  const [despesa, setDespesa] = useState<Despesa>({});
-  const [ajustes, setAjustes] = useState<Ajuste[]>([]);
-  const [diaVenc, setDiaVenc] = useState<number | "">("");
-  const [multa, setMulta] = useState<number | "">("");
-  const [mora, setMora] = useState<number | "">("");
-  const [previa, setPrevia] = useState<Previa | null>(null);
-  const [gravado, setGravado] = useState<Previa | null>(null);
-  const [revisandoGravada, setRevisandoGravada] = useState(false);
-  const [diaVencGravado, setDiaVencGravado] = useState<number | null>(null);
-  const [cancelando, setCancelando] = useState(false);
-  const [msgCancel, setMsgCancel] = useState<string | null>(null);
-  const [novoVenc, setNovoVenc] = useState<string>("");
-  const [alterandoVenc, setAlterandoVenc] = useState(false);
-  const [msgVenc, setMsgVenc] = useState<string | null>(null);
+  const [resumo, setResumo] = useState<Resumo | null>(null);
+  const [linhas, setLinhas] = useState<Linha[]>([]);
+  const [avisos, setAvisos] = useState<Aviso[]>([]);
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
-  const contrato = useMemo(
-    () => contratos.find((c) => c.id === contratoId) || null,
-    [contratos, contratoId]
-  );
-  const compData = `${competencia}-01`;
-
-  // vencimento padrão segue o dia do contrato; editável por mês.
-  // Ao revisar uma cobrança gravada, mantém o dia gravado (não sobrescreve).
-  useEffect(() => {
-    if (revisandoGravada && diaVencGravado != null) {
-      setDiaVenc(diaVencGravado);
-    } else {
-      setDiaVenc(contrato?.dia_vencimento ?? "");
+  async function carregar(comp: string) {
+    setCarregando(true);
+    setErro(null);
+    try {
+      const res = await fetch(`/api/adm/fechamento?competencia=${comp}`);
+      const d = await res.json();
+      if (!res.ok) {
+        setErro(d?.error || "Falha ao carregar.");
+        setLinhas([]);
+        setResumo(null);
+      } else {
+        setResumo(d.resumo);
+        setLinhas(d.linhas || []);
+      }
+      // avisos (reajuste/renovação) — não bloqueia a tela se falhar
+      try {
+        const av = await fetch(`/api/adm/avisos?competencia=${comp}`);
+        if (av.ok) {
+          const aj = (await av.json()) as AvisosResp;
+          setAvisos(aj.avisos || []);
+        } else {
+          setAvisos([]);
+        }
+      } catch {
+        setAvisos([]);
+      }
+    } catch {
+      setErro("Erro de rede.");
+    } finally {
+      setCarregando(false);
     }
-  }, [contrato, revisandoGravada, diaVencGravado]);
+  }
 
   useEffect(() => {
-    fetch("/api/adm/contratos")
-      .then((r) => r.json())
-      .then((d) => setContratos(d.contratos || []))
-      .catch(() => setErro("Não consegui carregar os contratos."));
-  }, []);
-
-  // pré-seleção ao chegar do dashboard: /cobrancas/nova?contrato=13&competencia=2026-07
-  // roda no mount, independente do carregamento dos contratos
-  useEffect(() => {
-    const q = new URLSearchParams(window.location.search);
-    const cid = q.get("contrato");
-    const comp = q.get("competencia");
-    if (cid && !Number.isNaN(Number(cid))) setContratoId(Number(cid));
-    if (comp) setCompetencia(comp);
-    // se veio do "Revisar", tenta abrir com a cobrança já gravada
-    if (cid && !Number.isNaN(Number(cid)) && comp) {
-      carregarGravada(Number(cid), comp);
-    }
+    carregar(competencia);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [competencia]);
 
-  // Busca uma cobrança já gravada e, se existir, monta a prévia preenchida
-  // (mesmo formato de calcular/confirmar) para revisão sem re-subir boleto.
-  async function carregarGravada(cid: number, comp: string) {
-    setCarregando(true);
-    setErro(null);
-    try {
-      const res = await fetch(`/api/adm/cobranca-gravada?contrato=${cid}&competencia=${comp}`);
-      const d = await res.json();
-      if (!res.ok || !d?.gravada) return; // sem cobrança gravada → fluxo normal (vazio)
-      const p: Previa = {
-        itens: d.itens || [],
-        total: d.total,
-        despesa: d.despesa || {},
-        cobranca_id: d.cobranca_id,
-        vencimento: d.vencimento,
-        status: d.status,
-        multa_percentual: d.multa_percentual,
-        mora_percentual: d.mora_percentual,
-      };
-      setPrevia(p);
-      setDespesa(p.despesa || {});
-      setMulta(d.multa_percentual ?? 10);
-      setMora(d.mora_percentual ?? 1);
-      // vencimento vem como data (ISO ou YYYY-MM-DD) → extrai o dia
-      const dia = diaDoVencimento(d.vencimento);
-      if (dia) {
-        setDiaVencGravado(dia);
-        setDiaVenc(dia);
-      }
-      setRevisandoGravada(true);
-    } catch {
-      // silencioso: se falhar, a tela apenas segue no fluxo normal
-    } finally {
-      setCarregando(false);
+  const aGravar = useMemo(() => linhas.filter((l) => l.estado !== "gravada"), [linhas]);
+
+  // mapa de avisos por contrato: prioriza vermelho sobre amarelo
+  const avisosPorContrato = useMemo(() => {
+    const m = new Map<number, Aviso[]>();
+    for (const a of avisos) {
+      const arr = m.get(a.contrato_id) || [];
+      arr.push(a);
+      m.set(a.contrato_id, arr);
     }
-  }
+    return m;
+  }, [avisos]);
+  const temVermelho = (cid: number) =>
+    (avisosPorContrato.get(cid) || []).some((a) => a.cor === "vermelho");
+  const temAmarelo = (cid: number) =>
+    (avisosPorContrato.get(cid) || []).some((a) => a.cor === "amarelo");
+  const gravadas = useMemo(() => linhas.filter((l) => l.estado === "gravada"), [linhas]);
+  const pendentesEmissao = useMemo(
+    () => gravadas.filter((l) => l.status_cobranca === "a_emitir" && l.cobranca_id),
+    [gravadas]
+  );
+  const pct = resumo && resumo.total ? Math.round((resumo.gravadas / resumo.total) * 100) : 0;
 
-  // Cancela o boleto emitido no Inter. O backend bloqueia se já estiver pago.
-  // Em caso de sucesso, a cobrança volta para 'a_emitir' (reemitível) — recarrega a tela.
-  async function cancelarBoleto() {
-    const cid = previa?.cobranca_id;
-    if (!cid || cancelando) return;
-    if (
-      !confirm(
-        "Cancelar este boleto no Banco Inter?\n\n" +
-          "O boleto será cancelado e a cobrança voltará para \"a emitir\", " +
-          "mantendo a composição. Você poderá reemitir depois.\n\n" +
-          "Boletos já pagos não podem ser cancelados."
-      )
-    )
-      return;
-    setCancelando(true);
-    setMsgCancel("Consultando o Inter e cancelando o boleto… (pode levar alguns segundos)");
-    try {
-      const res = await fetch("/api/adm/cancelar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cobranca_id: cid }),
-      });
-      const d = await res.json();
-      if (!res.ok) {
-        setMsgCancel(`Erro ao cancelar: ${d?.error || "falha"}.`);
-      } else if (d?.ok) {
-        setMsgCancel(d?.mensagem || "Boleto cancelado. A cobrança voltou para “a emitir”.");
-        // recarrega o estado gravado (agora a_emitir, sem código)
-        if (contratoId) await carregarGravada(contratoId, competencia);
-      } else {
-        // bloqueado (já pago) ou falha controlada
-        setMsgCancel(d?.mensagem || "Não foi possível cancelar este boleto.");
-      }
-    } catch {
-      setMsgCancel("Erro de rede ao cancelar. Confira a situação no painel antes de tentar de novo.");
-    } finally {
-      setCancelando(false);
-    }
-  }
+  // ---- filtros / ordenação / busca (só na seção Gravadas) ----
+  const [filtroSit, setFiltroSit] = useState<string>("todas");
+  const [ordenar, setOrdenar] = useState<string>("vencimento");
+  const [busca, setBusca] = useState<string>("");
 
-  // Altera o vencimento do boleto emitido no Inter (mesmo boleto, só a data).
-  // Se o Inter aceitar, a nova data é gravada e a tela recarrega.
-  async function alterarVencimento() {
-    const cid = previa?.cobranca_id;
-    if (!cid || alterandoVenc) return;
-    if (!novoVenc || !/^\d{4}-\d{2}-\d{2}$/.test(novoVenc)) {
-      setMsgVenc("Escolha a nova data de vencimento.");
-      return;
-    }
-    if (
-      !confirm(
-        `Alterar o vencimento para ${novoVenc.split("-").reverse().join("/")}?\n\n` +
-          "O boleto continua o mesmo (mesma linha digitável), só a data muda. " +
-          "A alteração é enviada ao Inter e aplica em alguns segundos."
-      )
-    )
-      return;
-    setAlterandoVenc(true);
-    setMsgVenc("Enviando a alteração ao Inter…");
-    try {
-      const res = await fetch("/api/adm/alterar-vencimento", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cobranca_id: cid, nova_data: novoVenc }),
-      });
-      const d = await res.json();
-      if (!res.ok) {
-        setMsgVenc(`Erro: ${d?.error || "falha"}.`);
-      } else if (d?.ok) {
-        setMsgVenc(d?.mensagem || "Vencimento alterado.");
-        setNovoVenc("");
-        if (contratoId) await carregarGravada(contratoId, competencia);
-      } else {
-        setMsgVenc(d?.mensagem || "Não foi possível alterar o vencimento.");
-      }
-    } catch {
-      setMsgVenc("Erro de rede ao alterar o vencimento. Confira no painel antes de tentar de novo.");
-    } finally {
-      setAlterandoVenc(false);
-    }
-  }
-
-  function reset() {
-    setPrevia(null);
-    setGravado(null);
-    setErro(null);
-    setRevisandoGravada(false);
-    setDiaVencGravado(null);
-    setNovoVenc("");
-    setMsgVenc(null);
-  }
-
-  async function chamar(payload: any): Promise<Previa | null> {
-    setCarregando(true);
-    setErro(null);
-    try {
-      const res = await fetch("/api/adm/cobranca", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setErro(typeof data?.detail === "string" ? data.detail : data?.error || "Falha no cálculo.");
-        return null;
-      }
-      return data as Previa;
-    } catch (e) {
-      setErro("Erro de rede ao falar com o servidor.");
-      return null;
-    } finally {
-      setCarregando(false);
-    }
-  }
-
-  // 1) Ler boleto(s) e calcular a primeira prévia
-  async function calcularComBoleto() {
-    if (!contratoId) return;
-    setGravado(null);
-    const boletos = await Promise.all(
-      arquivos.map(async (f) => ({ mimeType: f.type || "application/pdf", data: await fileToBase64(f) }))
-    );
-    const p = await chamar({
-      modo: "calcular",
-      contrato_id: contratoId,
-      competencia: compData,
-      boletos,
-    });
-    if (p) {
-      setPrevia(p);
-      setDespesa(p.despesa || {});
-      setMulta(p.multa_percentual ?? 10);
-      setMora(p.mora_percentual ?? 1);
-    }
-  }
-
-  // 1b) Contrato sem boleto (aluguel-only ou valor avulso): calcula direto dos campos
-  async function calcularSemBoleto() {
-    if (!contratoId) return;
-    setGravado(null);
-    const p = await chamar({
-      modo: "calcular",
-      contrato_id: contratoId,
-      competencia: compData,
-      overrides: limparDespesa(despesa),
-    });
-    if (p) {
-      setPrevia(p);
-      setDespesa(p.despesa || despesa);
-      setMulta(p.multa_percentual ?? 10);
-      setMora(p.mora_percentual ?? 1);
-    }
-  }
-
-  // 2) Recalcular após editar os valores lidos
-  async function recalcular() {
-    if (!contratoId) return;
-    const p = await chamar({
-      modo: "calcular",
-      contrato_id: contratoId,
-      competencia: compData,
-      overrides: limparDespesa(despesa),
-    });
-    if (p) setPrevia(p);
-  }
-
-  // 3) Confirmar e gravar
-  async function confirmar() {
-    if (!contratoId) return;
-    const p = await chamar({
-      modo: "confirmar",
-      contrato_id: contratoId,
-      competencia: compData,
-      despesa: limparDespesa(despesa),
-      vencimento: buildVenc(),
-    });
-    if (p) setGravado(p);
-  }
-
-  function limparDespesa(d: Despesa) {
-    return {
-      condominio: num(d.condominio) ?? 0,
-      extraordinaria: num(d.extraordinaria) ?? 0,
-      iptu: num(d.iptu) ?? 0,
-      valor_avulso: num(d.valor_avulso),
-      descricao_avulso: d.descricao_avulso,
-      extra_desc: d.extra_desc,
-      multa_percentual: num(multa),
-      mora_percentual: num(mora),
-      ajustes: ajustes
-        .filter((a) => num(a.valor) && num(a.valor)! > 0)
-        .map((a) => ({ descricao: a.descricao, valor: num(a.valor), tipo: a.tipo })),
+  // "em aberto" = emitido sem situação de pagamento resolvida (emitido/null)
+  const ehAberto = (s?: string | null) => s === "emitido" || s == null;
+  const contagem = useMemo(() => {
+    const c: Record<string, number> = {
+      todas: gravadas.length, aberto: 0, pago: 0, atrasado: 0, expirado: 0, cancelado: 0, a_emitir: 0,
     };
+    for (const l of gravadas) {
+      const s = l.status_cobranca;
+      if (s === "pago") c.pago++;
+      else if (s === "atrasado") c.atrasado++;
+      else if (s === "expirado") c.expirado++;
+      else if (s === "cancelado") c.cancelado++;
+      else if (s === "a_emitir") c.a_emitir++;
+      else if (s === "emitindo") {/* em trânsito, não conta */}
+      else c.aberto++;
+    }
+    return c;
+  }, [gravadas]);
+
+  const gravadasView = useMemo(() => {
+    let arr = gravadas;
+    if (filtroSit !== "todas") {
+      arr = arr.filter((l) =>
+        filtroSit === "aberto" ? ehAberto(l.status_cobranca) : l.status_cobranca === filtroSit
+      );
+    }
+    const q = busca.trim().toLowerCase();
+    if (q) {
+      arr = arr.filter(
+        (l) => l.locatario?.toLowerCase().includes(q) || String(l.contrato_id).includes(q)
+      );
+    }
+    const cmp = (a: Linha, b: Linha) => {
+      switch (ordenar) {
+        case "valor": return (b.total ?? 0) - (a.total ?? 0);
+        case "nome": return (a.locatario || "").localeCompare(b.locatario || "", "pt-BR");
+        case "contrato": return a.contrato_id - b.contrato_id;
+        case "vencimento":
+        default:
+          return String(a.vencimento || "").localeCompare(String(b.vencimento || ""));
+      }
+    };
+    return [...arr].sort(cmp);
+  }, [gravadas, filtroSit, ordenar, busca]);
+
+  const [emitindo, setEmitindo] = useState(false);
+  const [msgEmissao, setMsgEmissao] = useState<string | null>(null);
+  const [conciliando, setConciliando] = useState(false);
+
+  async function conciliar() {
+    if (conciliando) return;
+    setConciliando(true);
+    setMsgEmissao("Consultando o Banco Inter e atualizando os status…");
+    try {
+      const res = await fetch("/api/adm/conciliar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ competencia }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setMsgEmissao(`Erro ao atualizar: ${d?.error || "falha"}.`);
+      } else {
+        setMsgEmissao(
+          `Status atualizado — pagos: ${d?.pago ?? 0} · em aberto: ${d?.em_aberto ?? 0} · atrasados: ${d?.atrasado ?? 0} · cancelados: ${d?.cancelado ?? 0}.`
+        );
+        carregar(competencia);
+      }
+    } catch {
+      setMsgEmissao("Erro de rede ao atualizar status.");
+    } finally {
+      setConciliando(false);
+    }
   }
 
-  function addAjuste() {
-    setAjustes([...ajustes, { descricao: "", valor: "", tipo: "desconto" }]);
+  async function emitir(ids: number[]) {
+    if (ids.length === 0 || emitindo) return;
+    const qtd = ids.length;
+    if (!confirm(`Emitir ${qtd} boleto(s) no Banco Inter? Isso gera cobrança real.`)) return;
+    setEmitindo(true);
+    setMsgEmissao(`Emitindo ${qtd} boleto(s)… pode levar alguns minutos (não feche a página).`);
+    try {
+      const res = await fetch("/api/adm/emitir", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cobranca_ids: ids }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setMsgEmissao(`Erro: ${d?.error || "falha na emissão"}. ${d?.detail ? JSON.stringify(d.detail).slice(0, 200) : ""}`);
+      } else if (d?.mensagem) {
+        setMsgEmissao(d.mensagem);
+      } else {
+        const ok = d?.emitidos ?? 0;
+        const fal = d?.falhas ?? 0;
+        let msg = `✓ ${ok} emitido(s)`;
+        if (fal > 0) {
+          const detalhes = (d.detalhe_falhas || [])
+            .map((f: any) => `#${f.cobranca_id}: ${f.erro}`)
+            .join(" · ");
+          msg += ` · ⚠ ${fal} falha(s) — ${detalhes}`;
+        }
+        setMsgEmissao(msg);
+      }
+      carregar(competencia);
+    } catch {
+      setMsgEmissao("Erro de rede ao emitir. Verifique no painel antes de tentar de novo — pode ter emitido parcialmente.");
+    } finally {
+      setEmitindo(false);
+    }
   }
-  function setAjuste(i: number, patch: Partial<Ajuste>) {
-    setAjustes(ajustes.map((a, idx) => (idx === i ? { ...a, ...patch } : a)));
-  }
-  function delAjuste(i: number) {
-    setAjustes(ajustes.filter((_, idx) => idx !== i));
-  }
-
-  // monta o vencimento a partir do dia escolhido (clampado ao último dia do mês)
-  function buildVenc(): string | null {
-    const dia = Number(diaVenc);
-    if (!dia || dia < 1 || dia > 31) return null;
-    const [y, m] = competencia.split("-").map(Number);
-    const ultimo = new Date(y, m, 0).getDate();
-    const d = Math.min(dia, ultimo);
-    return `${competencia}-${String(d).padStart(2, "0")}`;
-  }
-
-  const podeCalcular = !!contratoId && !carregando;
 
   return (
     <div className="vj-wrap">
@@ -382,410 +231,363 @@ export default function ConferenciaCobranca() {
 
       <header className="vj-top">
         <a href="/cobrancas" className="vj-mark vj-marklink">RE/MAX <span>Ville</span></a>
-        <div className="vj-crumb">Administração · Conferência de cobrança</div>
+        <div className="vj-crumb">Administração · Fechamento do mês</div>
       </header>
 
       <main className="vj-main">
-        <a href="/cobrancas" className="vj-back">← Fechamento do mês</a>
-        <h1 className="vj-h1">Conferir e gerar cobrança</h1>
-        <p className="vj-sub">
-          Selecione o contrato, envie o boleto de condomínio/IPTU e confira a composição
-          antes de gravar. Nada é gravado até você confirmar.
-        </p>
+        <div className="vj-head">
+          <div>
+            <h1 className="vj-h1">Fechamento do mês</h1>
+            <p className="vj-sub">Acompanhe o que já virou cobrança e o que ainda falta.</p>
+          </div>
+          <label className="vj-field">
+            <span>Competência</span>
+            <input type="month" value={competencia} onChange={(e) => setCompetencia(e.target.value)} />
+          </label>
+        </div>
 
-        {/* seleção */}
+        {/* avisos da competência (reajuste / renovação) */}
+        {avisos.length > 0 && (
+          <section className="vj-avisos">
+            {avisos.map((a, i) => (
+              <div key={i} className={`vj-aviso vj-aviso-${a.cor}`}>
+                <span className="vj-aviso-tag">
+                  {a.tipo === "reajuste" ? "Reajuste" : "Renovação"}
+                </span>
+                <span className="vj-aviso-txt">
+                  <b>{a.locatario}</b> (contrato #{a.contrato_id}) — {a.detalhe}
+                </span>
+                <span className="vj-aviso-data">
+                  {a.data_evento.split("-").reverse().slice(0, 2).join("/")}
+                </span>
+              </div>
+            ))}
+          </section>
+        )}
+
+        {/* progresso */}
+        {resumo && (
+          <section className="vj-card vj-resumo">
+            <div className="vj-nums">
+              <div className="vj-num"><b>{resumo.gravadas}</b><span>Gravadas</span></div>
+              <div className="vj-num"><b>{resumo.prontas}</b><span>Prontas</span></div>
+              <div className="vj-num vj-num-w"><b>{resumo.aguardando}</b><span>Aguardando condomínio</span></div>
+              <div className="vj-num vj-num-t"><b>{resumo.total}</b><span>Contratos ativos</span></div>
+            </div>
+            <div className="vj-bar"><div className="vj-fill" style={{ width: `${pct}%` }} /></div>
+            <div className="vj-barlbl">{resumo.gravadas} de {resumo.total} fechadas · {pct}%</div>
+          </section>
+        )}
+
+        {erro && <div className="vj-erro">{erro}</div>}
+
+        {/* A GRAVAR */}
         <section className="vj-card">
-          <div className="vj-row">
-            <label className="vj-field vj-grow">
-              <span>Contrato</span>
-              <select
-                value={contratoId ?? ""}
-                onChange={(e) => {
-                  setContratoId(e.target.value ? Number(e.target.value) : null);
-                  reset();
-                  setDespesa({});
-                  setAjustes([]);
-                  setArquivos([]);
-                }}
-              >
-                <option value="">Selecione…</option>
-                {contratos.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    #{c.id} · {c.locatario} — {c.endereco}
-                  </option>
+          <h2 className="vj-h2">A gravar <span className="vj-count">{aGravar.length}</span></h2>
+          {aGravar.length === 0 ? (
+            <p className="vj-empty">Tudo fechado nesta competência. 🎉</p>
+          ) : (
+            <table className="vj-tab">
+              <thead><tr><th>Contrato</th><th>Locatário</th><th>Situação</th><th></th></tr></thead>
+              <tbody>
+                {aGravar.map((l) => (
+                  <tr key={l.contrato_id} className="vj-click">
+                    <td className="vj-id">
+                      <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>#{l.contrato_id}</a>
+                    </td>
+                    <td>
+                      <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>
+                        <div className="vj-nome">
+                          {temVermelho(l.contrato_id) && <span className="vj-dot vj-dot-v" title="Reajuste/renovação nesta competência" />}
+                          {!temVermelho(l.contrato_id) && temAmarelo(l.contrato_id) && <span className="vj-dot vj-dot-a" title="Reajuste/renovação no mês seguinte" />}
+                          {l.locatario}
+                        </div>
+                        <div className="vj-end">{l.endereco}</div>
+                      </a>
+                    </td>
+                    <td>
+                      {l.estado === "pronto" ? (
+                        <span className="vj-tag vj-tag-ok">Pronta pra fechar</span>
+                      ) : (
+                        <span className="vj-tag vj-tag-wait">Falta informar condomínio</span>
+                      )}
+                    </td>
+                    <td className="vj-go">
+                      <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>Conferir →</a>
+                    </td>
+                  </tr>
                 ))}
-              </select>
-              {contratoId && (
-                <a className="vj-editlink" href={`/contratos/editar?id=${contratoId}`}>
-                  Editar contrato →
-                </a>
-              )}
-            </label>
-
-            <label className="vj-field">
-              <span>Competência</span>
-              <input type="month" value={competencia} onChange={(e) => { setCompetencia(e.target.value); reset(); }} />
-            </label>
-          </div>
-
-          {contrato && (
-            <div className="vj-hint">
-              Aluguel atual <b>{brl(contrato.aluguel)}</b> · vencimento dia{" "}
-              <b>{contrato.dia_vencimento ?? "—"}</b>
-              {contrato.avulso && <span className="vj-badge">valor variável (digite abaixo)</span>}
-            </div>
+              </tbody>
+            </table>
           )}
-
-          {contrato && !contrato.avulso && (
-            <div className="vj-upload">
-              <input
-                id="file"
-                type="file"
-                accept="application/pdf,image/*"
-                multiple
-                onChange={(e) => setArquivos(Array.from(e.target.files || []))}
-              />
-              <label htmlFor="file" className="vj-drop">
-                {arquivos.length
-                  ? `${arquivos.length} arquivo(s): ${arquivos.map((f) => f.name).join(", ")}`
-                  : "Arraste ou clique para enviar o boleto de condomínio / IPTU (PDF)"}
-              </label>
-            </div>
-          )}
-
-          <div className="vj-actions">
-            {contrato?.avulso ? (
-              <button className="vj-btn vj-primary" disabled={!podeCalcular} onClick={calcularSemBoleto}>
-                Calcular prévia
-              </button>
-            ) : (
-              <>
-                <button
-                  className="vj-btn vj-primary"
-                  disabled={!podeCalcular || arquivos.length === 0}
-                  onClick={calcularComBoleto}
-                >
-                  Ler boleto e calcular
-                </button>
-                <button className="vj-btn vj-ghost" disabled={!podeCalcular} onClick={calcularSemBoleto}>
-                  Calcular sem boleto
-                </button>
-              </>
-            )}
-          </div>
-
-          {erro && <div className="vj-erro">{erro}</div>}
         </section>
 
-        {/* prévia */}
-        {previa && !gravado && (
-          <section className="vj-grid">
-            {revisandoGravada && (
-              <div className="vj-revaviso">
-                Revisando a cobrança <b>#{previa.cobranca_id}</b> já gravada
-                {previa.status ? <> · situação <b>{previa.status}</b></> : null}. Os valores abaixo
-                são os que estão gravados. Recalcular e confirmar de novo <b>substitui</b> esta cobrança.
-                {["emitido", "atrasado", "expirado"].includes(String(previa.status)) && (
-                  <div className="vj-vencrow">
-                    <label className="vj-venclbl2">Novo vencimento</label>
-                    <input
-                      type="date"
-                      className="vj-vencinput"
-                      value={novoVenc}
-                      onChange={(e) => setNovoVenc(e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="vj-btn-venc"
-                      disabled={alterandoVenc || !novoVenc}
-                      onClick={alterarVencimento}
-                    >
-                      {alterandoVenc ? "Alterando…" : "Alterar vencimento"}
-                    </button>
-                    <span className="vj-cancelhint">
-                      Muda só a data — o boleto continua o mesmo (mesma linha digitável).
-                    </span>
-                  </div>
-                )}
-                {msgVenc && <div className="vj-cancelmsg">{msgVenc}</div>}
-                {["emitido", "atrasado", "expirado"].includes(String(previa.status)) && (
-                  <div className="vj-cancelrow">
-                    <button
-                      type="button"
-                      className="vj-btn-cancelar"
-                      disabled={cancelando}
-                      onClick={cancelarBoleto}
-                    >
-                      {cancelando ? "Cancelando…" : "Cancelar boleto no Inter"}
-                    </button>
-                    <span className="vj-cancelhint">
-                      Cancela o boleto e devolve a cobrança para “a emitir” (mantém a composição).
-                    </span>
-                  </div>
-                )}
-                {msgCancel && <div className="vj-cancelmsg">{msgCancel}</div>}
-              </div>
-            )}
-            {/* valores editáveis */}
-            <div className="vj-card">
-              <h2 className="vj-h2">Valores lidos</h2>
-              <p className="vj-note">Corrija qualquer valor que o boleto mostre diferente e recalcule.</p>
-
-              {contrato?.avulso ? (
-                <label className="vj-field">
-                  <span>Valor do mês</span>
-                  <input
-                    inputMode="decimal"
-                    value={despesa.valor_avulso ?? ""}
-                    onChange={(e) => setDespesa({ ...despesa, valor_avulso: e.target.value })}
-                  />
-                </label>
-              ) : (
-                <>
-                  <label className="vj-field">
-                    <span>Condomínio (bruto)</span>
-                    <input inputMode="decimal" value={despesa.condominio ?? ""} onChange={(e) => setDespesa({ ...despesa, condominio: e.target.value })} />
-                  </label>
-                  <label className="vj-field">
-                    <span>Despesas extraordinárias</span>
-                    <input inputMode="decimal" value={despesa.extraordinaria ?? ""} onChange={(e) => setDespesa({ ...despesa, extraordinaria: e.target.value })} />
-                  </label>
-                  {despesa.extra_desc ? (
-                    <div className="vj-extradesc">
-                      <b>Não é do inquilino (o Gemini identificou):</b> {despesa.extra_desc}
-                      <span className="vj-extrahint">Confira contra o boleto e ajuste o valor acima se algo estiver errado.</span>
-                    </div>
-                  ) : null}
-                  <label className="vj-field">
-                    <span>IPTU</span>
-                    <input inputMode="decimal" value={despesa.iptu ?? ""} onChange={(e) => setDespesa({ ...despesa, iptu: e.target.value })} />
-                  </label>
-                </>
+        {/* GRAVADAS */}
+        <section className="vj-card">
+          <div className="vj-ajhead">
+            <h2 className="vj-h2">Gravadas <span className="vj-count">{gravadas.length}</span></h2>
+            <div className="vj-acoes-cab">
+              {gravadas.length > 0 && (
+                <button className="vj-btn-status" disabled={conciliando || emitindo} onClick={conciliar}>
+                  {conciliando ? "Atualizando…" : "↻ Atualizar status"}
+                </button>
               )}
-
-              <div className="vj-ajustes">
-                <div className="vj-ajhead">
-                  <span>Ajustes (descontos / acréscimos)</span>
-                  <button type="button" className="vj-addaj" onClick={addAjuste}>+ adicionar</button>
-                </div>
-                {ajustes.length === 0 && <p className="vj-ajnote">Nenhum ajuste neste mês.</p>}
-                {ajustes.map((a, i) => (
-                  <div className="vj-ajcard" key={i}>
-                    <div className="vj-ajgrid">
-                      <label className="vj-ajfield">
-                        <span>Tipo</span>
-                        <select
-                          value={a.tipo}
-                          onChange={(e) => setAjuste(i, { tipo: e.target.value as Ajuste["tipo"] })}
+              {pendentesEmissao.length > 0 && (
+                <button
+                  className="vj-btn-emitir"
+                  disabled={emitindo || conciliando}
+                  onClick={() => emitir(pendentesEmissao.map((l) => l.cobranca_id as number))}
+                >
+                  Emitir {pendentesEmissao.length} pendente(s) no Inter
+                </button>
+              )}
+            </div>
+          </div>
+          {msgEmissao && <div className="vj-msgemissao">{msgEmissao}</div>}
+          {gravadas.length === 0 ? (
+            <p className="vj-empty">Nenhuma cobrança gravada ainda.</p>
+          ) : (
+            <>
+            <div className="vj-filtros">
+              <label className="vj-filtro">
+                <span>Situação</span>
+                <select value={filtroSit} onChange={(e) => setFiltroSit(e.target.value)}>
+                  <option value="todas">Todas ({contagem.todas})</option>
+                  <option value="aberto">Em aberto ({contagem.aberto})</option>
+                  <option value="pago">Pagos ({contagem.pago})</option>
+                  <option value="atrasado">Atrasados ({contagem.atrasado})</option>
+                  <option value="expirado">Vencidos ({contagem.expirado})</option>
+                  <option value="cancelado">Cancelados ({contagem.cancelado})</option>
+                  <option value="a_emitir">A emitir ({contagem.a_emitir})</option>
+                </select>
+              </label>
+              <label className="vj-filtro">
+                <span>Ordenar por</span>
+                <select value={ordenar} onChange={(e) => setOrdenar(e.target.value)}>
+                  <option value="vencimento">Vencimento</option>
+                  <option value="valor">Maior valor</option>
+                  <option value="nome">Nome</option>
+                  <option value="contrato">Nº do contrato</option>
+                </select>
+              </label>
+              <label className="vj-filtro vj-filtro-busca">
+                <span>Buscar</span>
+                <input
+                  type="text"
+                  placeholder="Nome do locatário ou nº do contrato…"
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                />
+              </label>
+              <div className="vj-filtro-contagem">
+                {gravadasView.length} de {gravadas.length}
+              </div>
+            </div>
+            {gravadasView.length === 0 ? (
+              <p className="vj-empty">Nenhuma cobrança com esse filtro.</p>
+            ) : (
+            <table className="vj-tab">
+              <thead><tr><th>Contrato</th><th>Locatário</th><th>Vencimento</th><th className="vj-r vj-comp">Aluguel</th><th className="vj-r vj-comp">Cond.</th><th className="vj-r vj-comp">IPTU</th><th className="vj-r vj-comp">Outros</th><th className="vj-r">Total</th><th>Situação</th><th></th></tr></thead>
+              <tbody>
+                {gravadasView.map((l) => (
+                  <tr key={l.contrato_id} className="vj-click">
+                    <td className="vj-id">
+                      <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>#{l.contrato_id}</a>
+                    </td>
+                    <td>
+                      <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>
+                        <div className="vj-nome">
+                          {temVermelho(l.contrato_id) && <span className="vj-dot vj-dot-v" title="Reajuste/renovação nesta competência" />}
+                          {!temVermelho(l.contrato_id) && temAmarelo(l.contrato_id) && <span className="vj-dot vj-dot-a" title="Reajuste/renovação no mês seguinte" />}
+                          {l.locatario}
+                        </div>
+                      </a>
+                    </td>
+                    <td data-label="Vencimento">{l.vencimento}</td>
+                    <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.aluguel)}</td>
+                    <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.condominio)}</td>
+                    <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.iptu)}</td>
+                    <td className={`vj-r vj-comp vj-compval${(l.comp?.outros ?? 0) < 0 ? " vj-neg" : ""}`}>{brlComp(l.comp?.outros)}</td>
+                    <td className="vj-r vj-money" data-label="Total">{brl(l.total)}</td>
+                    <td data-label="Situação">
+                      {l.status_cobranca === "a_emitir" ? (
+                        <button
+                          className="vj-btn-emitir vj-btn-emitir-sm"
+                          disabled={emitindo || !l.cobranca_id}
+                          onClick={() => emitir([l.cobranca_id as number])}
                         >
-                          <option value="desconto">Desconto</option>
-                          <option value="acrescimo">Acréscimo</option>
-                        </select>
-                      </label>
-                      <label className="vj-ajfield vj-ajfield-val">
-                        <span>Valor (R$)</span>
-                        <input
-                          inputMode="decimal"
-                          placeholder="0,00"
-                          value={a.valor}
-                          onChange={(e) => setAjuste(i, { valor: e.target.value })}
-                        />
-                      </label>
-                      <button type="button" className="vj-ajdel" onClick={() => delAjuste(i)} title="Remover ajuste">×</button>
-                    </div>
-                    <label className="vj-ajfield">
-                      <span>Descrição</span>
-                      <input
-                        placeholder="ex.: reembolso troca de fechadura"
-                        value={a.descricao}
-                        onChange={(e) => setAjuste(i, { descricao: e.target.value })}
-                      />
-                    </label>
-                  </div>
-                ))}
-              </div>
-
-              <button className="vj-btn vj-ghost" disabled={carregando} onClick={recalcular}>
-                Recalcular
-              </button>
-            </div>
-
-            {/* composição + total */}
-            <div className="vj-card">
-              <h2 className="vj-h2">Composição do boleto</h2>
-              <table className="vj-tab">
-                <tbody>
-                  {previa.itens.map((it, i) => (
-                    <tr key={i}>
-                      <td>{it.descricao}</td>
-                      <td className="vj-val">{brl(it.valor)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td>Total</td>
-                    <td className="vj-total">{brl(previa.total)}</td>
+                          Emitir
+                        </button>
+                      ) : l.status_cobranca === "emitindo" ? (
+                        <span className="vj-emitindo">emitindo…</span>
+                      ) : l.status_cobranca === "pago" ? (
+                        <span className="vj-tag vj-tag-pago">✓ pago</span>
+                      ) : l.status_cobranca === "atrasado" ? (
+                        <span className="vj-tag vj-tag-atras">⚠ atrasado</span>
+                      ) : l.status_cobranca === "expirado" ? (
+                        <span className="vj-tag vj-tag-exp">vencido</span>
+                      ) : l.status_cobranca === "cancelado" ? (
+                        <span className="vj-tag vj-tag-canc">cancelado</span>
+                      ) : (
+                        <span className="vj-tag vj-tag-aberto">em aberto</span>
+                      )}
+                    </td>
+                    <td className="vj-go">
+                      {l.cobranca_id &&
+                        l.status_cobranca !== "a_emitir" &&
+                        l.status_cobranca !== "emitindo" &&
+                        l.status_cobranca !== "cancelado" && (
+                          <a
+                            className="vj-boleto"
+                            href={`/api/adm/boleto-pdf?cobranca=${l.cobranca_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Abrir o boleto em PDF"
+                          >
+                            ⭳ Boleto
+                          </a>
+                        )}
+                      <a className="vj-rowlink vj-revisar" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>Revisar →</a>
+                    </td>
                   </tr>
-                </tfoot>
-              </table>
+                ))}
+              </tbody>
+            </table>
+            )}
+            </>
+          )}
+        </section>
 
-              <div className="vj-venc-row">
-                <label className="vj-field vj-venc">
-                  <span>Vencimento (dia)</span>
-                  <input
-                    inputMode="numeric"
-                    value={diaVenc}
-                    onChange={(e) => setDiaVenc(e.target.value === "" ? "" : Number(e.target.value))}
-                  />
-                </label>
-                <label className="vj-field vj-venc">
-                  <span>Multa (%)</span>
-                  <input
-                    inputMode="decimal"
-                    value={multa}
-                    onChange={(e) => setMulta(e.target.value === "" ? "" : Number(e.target.value))}
-                  />
-                </label>
-                <label className="vj-field vj-venc">
-                  <span>Juros ao mês (%)</span>
-                  <input
-                    inputMode="decimal"
-                    value={mora}
-                    onChange={(e) => setMora(e.target.value === "" ? "" : Number(e.target.value))}
-                  />
-                </label>
-              </div>
-              {buildVenc() && (
-                <div className="vj-venclbl">
-                  Vence em {buildVenc()!.split("-").reverse().join("/")} · após vencimento: multa {multa || 0}% + juros {mora || 0}%/mês
-                </div>
-              )}
-
-              <button className="vj-btn vj-confirm" disabled={carregando} onClick={confirmar}>
-                Confirmar e gravar
-              </button>
-            </div>
-          </section>
-        )}
-
-        {/* gravado */}
-        {gravado && (
-          <section className="vj-card vj-ok">
-            <div className="vj-okmark">✓ Cobrança gravada</div>
-            <div className="vj-okgrid">
-              <div><span>Cobrança</span><b>#{gravado.cobranca_id}</b></div>
-              <div><span>Total</span><b>{brl(gravado.total)}</b></div>
-              <div><span>Vencimento</span><b>{gravado.vencimento}</b></div>
-              <div><span>Status</span><b>{gravado.status}</b></div>
-            </div>
-            <p className="vj-note">Pronta para emissão no Banco Inter.</p>
-            <button className="vj-btn vj-ghost" onClick={() => { reset(); setDespesa({}); setAjustes([]); setArquivos([]); }}>
-              Nova cobrança
-            </button>
-          </section>
-        )}
-
-        {carregando && <div className="vj-load">Processando…</div>}
+        {(carregando || emitindo) && <div className="vj-load">{emitindo ? "Emitindo no Inter…" : "Carregando…"}</div>}
       </main>
     </div>
   );
 }
 
-/* ---------- estilo (RE/MAX Ville: azul #003DA5, vermelho #DC1C2E) ---------- */
 const CSS = `
-.vj-wrap{--azul:#003DA5;--azul-esc:#00286b;--verm:#DC1C2E;--bg:#F4F6FA;--card:#fff;--linha:#E4E9F2;--txt:#16233B;--mut:#5A6B85;--ok:#0F7B4F;
+.vj-wrap{--azul:#003DA5;--azul-esc:#00286b;--verm:#DC1C2E;--bg:#F4F6FA;--card:#fff;--linha:#E4E9F2;--txt:#16233B;--mut:#5A6B85;--ok:#0F7B4F;--wait:#B8860B;
   min-height:100vh;background:var(--bg);color:var(--txt);
   font-family:Archivo,"Segoe UI",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;}
-.vj-top{display:flex;align-items:center;justify-content:space-between;gap:16px;
-  padding:16px 28px;background:var(--azul);color:#fff;}
-.vj-mark{font-weight:800;letter-spacing:.5px;font-size:18px}
+.vj-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 28px;background:var(--azul);color:#fff}
+.vj-mark{font-weight:800;letter-spacing:.5px;font-size:18px}.vj-mark span{color:#BFD3FF;font-weight:600}
 .vj-marklink{color:#fff;text-decoration:none}
-.vj-mark span{color:#BFD3FF;font-weight:600}
 .vj-crumb{font-size:13px;color:#C9D8F5}
-.vj-back{display:inline-block;margin-bottom:14px;color:var(--azul);text-decoration:none;font-weight:600;font-size:14px}
-.vj-back:hover{text-decoration:underline}
 .vj-main{max-width:960px;margin:0 auto;padding:32px 20px 80px}
+.vj-head{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap;margin-bottom:22px}
 .vj-h1{font-family:Fraunces,Georgia,serif;font-size:30px;font-weight:600;margin:0 0 6px}
-.vj-sub{color:var(--mut);margin:0 0 24px;max-width:60ch;line-height:1.5}
-.vj-card{background:var(--card);border:1px solid var(--linha);border-radius:14px;padding:22px;margin-bottom:20px;
-  box-shadow:0 1px 2px rgba(16,35,59,.04)}
-.vj-row{display:flex;gap:16px;flex-wrap:wrap}
-.vj-field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
-.vj-field.vj-grow{flex:1;min-width:260px}
-.vj-editlink{align-self:flex-start;margin-top:6px;font-size:13px;font-weight:600;color:var(--azul);text-decoration:none}
-.vj-editlink:hover{text-decoration:underline}
+.vj-sub{color:var(--mut);margin:0}
+.vj-field{display:flex;flex-direction:column;gap:6px}
 .vj-field>span{font-size:12px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
-.vj-field input,.vj-field select{font:inherit;padding:11px 12px;border:1px solid var(--linha);border-radius:9px;background:#fff;color:var(--txt)}
-.vj-field input:focus,.vj-field select:focus{outline:2px solid var(--azul);outline-offset:1px;border-color:var(--azul)}
-.vj-hint{font-size:14px;color:var(--mut);margin:4px 0 14px}
-.vj-hint b{color:var(--txt)}
-.vj-badge{display:inline-block;margin-left:10px;background:#FDECEE;color:var(--verm);font-size:12px;font-weight:600;padding:3px 9px;border-radius:20px}
-.vj-upload{position:relative;margin:6px 0 16px}
-.vj-upload input{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
-.vj-drop{display:block;border:1.5px dashed #B8C6DF;border-radius:11px;padding:22px;text-align:center;
-  color:var(--mut);cursor:pointer;transition:.15s;background:#FAFCFF}
-.vj-drop:hover{border-color:var(--azul);color:var(--azul);background:#F2F7FF}
-.vj-actions{display:flex;gap:10px;flex-wrap:wrap}
-.vj-btn{font:inherit;font-weight:600;padding:11px 18px;border-radius:9px;border:1px solid transparent;cursor:pointer;transition:.15s}
-.vj-btn:disabled{opacity:.5;cursor:not-allowed}
-.vj-primary{background:var(--azul);color:#fff}
-.vj-primary:not(:disabled):hover{background:var(--azul-esc)}
-.vj-ghost{background:#fff;border-color:var(--linha);color:var(--azul)}
-.vj-ghost:not(:disabled):hover{background:#F2F7FF}
-.vj-confirm{background:var(--verm);color:#fff;width:100%;margin-top:16px;padding:13px}
-.vj-confirm:not(:disabled):hover{background:#B4131F}
-.vj-erro{margin-top:14px;background:#FDECEE;border:1px solid #F6C6CC;color:#9B1420;padding:11px 14px;border-radius:9px;font-size:14px}
-.vj-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
-.vj-revaviso{grid-column:1 / -1;background:#EAF0FA;border:1px solid #C9D8F5;color:var(--azul);padding:12px 16px;border-radius:11px;font-size:14px;line-height:1.5}
-.vj-cancelrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid #C9D8F5}
-.vj-vencrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid #C9D8F5}
-.vj-venclbl2{font-size:12px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
-.vj-vencinput{font:inherit;padding:8px 10px;border:1px solid var(--linha);border-radius:8px;background:#fff;color:var(--txt)}
-.vj-vencinput:focus{outline:2px solid var(--azul);outline-offset:1px;border-color:var(--azul)}
-.vj-btn-venc{background:var(--azul);border:none;color:#fff;font:inherit;font-weight:600;font-size:14px;padding:9px 16px;border-radius:9px;cursor:pointer;white-space:nowrap}
-.vj-btn-venc:hover:not(:disabled){background:var(--azul-esc)}
-.vj-btn-venc:disabled{opacity:.5;cursor:not-allowed}
-.vj-btn-cancelar{background:#fff;border:1px solid var(--verm);color:var(--verm);font:inherit;font-weight:600;font-size:14px;padding:9px 16px;border-radius:9px;cursor:pointer;white-space:nowrap}
-.vj-btn-cancelar:hover:not(:disabled){background:#FDECEE}
-.vj-btn-cancelar:disabled{opacity:.5;cursor:not-allowed}
-.vj-cancelhint{font-size:12px;color:var(--mut)}
-.vj-cancelmsg{margin-top:10px;background:#fff;border:1px solid #C9D8F5;border-radius:9px;padding:9px 12px;font-size:13px;color:var(--txt)}
-.vj-h2{font-family:Fraunces,Georgia,serif;font-size:19px;font-weight:600;margin:0 0 4px}
-.vj-note{font-size:13px;color:var(--mut);margin:0 0 16px}
-.vj-extradesc{background:#FBF3E2;border:1px solid #F0DFB8;border-radius:9px;padding:10px 12px;margin:-6px 0 14px;font-size:13px;color:#6B5410;line-height:1.5}
-.vj-extradesc b{color:#5A4300}
-.vj-extrahint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
-.vj-ajustes{margin:6px 0 16px;border-top:1px solid var(--linha);padding-top:14px}
-.vj-ajhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-.vj-ajhead>span{font-size:12px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
-.vj-addaj{background:none;border:1px solid var(--linha);color:var(--azul);font:inherit;font-weight:600;font-size:13px;padding:5px 12px;border-radius:8px;cursor:pointer}
-.vj-addaj:hover{background:#F2F7FF}
-.vj-ajnote{font-size:13px;color:var(--mut);margin:4px 0}
-.vj-ajcard{border:1px solid var(--linha);border-radius:10px;padding:12px;margin-bottom:10px;background:#FAFCFF}
-.vj-ajgrid{display:flex;gap:10px;align-items:flex-end;margin-bottom:10px}
-.vj-ajfield{display:flex;flex-direction:column;gap:5px;flex:1}
-.vj-ajfield>span{font-size:11px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
-.vj-ajfield select,.vj-ajfield input{font:inherit;padding:9px 10px;border:1px solid var(--linha);border-radius:8px;background:#fff;color:var(--txt);width:100%}
-.vj-ajfield select:focus,.vj-ajfield input:focus{outline:2px solid var(--azul);outline-offset:1px;border-color:var(--azul)}
-.vj-ajfield-val input{text-align:right;font-variant-numeric:tabular-nums}
-.vj-ajdel{background:none;border:none;color:var(--verm);font-size:22px;line-height:1;cursor:pointer;padding:0 2px 6px}
-.vj-ajdel:hover{color:#B4131F}
-.vj-tab{width:100%;border-collapse:collapse;margin-bottom:8px}
-.vj-tab td{padding:11px 0;border-bottom:1px solid var(--linha);font-size:15px}
-.vj-tab .vj-val{text-align:right;font-variant-numeric:tabular-nums}
-.vj-tab tfoot td{border:0;padding-top:14px;font-weight:700}
-.vj-total{text-align:right;font-size:22px;color:var(--azul);font-variant-numeric:tabular-nums}
-.vj-venc{margin-top:16px;max-width:160px}
-.vj-venc-row{display:flex;gap:12px;flex-wrap:wrap}
-.vj-venc-row .vj-venc{max-width:130px}
-.vj-venclbl{font-size:13px;color:var(--mut);margin:-6px 0 4px}
-.vj-ok{border-color:#B7E3CE;background:#F1FBF6}
-.vj-okmark{color:var(--ok);font-weight:700;font-size:17px;margin-bottom:14px}
-.vj-okgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:12px}
-.vj-okgrid span{display:block;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
-.vj-okgrid b{font-size:17px}
+.vj-field input{font:inherit;padding:10px 12px;border:1px solid var(--linha);border-radius:9px;background:#fff;color:var(--txt)}
+.vj-field input:focus{outline:2px solid var(--azul);outline-offset:1px;border-color:var(--azul)}
+.vj-card{background:var(--card);border:1px solid var(--linha);border-radius:14px;padding:22px;margin-bottom:20px;box-shadow:0 1px 2px rgba(16,35,59,.04)}
+.vj-avisos{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.vj-aviso{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:10px;font-size:14px;border:1px solid}
+.vj-aviso-vermelho{background:#FDECEE;border-color:#F5C2C7;color:#8B1A24}
+.vj-aviso-amarelo{background:#FFF8E6;border-color:#F5E1A8;color:#7A5B00}
+.vj-aviso-tag{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:3px 9px;border-radius:20px;white-space:nowrap}
+.vj-aviso-vermelho .vj-aviso-tag{background:#DC1C2E;color:#fff}
+.vj-aviso-amarelo .vj-aviso-tag{background:#B8860B;color:#fff}
+.vj-aviso-txt{flex:1;line-height:1.4}
+.vj-aviso-data{font-variant-numeric:tabular-nums;font-weight:600;font-size:13px;white-space:nowrap;opacity:.85}
+.vj-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:middle}
+.vj-dot-v{background:var(--verm)}
+.vj-dot-a{background:#B8860B}
+.vj-resumo{padding-bottom:18px}
+.vj-nums{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
+.vj-num{border-left:3px solid var(--linha);padding-left:12px}
+.vj-num b{display:block;font-size:26px;font-family:Fraunces,Georgia,serif;line-height:1}
+.vj-num span{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
+.vj-num-w{border-left-color:var(--wait)}.vj-num-t{border-left-color:var(--azul)}
+.vj-bar{height:8px;background:#EAF0FA;border-radius:20px;overflow:hidden}
+.vj-fill{height:100%;background:var(--azul);border-radius:20px;transition:width .4s}
+.vj-barlbl{font-size:13px;color:var(--mut);margin-top:8px}
+.vj-h2{font-family:Fraunces,Georgia,serif;font-size:19px;font-weight:600;margin:0 0 14px;display:flex;align-items:center;gap:10px}
+.vj-count{background:#EAF0FA;color:var(--azul);font-family:Archivo,sans-serif;font-size:13px;font-weight:700;padding:2px 10px;border-radius:20px}
+.vj-tab{width:100%;border-collapse:collapse}
+.vj-tab th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--mut);padding:0 10px 10px;border-bottom:1px solid var(--linha)}
+.vj-tab td{padding:12px 10px;border-bottom:1px solid var(--linha);font-size:14px;vertical-align:middle}
+.vj-r{text-align:right}
+.vj-click{cursor:pointer;transition:background .12s}
+.vj-click:hover{background:#F5F9FF}
+.vj-rowlink{display:block;color:inherit;text-decoration:none}
+.vj-id{font-weight:700;color:var(--azul);font-variant-numeric:tabular-nums}
+.vj-nome{font-weight:600}
+.vj-end{font-size:12px;color:var(--mut);margin-top:2px}
+.vj-money{font-variant-numeric:tabular-nums;font-weight:600}
+.vj-compval{font-variant-numeric:tabular-nums;color:var(--mut);font-size:13px;white-space:nowrap}
+.vj-neg{color:var(--verm)}
+@media (max-width:900px){.vj-comp{display:none}}
+.vj-tag{display:inline-block;font-size:12px;font-weight:600;padding:4px 10px;border-radius:20px}
+.vj-tag-ok{background:#EAF7F0;color:var(--ok)}
+.vj-tag-wait{background:#FBF3E2;color:var(--wait)}
+.vj-go{text-align:right;color:var(--azul);font-weight:600;font-size:13px;white-space:nowrap}
+.vj-boleto{display:inline-block;margin-right:12px;color:var(--azul);text-decoration:none;font-weight:600;font-size:13px;padding:4px 10px;border:1px solid var(--linha);border-radius:8px;background:#fff}
+.vj-boleto:hover{background:#F2F7FF;border-color:var(--azul)}
+.vj-revisar{display:inline-block}
+.vj-empty{color:var(--mut);margin:6px 0}
+.vj-ajhead{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.vj-acoes-cab{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.vj-btn-status{background:#fff;border:1px solid var(--azul);color:var(--azul);font:inherit;font-weight:600;font-size:14px;padding:9px 16px;border-radius:9px;cursor:pointer}
+.vj-btn-status:hover:not(:disabled){background:#F2F7FF}
+.vj-btn-status:disabled{opacity:.5;cursor:not-allowed}
+.vj-tag-pago{background:#EAF7F0;color:var(--ok)}
+.vj-tag-aberto{background:#EAF0FA;color:var(--azul)}
+.vj-tag-atras{background:#FBF3E2;color:var(--wait)}
+.vj-tag-exp{background:#FDECEE;color:var(--verm)}
+.vj-tag-canc{background:#EEE;color:#777}
+.vj-filtros{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin:4px 0 16px;padding-bottom:14px;border-bottom:1px solid var(--linha)}
+.vj-filtro{display:flex;flex-direction:column;gap:5px}
+.vj-filtro>span{font-size:11px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
+.vj-filtro select,.vj-filtro input{font:inherit;padding:9px 11px;border:1px solid var(--linha);border-radius:8px;background:#fff;color:var(--txt)}
+.vj-filtro select:focus,.vj-filtro input:focus{outline:2px solid var(--azul);outline-offset:1px;border-color:var(--azul)}
+.vj-filtro-busca{flex:1;min-width:180px}
+.vj-filtro-busca input{width:100%}
+.vj-filtro-contagem{font-size:13px;color:var(--mut);padding-bottom:9px;margin-left:auto}
+.vj-btn-emitir{background:var(--verm);color:#fff;border:none;font:inherit;font-weight:600;font-size:14px;padding:9px 16px;border-radius:9px;cursor:pointer}
+.vj-btn-emitir:hover:not(:disabled){background:#B4131F}
+.vj-btn-emitir:disabled{opacity:.5;cursor:not-allowed}
+.vj-btn-emitir-sm{padding:6px 12px;font-size:13px}
+.vj-emitido{color:var(--ok);font-weight:600;font-size:13px;white-space:nowrap}
+.vj-emitindo{color:var(--wait);font-weight:600;font-size:13px;white-space:nowrap}
+.vj-msgemissao{background:#EAF0FA;border:1px solid #C9D8F5;color:var(--azul);padding:10px 14px;border-radius:9px;font-size:14px;margin:10px 0}
+.vj-erro{background:#FDECEE;border:1px solid #F6C6CC;color:#9B1420;padding:11px 14px;border-radius:9px;font-size:14px;margin-bottom:16px}
 .vj-load{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--azul);color:#fff;padding:10px 20px;border-radius:24px;font-size:14px;box-shadow:0 6px 20px rgba(0,61,165,.3)}
-@media (max-width:720px){.vj-grid{grid-template-columns:1fr}.vj-okgrid{grid-template-columns:1fr 1fr}}
+@media (max-width:720px){.vj-nums{grid-template-columns:1fr 1fr}.vj-end{display:none}}
+
+/* ---- mobile: tabelas viram cartões empilhados (sem scroll lateral) ---- */
+@media (max-width:640px){
+  .vj-tab, .vj-tab tbody, .vj-tab tr, .vj-tab td { display:block; width:100% }
+  .vj-tab thead { display:none }
+  .vj-tab tr {
+    border:1px solid var(--linha); border-radius:12px;
+    padding:12px 14px; margin-bottom:12px; background:#fff;
+  }
+  .vj-tab td {
+    border:0; padding:5px 0; text-align:left !important;
+    display:flex; justify-content:space-between; align-items:center; gap:12px;
+  }
+  /* rótulo à esquerda para as células marcadas */
+  .vj-tab td[data-label]::before {
+    content: attr(data-label);
+    font-size:11px; font-weight:600; color:var(--mut);
+    text-transform:uppercase; letter-spacing:.4px;
+  }
+  /* contrato + nome em destaque no topo do cartão */
+  .vj-tab td.vj-id { font-size:16px; padding-bottom:8px }
+  .vj-tab td.vj-id::after { content:none }
+  .vj-nome { font-size:16px; font-weight:700 }
+  .vj-money { font-size:17px }
+  /* ações ocupam a largura, botões maiores para toque */
+  .vj-go { padding-top:10px !important; border-top:1px solid var(--linha) !important; margin-top:4px;
+           display:flex; gap:10px; justify-content:flex-start }
+  .vj-boleto, .vj-revisar { padding:9px 14px; font-size:14px }
+  .vj-btn-emitir-sm { padding:9px 16px; font-size:14px }
+  /* filtros empilham */
+  .vj-filtros { flex-direction:column; align-items:stretch; gap:10px }
+  .vj-filtro-contagem { margin-left:0; padding-bottom:0 }
+  .vj-acoes-cab { width:100%; }
+  .vj-btn-status, .vj-btn-emitir { width:100% }
+}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 `;
