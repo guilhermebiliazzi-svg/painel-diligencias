@@ -78,6 +78,9 @@ export default function ConferenciaCobranca() {
   const [diaVencGravado, setDiaVencGravado] = useState<number | null>(null);
   const [cancelando, setCancelando] = useState(false);
   const [msgCancel, setMsgCancel] = useState<string | null>(null);
+  const [novoVenc, setNovoVenc] = useState<string>("");
+  const [alterandoVenc, setAlterandoVenc] = useState(false);
+  const [msgVenc, setMsgVenc] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -196,12 +199,56 @@ export default function ConferenciaCobranca() {
     }
   }
 
+  // Altera o vencimento do boleto emitido no Inter (mesmo boleto, só a data).
+  // Se o Inter aceitar, a nova data é gravada e a tela recarrega.
+  async function alterarVencimento() {
+    const cid = previa?.cobranca_id;
+    if (!cid || alterandoVenc) return;
+    if (!novoVenc || !/^\d{4}-\d{2}-\d{2}$/.test(novoVenc)) {
+      setMsgVenc("Escolha a nova data de vencimento.");
+      return;
+    }
+    if (
+      !confirm(
+        `Alterar o vencimento para ${novoVenc.split("-").reverse().join("/")}?\n\n` +
+          "O boleto continua o mesmo (mesma linha digitável), só a data muda. " +
+          "A alteração é enviada ao Inter e aplica em alguns segundos."
+      )
+    )
+      return;
+    setAlterandoVenc(true);
+    setMsgVenc("Enviando a alteração ao Inter…");
+    try {
+      const res = await fetch("/api/adm/alterar-vencimento", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cobranca_id: cid, nova_data: novoVenc }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setMsgVenc(`Erro: ${d?.error || "falha"}.`);
+      } else if (d?.ok) {
+        setMsgVenc(d?.mensagem || "Vencimento alterado.");
+        setNovoVenc("");
+        if (contratoId) await carregarGravada(contratoId, competencia);
+      } else {
+        setMsgVenc(d?.mensagem || "Não foi possível alterar o vencimento.");
+      }
+    } catch {
+      setMsgVenc("Erro de rede ao alterar o vencimento. Confira no painel antes de tentar de novo.");
+    } finally {
+      setAlterandoVenc(false);
+    }
+  }
+
   function reset() {
     setPrevia(null);
     setGravado(null);
     setErro(null);
     setRevisandoGravada(false);
     setDiaVencGravado(null);
+    setNovoVenc("");
+    setMsgVenc(null);
   }
 
   async function chamar(payload: any): Promise<Previa | null> {
@@ -434,6 +481,29 @@ export default function ConferenciaCobranca() {
                 {previa.status ? <> · situação <b>{previa.status}</b></> : null}. Os valores abaixo
                 são os que estão gravados. Recalcular e confirmar de novo <b>substitui</b> esta cobrança.
                 {["emitido", "atrasado", "expirado"].includes(String(previa.status)) && (
+                  <div className="vj-vencrow">
+                    <label className="vj-venclbl2">Novo vencimento</label>
+                    <input
+                      type="date"
+                      className="vj-vencinput"
+                      value={novoVenc}
+                      onChange={(e) => setNovoVenc(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="vj-btn-venc"
+                      disabled={alterandoVenc || !novoVenc}
+                      onClick={alterarVencimento}
+                    >
+                      {alterandoVenc ? "Alterando…" : "Alterar vencimento"}
+                    </button>
+                    <span className="vj-cancelhint">
+                      Muda só a data — o boleto continua o mesmo (mesma linha digitável).
+                    </span>
+                  </div>
+                )}
+                {msgVenc && <div className="vj-cancelmsg">{msgVenc}</div>}
+                {["emitido", "atrasado", "expirado"].includes(String(previa.status)) && (
                   <div className="vj-cancelrow">
                     <button
                       type="button"
@@ -662,6 +732,13 @@ const CSS = `
 .vj-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
 .vj-revaviso{grid-column:1 / -1;background:#EAF0FA;border:1px solid #C9D8F5;color:var(--azul);padding:12px 16px;border-radius:11px;font-size:14px;line-height:1.5}
 .vj-cancelrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid #C9D8F5}
+.vj-vencrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid #C9D8F5}
+.vj-venclbl2{font-size:12px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
+.vj-vencinput{font:inherit;padding:8px 10px;border:1px solid var(--linha);border-radius:8px;background:#fff;color:var(--txt)}
+.vj-vencinput:focus{outline:2px solid var(--azul);outline-offset:1px;border-color:var(--azul)}
+.vj-btn-venc{background:var(--azul);border:none;color:#fff;font:inherit;font-weight:600;font-size:14px;padding:9px 16px;border-radius:9px;cursor:pointer;white-space:nowrap}
+.vj-btn-venc:hover:not(:disabled){background:var(--azul-esc)}
+.vj-btn-venc:disabled{opacity:.5;cursor:not-allowed}
 .vj-btn-cancelar{background:#fff;border:1px solid var(--verm);color:var(--verm);font:inherit;font-weight:600;font-size:14px;padding:9px 16px;border-radius:9px;cursor:pointer;white-space:nowrap}
 .vj-btn-cancelar:hover:not(:disabled){background:#FDECEE}
 .vj-btn-cancelar:disabled{opacity:.5;cursor:not-allowed}
