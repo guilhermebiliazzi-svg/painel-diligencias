@@ -31,6 +31,9 @@ type Previa = {
   modo?: string;
   multa_percentual?: number;
   mora_percentual?: number;
+  bloqueado?: boolean;
+  erros?: string[];
+  complemento_desc?: string | null;
 };
 
 /* ---------- helpers ---------- */
@@ -328,6 +331,7 @@ export default function ConferenciaCobranca() {
   // 3) Confirmar e gravar
   async function confirmar() {
     if (!contratoId) return;
+    if (previa?.bloqueado) return; // não grava se os boletos não conferem
     const p = await chamar({
       modo: "confirmar",
       contrato_id: contratoId,
@@ -480,6 +484,17 @@ export default function ConferenciaCobranca() {
         {/* prévia */}
         {previa && !gravado && (
           <section className="vj-grid">
+            {previa.bloqueado && (previa.erros?.length ?? 0) > 0 && (
+              <div className="vj-bloqueio">
+                <b>⛔ Boletos não conferem com o cadastro do imóvel.</b> Corrija antes de gravar
+                — a gravação está bloqueada.
+                <ul className="vj-bloqlista">
+                  {previa.erros!.map((e, i) => (
+                    <li key={i}>{e}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {revisandoGravada && (
               <div className="vj-revaviso">
                 Revisando a cobrança <b>#{previa.cobranca_id}</b> já gravada
@@ -615,12 +630,23 @@ export default function ConferenciaCobranca() {
               <h2 className="vj-h2">Composição do boleto</h2>
               <table className="vj-tab">
                 <tbody>
-                  {previa.itens.map((it, i) => (
-                    <tr key={i}>
-                      <td>{it.descricao}</td>
-                      <td className="vj-val">{brl(it.valor)}</td>
-                    </tr>
-                  ))}
+                  {previa.itens.map((it, i) => {
+                    const cat = String(it.categoria || "").toLowerCase();
+                    const nomeL = it.descricao.toLowerCase();
+                    const ehCondIptu =
+                      cat === "condominio" || cat === "iptu" ||
+                      nomeL.startsWith("condom") || nomeL.startsWith("iptu");
+                    const desc =
+                      previa.complemento_desc && ehCondIptu
+                        ? `${it.descricao} (${previa.complemento_desc})`
+                        : it.descricao;
+                    return (
+                      <tr key={i}>
+                        <td>{desc}</td>
+                        <td className="vj-val">{brl(it.valor)}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
                 <tfoot>
                   <tr>
@@ -662,7 +688,7 @@ export default function ConferenciaCobranca() {
                 </div>
               )}
 
-              <button className="vj-btn vj-confirm" disabled={carregando} onClick={confirmar}>
+              <button className="vj-btn vj-confirm" disabled={carregando || !!previa.bloqueado} onClick={confirmar}>
                 Confirmar e gravar
               </button>
             </div>
@@ -715,6 +741,9 @@ const CSS = `
 .vj-field.vj-grow{flex:1;min-width:260px}
 .vj-editlink{align-self:flex-start;margin-top:6px;font-size:13px;font-weight:600;color:var(--azul);text-decoration:none}
 .vj-editlink:hover{text-decoration:underline}
+.vj-bloqueio{grid-column:1 / -1;background:#FDECEE;border:1px solid #F5C2C7;color:#8B1A24;padding:13px 16px;border-radius:11px;font-size:14px;line-height:1.5}
+.vj-bloqlista{margin:8px 0 0;padding-left:20px}
+.vj-bloqlista li{margin:2px 0}
 .vj-field>span{font-size:12px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
 .vj-field input,.vj-field select{font:inherit;padding:11px 12px;border:1px solid var(--linha);border-radius:9px;background:#fff;color:var(--txt)}
 .vj-field input:focus,.vj-field select:focus{outline:2px solid var(--azul);outline-offset:1px;border-color:var(--azul)}
