@@ -15,6 +15,20 @@ type Linha = {
   comp?: { aluguel: number; condominio: number; iptu: number; outros: number } | null;
 };
 type Resumo = { total: number; gravadas: number; prontas: number; aguardando: number };
+type Aviso = {
+  contrato_id: number;
+  locatario: string;
+  endereco: string;
+  tipo: "reajuste" | "renovacao";
+  cor: "amarelo" | "vermelho";
+  data_evento: string;
+  indice: string | null;
+  detalhe: string;
+};
+type AvisosResp = {
+  resumo: { total: number; vermelhos: number; amarelos: number; reajustes: number; renovacoes: number };
+  avisos: Aviso[];
+};
 
 const brl = (n: number | null) =>
   n == null ? "—" : Number(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -29,6 +43,7 @@ export default function FechamentoMes() {
   });
   const [resumo, setResumo] = useState<Resumo | null>(null);
   const [linhas, setLinhas] = useState<Linha[]>([]);
+  const [avisos, setAvisos] = useState<Aviso[]>([]);
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -46,6 +61,18 @@ export default function FechamentoMes() {
         setResumo(d.resumo);
         setLinhas(d.linhas || []);
       }
+      // avisos (reajuste/renovação) — não bloqueia a tela se falhar
+      try {
+        const av = await fetch(`/api/adm/avisos?competencia=${comp}`);
+        if (av.ok) {
+          const aj = (await av.json()) as AvisosResp;
+          setAvisos(aj.avisos || []);
+        } else {
+          setAvisos([]);
+        }
+      } catch {
+        setAvisos([]);
+      }
     } catch {
       setErro("Erro de rede.");
     } finally {
@@ -59,6 +86,21 @@ export default function FechamentoMes() {
   }, [competencia]);
 
   const aGravar = useMemo(() => linhas.filter((l) => l.estado !== "gravada"), [linhas]);
+
+  // mapa de avisos por contrato: prioriza vermelho sobre amarelo
+  const avisosPorContrato = useMemo(() => {
+    const m = new Map<number, Aviso[]>();
+    for (const a of avisos) {
+      const arr = m.get(a.contrato_id) || [];
+      arr.push(a);
+      m.set(a.contrato_id, arr);
+    }
+    return m;
+  }, [avisos]);
+  const temVermelho = (cid: number) =>
+    (avisosPorContrato.get(cid) || []).some((a) => a.cor === "vermelho");
+  const temAmarelo = (cid: number) =>
+    (avisosPorContrato.get(cid) || []).some((a) => a.cor === "amarelo");
   const gravadas = useMemo(() => linhas.filter((l) => l.estado === "gravada"), [linhas]);
   const pendentesEmissao = useMemo(
     () => gravadas.filter((l) => l.status_cobranca === "a_emitir" && l.cobranca_id),
@@ -204,6 +246,25 @@ export default function FechamentoMes() {
           </label>
         </div>
 
+        {/* avisos da competência (reajuste / renovação) */}
+        {avisos.length > 0 && (
+          <section className="vj-avisos">
+            {avisos.map((a, i) => (
+              <div key={i} className={`vj-aviso vj-aviso-${a.cor}`}>
+                <span className="vj-aviso-tag">
+                  {a.tipo === "reajuste" ? "Reajuste" : "Renovação"}
+                </span>
+                <span className="vj-aviso-txt">
+                  <b>{a.locatario}</b> (contrato #{a.contrato_id}) — {a.detalhe}
+                </span>
+                <span className="vj-aviso-data">
+                  {a.data_evento.split("-").reverse().slice(0, 2).join("/")}
+                </span>
+              </div>
+            ))}
+          </section>
+        )}
+
         {/* progresso */}
         {resumo && (
           <section className="vj-card vj-resumo">
@@ -236,7 +297,11 @@ export default function FechamentoMes() {
                     </td>
                     <td>
                       <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>
-                        <div className="vj-nome">{l.locatario}</div>
+                        <div className="vj-nome">
+                          {temVermelho(l.contrato_id) && <span className="vj-dot vj-dot-v" title="Reajuste/renovação nesta competência" />}
+                          {!temVermelho(l.contrato_id) && temAmarelo(l.contrato_id) && <span className="vj-dot vj-dot-a" title="Reajuste/renovação no mês seguinte" />}
+                          {l.locatario}
+                        </div>
                         <div className="vj-end">{l.endereco}</div>
                       </a>
                     </td>
@@ -331,7 +396,11 @@ export default function FechamentoMes() {
                     </td>
                     <td>
                       <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>
-                        <div className="vj-nome">{l.locatario}</div>
+                        <div className="vj-nome">
+                          {temVermelho(l.contrato_id) && <span className="vj-dot vj-dot-v" title="Reajuste/renovação nesta competência" />}
+                          {!temVermelho(l.contrato_id) && temAmarelo(l.contrato_id) && <span className="vj-dot vj-dot-a" title="Reajuste/renovação no mês seguinte" />}
+                          {l.locatario}
+                        </div>
                       </a>
                     </td>
                     <td data-label="Vencimento">{l.vencimento}</td>
@@ -412,6 +481,18 @@ const CSS = `
 .vj-field input{font:inherit;padding:10px 12px;border:1px solid var(--linha);border-radius:9px;background:#fff;color:var(--txt)}
 .vj-field input:focus{outline:2px solid var(--azul);outline-offset:1px;border-color:var(--azul)}
 .vj-card{background:var(--card);border:1px solid var(--linha);border-radius:14px;padding:22px;margin-bottom:20px;box-shadow:0 1px 2px rgba(16,35,59,.04)}
+.vj-avisos{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.vj-aviso{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:10px;font-size:14px;border:1px solid}
+.vj-aviso-vermelho{background:#FDECEE;border-color:#F5C2C7;color:#8B1A24}
+.vj-aviso-amarelo{background:#FFF8E6;border-color:#F5E1A8;color:#7A5B00}
+.vj-aviso-tag{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:3px 9px;border-radius:20px;white-space:nowrap}
+.vj-aviso-vermelho .vj-aviso-tag{background:#DC1C2E;color:#fff}
+.vj-aviso-amarelo .vj-aviso-tag{background:#B8860B;color:#fff}
+.vj-aviso-txt{flex:1;line-height:1.4}
+.vj-aviso-data{font-variant-numeric:tabular-nums;font-weight:600;font-size:13px;white-space:nowrap;opacity:.85}
+.vj-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:middle}
+.vj-dot-v{background:var(--verm)}
+.vj-dot-a{background:#B8860B}
 .vj-resumo{padding-bottom:18px}
 .vj-nums{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
 .vj-num{border-left:3px solid var(--linha);padding-left:12px}
