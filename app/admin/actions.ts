@@ -579,3 +579,84 @@ export async function gerarCCV(diligencia_id: string) {
 
   revalidatePath(`/admin/d/${diligencia_id}`);
 }
+// ====== Dados do negócio (fonte dos FATOS do CCV) ======
+// Lê/grava diligencias.dados_completos.negocio via read-modify-write em JS
+// (robusto a coluna text ou jsonb; preserva as demais chaves do JSON).
+
+type NegocioPayload = Record<string, unknown>;
+
+function parseObj(v: unknown): Record<string, unknown> {
+  if (!v) return {};
+  if (typeof v === 'string') {
+    try { return JSON.parse(v) as Record<string, unknown>; } catch { return {}; }
+  }
+  if (typeof v === 'object') return v as Record<string, unknown>;
+  return {};
+}
+
+export async function carregarNegocio(diligencia_id: string): Promise<{
+  ok: boolean;
+  negocio: NegocioPayload;
+  preco: number | null;
+  vendedores: { nome: string; cpf: string }[];
+  error?: string;
+}> {
+  if (!diligencia_id) {
+    return { ok: false, negocio: {}, preco: null, vendedores: [], error: 'diligencia_id ausente' };
+  }
+  const r = await pool.query(
+    `SELECT dados_completos, preco FROM diligencias WHERE id = $1`,
+    [diligencia_id]
+  );
+  if (r.rows.length === 0) {
+    return { ok: false, negocio: {}, preco: null, vendedores: [], error: 'diligência não encontrada' };
+  }
+  const dc = parseObj(r.rows[0].dados_completos);
+  const negocio = parseObj(dc.negocio);
+  const vpf = Array.isArray(dc.vendedoresPF) ? (dc.vendedoresPF as Record<string, unknown>[]) : [];
+  const vendedores = vpf
+    .map((p) => ({ nome: String(p?.pf_nome ?? ''), cpf: String(p?.pf_cpf ?? '') }))
+    .filter((v) => v.nome);
+  const precoRaw = r.rows[0].preco;
+  const precoNum = precoRaw === null || precoRaw === undefined ? NaN : Number(precoRaw);
+  return { ok: true, negocio, preco: isFinite(precoNum) ? precoNum : null, vendedores };
+}
+
+export async function salvarNegocio(
+  diligencia_id: string,
+  novo: NegocioPayload
+): Promise<{ ok: boolean; error?: string }> {
+  if (!diligencia_id) return { ok: false, error: 'diligencia_id ausente' };
+  try {
+    const r = await pool.query(
+      `SELECT dados_completos FROM diligencias WHERE id = $1`,
+      [diligencia_id]
+    );
+    if (r.rows.length === 0) return { ok: false, error: 'diligência não encontrada' };
+
+    const dc = parseObj(r.rows[0].dados_completos);
+    const atual = parseObj(dc.negocio);
+    const merged: NegocioPayload = { ...atual, ...novo };
+    // merge raso das sub-árvores para preservar chaves antigas (ex.: conta_vendedora)
+    merged.pagamento = { ...parseObj(atual.pagamento), ...parseObj(novo.pagamento) };
+    merged.comissao = { ...parseObj(atual.comissao), ...parseObj(novo.comissao) };
+    dc.negocio = merged;
+
+    await pool.query(
+      `UPDATE diligencias SET dados_completos = $2 WHERE id = $1`,
+      [diligencia_id, JSON.stringify(dc)]
+    );
+    if (novo.preco !== undefined && novo.preco !== null) {
+      await pool.query(`UPDATE diligencias SET preco = $2 WHERE id = $1`, [
+        diligencia_id,
+        novo.preco,
+      ]);
+    }
+
+    await logAcao({ acao: 'salvar_negocio', detalhe: { diligencia_id } });
+    revalidatePath(`/admin/d/${diligencia_id}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
