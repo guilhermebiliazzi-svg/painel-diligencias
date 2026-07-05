@@ -20,6 +20,7 @@ import { CopiarLinkCliente } from '../../CopiarLinkCliente';
 import { CardExtraNovo, ExcluirCardExtra } from '../../CardExtra';
 import { GerarParecer } from '../../GerarParecer';
 import { GerarCCV } from '../../GerarCCV';
+import { FichaNegocio } from '../../FichaNegocio';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -897,6 +898,7 @@ export default async function AdminDiligenciaPage({
                 ↻ Auditar diligência
               </SubmitButtonAsync>
             </form>
+            <FichaNegocio diligenciaId={id} />
             <GerarParecer diligenciaId={id} />
             <GerarCCV diligenciaId={id} />
             <form action={logoutAction}>
