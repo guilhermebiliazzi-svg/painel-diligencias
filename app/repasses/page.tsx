@@ -36,6 +36,7 @@ export default function Repasse() {
   const [erro, setErro] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [reciboUrl, setReciboUrl] = useState<string | null>(null);
 
   // valores editáveis (cópia local da prévia)
   const [recebimentos, setRecebimentos] = useState<Linha[]>([]);
@@ -89,6 +90,7 @@ export default function Repasse() {
     setSalvando(true);
     setMsg(null);
     setErro(null);
+    setReciboUrl(null);
     // monta o snapshot conferido a partir do que está na tela
     const dados = {
       cabecalho: previa.cabecalho,
@@ -102,16 +104,19 @@ export default function Repasse() {
       total_liquido: totais.liquido,
     };
     try {
-      const res = await fetch("/api/adm/repasse-gravar", {
+      const res = await fetch("/api/adm/repasse-recibo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contrato_id: contratoId, competencia, dados }),
       });
       const d = await res.json();
-      if (!res.ok) setErro(d?.error || "Falha ao gravar.");
-      else setMsg(`Repasse gravado. Líquido: ${brl(totais.liquido)}`);
+      if (!res.ok) setErro(d?.error || "Falha ao gerar recibo.");
+      else {
+        setMsg(`Recibo gerado. Líquido: ${brl(totais.liquido)}`);
+        setReciboUrl(d?.download_url || d?.pdf_url || null);
+      }
     } catch {
-      setErro("Erro de rede ao gravar.");
+      setErro("Erro de rede.");
     } finally {
       setSalvando(false);
     }
@@ -214,11 +219,18 @@ export default function Repasse() {
               <b>{brl(totais.liquido)}</b>
             </section>
 
-            {msg && <div className="vj-card vj-ok">{msg}</div>}
+            {msg && (
+              <div className="vj-card vj-ok">
+                {msg}
+                {reciboUrl && (
+                  <> — <a className="vj-link-recibo" href={reciboUrl} target="_blank" rel="noopener noreferrer">Abrir recibo (PDF)</a></>
+                )}
+              </div>
+            )}
 
             <div className="vj-acoes">
               <button className="vj-btn vj-gerar" onClick={salvar} disabled={salvando}>
-                {salvando ? "Gravando…" : "Salvar repasse"}
+                {salvando ? "Gerando…" : "Salvar e gerar recibo"}
               </button>
             </div>
           </>
@@ -265,5 +277,6 @@ const CSS = `
 .vj-acoes{margin-top:4px}
 .vj-erro{border-color:#F5C2C7;background:#FDECEE;color:#8B1A24}
 .vj-ok{border-color:#BCE3D0;background:#EAF7F0;color:#0F7B4F}
+.vj-link-recibo{color:#003DA5;font-weight:700;text-decoration:underline}
 @media (max-width:640px){.vj-sel{flex-direction:column;align-items:stretch}.vj-vlr{width:110px}}
 `;
