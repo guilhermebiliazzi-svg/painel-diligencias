@@ -34,6 +34,8 @@ export default function Repasse() {
   const [previa, setPrevia] = useState<Previa | null>(null);
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const [salvando, setSalvando] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
 
   // valores editáveis (cópia local da prévia)
   const [recebimentos, setRecebimentos] = useState<Linha[]>([]);
@@ -81,6 +83,39 @@ export default function Repasse() {
     const liquido = creditoDono - (Number(taxaAdm) || 0) - somaDed - somaAvulsas;
     return { somaReceb, somaDed, somaAvulsas, liquido };
   }, [recebimentos, deducoes, avulsas, taxaAdm]);
+
+  async function salvar() {
+    if (!previa || !contratoId || salvando) return;
+    setSalvando(true);
+    setMsg(null);
+    setErro(null);
+    // monta o snapshot conferido a partir do que está na tela
+    const dados = {
+      cabecalho: previa.cabecalho,
+      recebimentos: recebimentos.map((l) => ({ descricao: l.descricao, categoria: l.categoria, valor: Number(l.valor) || 0 })),
+      taxa_adm: { descricao: `Taxa de administração (${previa.taxa_adm.percentual}%)`, valor: Number(taxaAdm) || 0 },
+      deducoes: deducoes.map((l) => ({ descricao: l.descricao, categoria: l.categoria, valor: Number(l.valor) || 0 })),
+      avulsas: avulsas
+        .filter((l) => l.descricao || Number(l.valor))
+        .map((l) => ({ descricao: l.descricao, categoria: "avulso", valor: Number(l.valor) || 0 })),
+      total_recebido: totais.somaReceb,
+      total_liquido: totais.liquido,
+    };
+    try {
+      const res = await fetch("/api/adm/repasse-gravar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contrato_id: contratoId, competencia, dados }),
+      });
+      const d = await res.json();
+      if (!res.ok) setErro(d?.error || "Falha ao gravar.");
+      else setMsg(`Repasse gravado. Líquido: ${brl(totais.liquido)}`);
+    } catch {
+      setErro("Erro de rede ao gravar.");
+    } finally {
+      setSalvando(false);
+    }
+  }
 
   function editarLinha(
     lista: Linha[],
@@ -179,9 +214,11 @@ export default function Repasse() {
               <b>{brl(totais.liquido)}</b>
             </section>
 
+            {msg && <div className="vj-card vj-ok">{msg}</div>}
+
             <div className="vj-acoes">
-              <button className="vj-btn vj-gerar" disabled>
-                Gerar recibo (em breve)
+              <button className="vj-btn vj-gerar" onClick={salvar} disabled={salvando}>
+                {salvando ? "Gravando…" : "Salvar repasse"}
               </button>
             </div>
           </>
@@ -227,5 +264,6 @@ const CSS = `
 .vj-gerar:disabled{opacity:.5;cursor:not-allowed}
 .vj-acoes{margin-top:4px}
 .vj-erro{border-color:#F5C2C7;background:#FDECEE;color:#8B1A24}
+.vj-ok{border-color:#BCE3D0;background:#EAF7F0;color:#0F7B4F}
 @media (max-width:640px){.vj-sel{flex-direction:column;align-items:stretch}.vj-vlr{width:110px}}
 `;
