@@ -42,7 +42,7 @@ export default function Repasse() {
   const [avulsas, setAvulsas] = useState<Linha[]>([]);
 
   useEffect(() => {
-    fetch("/api/adm/repasse-previa", { method: "POST" })
+    fetch("/api/adm/contratos")
       .then((r) => r.json())
       .then((d) => setContratos(d.contratos || []))
       .catch(() => {});
