@@ -74,9 +74,9 @@ export default function Repasse() {
 
   // total líquido recalculado ao vivo
   const totais = useMemo(() => {
-    const somaReceb = recebimentos.reduce((s, l) => s + (Number(l.valor) || 0), 0);
-    const somaDed = deducoes.reduce((s, l) => s + (Number(l.valor) || 0), 0);
-    const somaAvulsas = avulsas.reduce((s, l) => s + (Number(l.valor) || 0), 0);
+    const somaReceb = recebimentos.reduce((s: number, l: Linha) => s + (Number(l.valor) || 0), 0);
+    const somaDed = deducoes.reduce((s: number, l: Linha) => s + (Number(l.valor) || 0), 0);
+    const somaAvulsas = avulsas.reduce((s: number, l: Linha) => s + (Number(l.valor) || 0), 0);
     const creditoDono = somaReceb; // o que o dono recebe (itens que foram ao boleto)
     const liquido = creditoDono - (Number(taxaAdm) || 0) - somaDed - somaAvulsas;
     return { somaReceb, somaDed, somaAvulsas, liquido };
@@ -89,7 +89,7 @@ export default function Repasse() {
     campo: keyof Linha,
     valor: any
   ) {
-    setLista(lista.map((l, idx) => (idx === i ? { ...l, [campo]: valor } : l)));
+    setLista(lista.map((l: Linha, idx: number) => (idx === i ? { ...l, [campo]: valor } : l)));
   }
 
   return (
@@ -110,7 +110,7 @@ export default function Repasse() {
             <span>Contrato</span>
             <select value={contratoId ?? ""} onChange={(e) => { setContratoId(e.target.value ? Number(e.target.value) : null); setPrevia(null); }}>
               <option value="">Selecione…</option>
-              {contratos.map((c) => (
+              {contratos.map((c: Contrato) => (
                 <option key={c.id} value={c.id}>#{c.id} · {c.locatario} — {c.endereco}</option>
               ))}
             </select>
@@ -136,7 +136,7 @@ export default function Repasse() {
             {/* Recebimentos */}
             <section className="vj-card">
               <h2 className="vj-h2">Recebimentos</h2>
-              {recebimentos.map((l, i) => (
+              {recebimentos.map((l: Linha, i: number) => (
                 <div key={i} className="vj-lin">
                   <input className="vj-desc" value={l.descricao} onChange={(e) => editarLinha(recebimentos, setRecebimentos, i, "descricao", e.target.value)} />
                   <input className="vj-vlr" type="number" step="0.01" value={l.valor} onChange={(e) => editarLinha(recebimentos, setRecebimentos, i, "valor", e.target.value)} />
@@ -152,20 +152,20 @@ export default function Repasse() {
                 <span className="vj-desc vj-fixa">Taxa de administração ({previa.taxa_adm.percentual}%)</span>
                 <input className="vj-vlr" type="number" step="0.01" value={taxaAdm} onChange={(e) => setTaxaAdm(Number(e.target.value))} />
               </div>
-              {deducoes.map((l, i) => (
+              {deducoes.map((l: Linha, i: number) => (
                 <div key={i} className="vj-lin">
                   <input className="vj-desc" value={l.descricao} onChange={(e) => editarLinha(deducoes, setDeducoes, i, "descricao", e.target.value)} />
                   <input className="vj-vlr" type="number" step="0.01" value={l.valor} onChange={(e) => editarLinha(deducoes, setDeducoes, i, "valor", e.target.value)} />
-                  <button className="vj-x" onClick={() => setDeducoes(deducoes.filter((_, idx) => idx !== i))} title="Remover">×</button>
+                  <button className="vj-x" onClick={() => setDeducoes(deducoes.filter((_: Linha, idx: number) => idx !== i))} title="Remover">×</button>
                 </div>
               ))}
 
               {/* Deduções avulsas (manutenção, comissão, etc.) */}
-              {avulsas.map((l, i) => (
+              {avulsas.map((l: Linha, i: number) => (
                 <div key={`av${i}`} className="vj-lin vj-lin-avulsa">
                   <input className="vj-desc" placeholder="Descrição (ex.: Manutenção hidráulica)" value={l.descricao} onChange={(e) => editarLinha(avulsas, setAvulsas, i, "descricao", e.target.value)} />
                   <input className="vj-vlr" type="number" step="0.01" placeholder="0,00" value={l.valor} onChange={(e) => editarLinha(avulsas, setAvulsas, i, "valor", e.target.value)} />
-                  <button className="vj-x" onClick={() => setAvulsas(avulsas.filter((_, idx) => idx !== i))} title="Remover">×</button>
+                  <button className="vj-x" onClick={() => setAvulsas(avulsas.filter((_: Linha, idx: number) => idx !== i))} title="Remover">×</button>
                 </div>
               ))}
               <button className="vj-add" onClick={() => setAvulsas([...avulsas, { descricao: "", categoria: "avulso", valor: "" }])}>
