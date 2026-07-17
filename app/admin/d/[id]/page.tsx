@@ -13,7 +13,7 @@ import { pool } from '@/lib/db';
 import { listPdfsInFolders, type DriveFile } from '@/lib/drive';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { desvincularPDF, vincularPDF, reemitirCertidao, auditarDiligencia, logoutAction } from '../../actions';
+import { desvincularPDF, vincularPDF, reemitirCertidao, auditarDiligencia, logoutAction, validarManualmente } from '../../actions';
 import { SubmitButtonAsync } from '../../SubmitButtonAsync';
 import { ToggleCardVisivel, TogglePessoaVisivel } from '../../ToggleVisibilidade';
 import { CopiarLinkCliente } from '../../CopiarLinkCliente';
@@ -616,6 +616,60 @@ function CardAdmin({
               Desvincular PDF
             </button>
           </form>
+        )}
+        {/* Validar manualmente: so aparece quando ja tem PDF mas ninguem registrou
+            o veredito. Fecha o dado (resultado_certidao) em vez de so pintar o card. */}
+        {r.drive_file_id && !r.resultado && (
+          <details className="relative">
+            <summary className="cursor-pointer list-none rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50">
+              ✓ Validar manualmente
+            </summary>
+            <div className="absolute left-0 top-full z-20 mt-1 w-72 rounded-md border border-slate-200 bg-white p-3 shadow-lg">
+              <p className="mb-2 text-xs text-slate-600">
+                Você leu o PDF. Qual o resultado da certidão?
+              </p>
+              <form
+                action={async (formData: FormData) => {
+                  'use server';
+                  await validarManualmente({
+                    certidao_id: r.certidao_id,
+                    diligencia_id,
+                    resultado: String(formData.get('resultado')) as
+                      | 'negativa'
+                      | 'positiva'
+                      | 'com_pendencias',
+                    observacao: String(formData.get('observacao') || ''),
+                  });
+                }}
+                className="space-y-2"
+              >
+                <select
+                  name="resultado"
+                  required
+                  defaultValue="negativa"
+                  className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+                >
+                  <option value="negativa">Negativa (nada consta)</option>
+                  <option value="positiva">Positiva (consta pendência)</option>
+                  <option value="com_pendencias">Com pendências</option>
+                </select>
+                <input
+                  type="text"
+                  name="observacao"
+                  placeholder="Observação (opcional)"
+                  maxLength={400}
+                  className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+                />
+                <SubmitButtonAsync
+                  pendingLabel="Gravando..."
+                  className="w-full rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                  title="Grava o veredito e marca que a leitura foi humana"
+                >
+                  Confirmar validação
+                </SubmitButtonAsync>
+              </form>
+            </div>
+          </details>
         )}
         <details className="relative">
           <summary className="cursor-pointer list-none rounded-md border border-blue-300 bg-white px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50">
