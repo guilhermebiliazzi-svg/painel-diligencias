@@ -619,14 +619,16 @@ function CardAdmin({
         )}
         {/* Validar manualmente: so aparece quando ja tem PDF mas ninguem registrou
             o veredito. Fecha o dado (resultado_certidao) em vez de so pintar o card. */}
-        {r.drive_file_id && !r.resultado && (
+        {r.drive_file_id && (!r.resultado || r.situacao === 'Em revisao') && (
           <details className="relative">
             <summary className="cursor-pointer list-none rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50">
-              ✓ Validar manualmente
+              {r.situacao === 'Em revisao' ? '✓ Resolver revisão' : '✓ Validar manualmente'}
             </summary>
             <div className="absolute left-0 top-full z-20 mt-1 w-72 rounded-md border border-slate-200 bg-white p-3 shadow-lg">
               <p className="mb-2 text-xs text-slate-600">
-                Você leu o PDF. Qual o resultado da certidão?
+                {r.situacao === 'Em revisao'
+                  ? 'A IA apontou divergência. Se você conferiu e está tudo certo, confirme o resultado para liberar o card.'
+                  : 'Você leu o PDF. Qual o resultado da certidão?'}
               </p>
               <form
                 action={async (formData: FormData) => {
@@ -646,7 +648,7 @@ function CardAdmin({
                 <select
                   name="resultado"
                   required
-                  defaultValue="negativa"
+                  defaultValue={(r.resultado as string) || "negativa"}
                   className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
                 >
                   <option value="negativa">Negativa (nada consta)</option>
