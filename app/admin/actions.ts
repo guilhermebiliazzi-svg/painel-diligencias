@@ -123,6 +123,66 @@ export async function vincularPDF(opts: {
 }
 
 /**
+ * Validar manualmente: o admin leu o PDF e grava o veredito.
+ *
+ * Por que existe: o "Vincular PDF" resolve o CARD (fica verde) mas nao o DADO —
+ * ele deixa `resultado_certidao` vazio. Com o veredito vazio, o motor do parecer
+ * reenvia o PDF inteiro pro Claude ler de novo (caro), e o painel afirma
+ * "concluido" sem que ninguem tenha registrado o que a certidao diz.
+ *
+ * Esta action fecha o dado: grava o resultado e deixa registrado que quem leu
+ * foi um humano (e nao a IA), pra nao confundir auditoria automatica com
+ * conferencia manual.
+ */
+export async function validarManualmente(opts: {
+  certidao_id: string;
+  diligencia_id: string;
+  resultado: 'negativa' | 'positiva' | 'com_pendencias';
+  observacao?: string;
+}) {
+  const { certidao_id, diligencia_id, resultado, observacao } = opts;
+  if (!certidao_id) throw new Error('certidao_id ausente');
+  if (!['negativa', 'positiva', 'com_pendencias'].includes(resultado)) {
+    throw new Error('resultado invalido: ' + resultado);
+  }
+
+  const before = await pool.query(
+    `SELECT drive_file_id, resultado_certidao FROM certidoes_status WHERE id = $1`,
+    [certidao_id]
+  );
+  if (!before.rows[0]) throw new Error('certidao nao encontrada');
+  if (!before.rows[0].drive_file_id) {
+    throw new Error('vincule um PDF antes de validar manualmente');
+  }
+
+  const carimbo =
+    'Validado manualmente pelo admin em ' +
+    new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) +
+    (observacao && observacao.trim() ? ' — ' + observacao.trim().slice(0, 400) : '');
+
+  await pool.query(
+    `UPDATE certidoes_status
+     SET resultado_certidao = $1,
+         validacao_status   = 'validado',
+         divergencia        = false,
+         status             = 'concluido',
+         observacao_ia      = $2,
+         erro               = NULL,
+         auditado_em        = NOW()
+     WHERE id = $3`,
+    [resultado, carimbo, certidao_id]
+  );
+
+  await logAcao({
+    acao: 'validar_manual',
+    certidao_id,
+    detalhe: { resultado, observacao: observacao ?? null },
+  });
+
+  revalidatePath(`/admin/d/${diligencia_id}`);
+}
+
+/**
  * Reemitir: dispara o webhook do WF-04/WF-08/WF-03 conforme o tipo da
  * certidao. Faz a mesma coisa que o Code — Roteador do WF-09 faz, mas
  * sob demanda (sem esperar cron).
