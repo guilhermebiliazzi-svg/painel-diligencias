@@ -1,9 +1,14 @@
 'use client';
 
 // app/admin/GerarCCV.tsx
-// Botão "Gerar CCV" no cabeçalho da diligência. Só habilita depois que o parecer
-// está liberado (status 'aprovado'). Dispara o webhook gerar-ccv (fire-and-forget)
-// e acompanha o resultado pelo /api/ccv-status.
+// Botão "Gerar CCV" no cabeçalho da diligência. Dispara o webhook gerar-ccv
+// (fire-and-forget) e acompanha o resultado pelo /api/ccv-status.
+//
+// O CCV NÃO depende do parecer: a minuta tem cláusula de prazo para apresentação
+// das certidões, e listar (ou não) pendências é decisão do admin. Quando existe
+// parecer liberado, o motor usa as pendências e a situação registral dele; quando
+// não existe, gera sem essa seção. O status do parecer é apenas informado no
+// tooltip — nunca bloqueia.
 
 import { useState, useEffect, useRef, useTransition, useCallback } from 'react';
 import { gerarCCV } from './actions';
@@ -70,7 +75,6 @@ export function GerarCCV({ diligenciaId }: { diligenciaId: string }) {
   }, [gerando]);
 
   function disparar() {
-    if (!parecerAprovado) return;
     setErro(null);
     ccvIdInicial.current = ccv?.id ?? null;
     startTransition(async () => {
@@ -84,7 +88,8 @@ export function GerarCCV({ diligenciaId }: { diligenciaId: string }) {
   }
 
   const ineditavel = pending || gerando;
-  const desabilitado = ineditavel || !parecerAprovado;
+  // Sem gate de parecer: gerar CCV é prerrogativa do admin.
+  const desabilitado = ineditavel;
 
   return (
     <div className="flex items-center gap-2">
@@ -120,7 +125,7 @@ export function GerarCCV({ diligenciaId }: { diligenciaId: string }) {
         title={
           parecerAprovado
             ? 'Gera o CCV a partir do parecer liberado e dos dados do negócio'
-            : 'Libere o parecer (status aprovado) antes de gerar o CCV'
+            : 'Gera o CCV com os dados do negócio. O parecer ainda não foi liberado, então a minuta sai sem as pendências/situação registral dele.'
         }
       >
         {gerando ? 'Gerando…' : ccv ? '↻ Gerar CCV de novo' : '📄 Gerar CCV'}
