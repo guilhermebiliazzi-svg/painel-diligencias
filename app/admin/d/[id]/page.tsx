@@ -21,6 +21,7 @@ import { CardExtraNovo, ExcluirCardExtra } from '../../CardExtra';
 import { GerarParecer } from '../../GerarParecer';
 import { GerarCCV } from '../../GerarCCV';
 import { FichaNegocio } from '../../FichaNegocio';
+import { EmitirCobranca } from '../../EmitirCobranca';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -957,6 +958,7 @@ export default async function AdminDiligenciaPage({
             <FichaNegocio diligenciaId={id} />
             <GerarParecer diligenciaId={id} />
             <GerarCCV diligenciaId={id} />
+            <EmitirCobranca diligenciaId={id} />
             <form action={logoutAction}>
               <button
                 type="submit"
