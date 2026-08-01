@@ -159,6 +159,7 @@ export default function FechamentoMes() {
   }, [gravadas, filtroSit, ordenar, busca]);
 
   const [emitindo, setEmitindo] = useState(false);
+  const [progresso, setProgresso] = useState<string | null>(null);
   const [msgEmissao, setMsgEmissao] = useState<string | null>(null);
   const [conciliando, setConciliando] = useState(false);
 
@@ -188,41 +189,60 @@ export default function FechamentoMes() {
     }
   }
 
+  // Emissão EM SÉRIE, uma cobrança por requisição.
+  // Antes: todos os ids iam num POST só — a rota marcava o lote inteiro como
+  // 'emitindo', emitia a primeira e a função morria no timeout da Vercel,
+  // deixando o resto travado num estado sem retorno.
+  // Agora: cada id vai sozinho, num POST curto. Uma falha não contamina as
+  // outras, e o que travar trava só a si mesmo.
   async function emitir(ids: number[]) {
     if (ids.length === 0 || emitindo) return;
     const qtd = ids.length;
     if (!confirm(`Emitir ${qtd} boleto(s) no Banco Inter? Isso gera cobrança real.`)) return;
+
     setEmitindo(true);
-    setMsgEmissao(`Emitindo ${qtd} boleto(s)… pode levar alguns minutos (não feche a página).`);
-    try {
-      const res = await fetch("/api/adm/emitir", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cobranca_ids: ids }),
-      });
-      const d = await res.json();
-      if (!res.ok) {
-        setMsgEmissao(`Erro: ${d?.error || "falha na emissão"}. ${d?.detail ? JSON.stringify(d.detail).slice(0, 200) : ""}`);
-      } else if (d?.mensagem) {
-        setMsgEmissao(d.mensagem);
-      } else {
-        const ok = d?.emitidos ?? 0;
-        const fal = d?.falhas ?? 0;
-        let msg = `✓ ${ok} emitido(s)`;
-        if (fal > 0) {
-          const detalhes = (d.detalhe_falhas || [])
-            .map((f: any) => `#${f.cobranca_id}: ${f.erro}`)
-            .join(" · ");
-          msg += ` · ⚠ ${fal} falha(s) — ${detalhes}`;
+    setMsgEmissao(null);
+
+    let ok = 0;
+    const falhas: string[] = [];
+
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      setProgresso(
+        `Emitindo ${i + 1} de ${qtd} (cobrança #${id})… não feche a página.` +
+          (ok || falhas.length ? ` — ${ok} ok · ${falhas.length} falha(s)` : "")
+      );
+      try {
+        const res = await fetch("/api/adm/emitir", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cobranca_ids: [id] }),
+        });
+        const d = await res.json().catch(() => ({} as any));
+        if (!res.ok) {
+          falhas.push(`#${id}: ${d?.error || `HTTP ${res.status}`}`);
+        } else if ((d?.falhas ?? 0) > 0) {
+          const det = (d?.detalhe_falhas || [])
+            .map((f: any) => f?.erro)
+            .filter(Boolean)
+            .join("; ");
+          falhas.push(`#${id}: ${det || "falha na emissão"}`);
+        } else {
+          ok += d?.emitidos ?? 1;
         }
-        setMsgEmissao(msg);
+      } catch {
+        falhas.push(`#${id}: erro de rede / tempo esgotado`);
       }
-      carregar(competencia);
-    } catch {
-      setMsgEmissao("Erro de rede ao emitir. Verifique no painel antes de tentar de novo — pode ter emitido parcialmente.");
-    } finally {
-      setEmitindo(false);
     }
+
+    let msg = `✓ ${ok} de ${qtd} emitido(s)`;
+    if (falhas.length > 0) {
+      msg += ` · ⚠ ${falhas.length} falha(s) — ${falhas.join(" · ")}`;
+    }
+    setProgresso(null);
+    setMsgEmissao(msg);
+    setEmitindo(false);
+    carregar(competencia);
   }
 
   return (
@@ -343,6 +363,7 @@ export default function FechamentoMes() {
               )}
             </div>
           </div>
+          {progresso && <div className="vj-msgemissao vj-msgprog">{progresso}</div>}
           {msgEmissao && <div className="vj-msgemissao">{msgEmissao}</div>}
           {gravadas.length === 0 ? (
             <p className="vj-empty">Nenhuma cobrança gravada ainda.</p>
@@ -458,7 +479,9 @@ export default function FechamentoMes() {
           )}
         </section>
 
-        {(carregando || emitindo) && <div className="vj-load">{emitindo ? "Emitindo no Inter…" : "Carregando…"}</div>}
+        {(carregando || emitindo) && (
+          <div className="vj-load">{emitindo ? progresso || "Emitindo no Inter…" : "Carregando…"}</div>
+        )}
       </main>
     </div>
   );
@@ -551,8 +574,9 @@ const CSS = `
 .vj-emitido{color:var(--ok);font-weight:600;font-size:13px;white-space:nowrap}
 .vj-emitindo{color:var(--wait);font-weight:600;font-size:13px;white-space:nowrap}
 .vj-msgemissao{background:#EAF0FA;border:1px solid #C9D8F5;color:var(--azul);padding:10px 14px;border-radius:9px;font-size:14px;margin:10px 0}
+.vj-msgprog{background:#FBF3E2;border-color:#F0DFB8;color:#6B5410;font-weight:600}
 .vj-erro{background:#FDECEE;border:1px solid #F6C6CC;color:#9B1420;padding:11px 14px;border-radius:9px;font-size:14px;margin-bottom:16px}
-.vj-load{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--azul);color:#fff;padding:10px 20px;border-radius:24px;font-size:14px;box-shadow:0 6px 20px rgba(0,61,165,.3)}
+.vj-load{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--azul);color:#fff;padding:10px 20px;border-radius:24px;font-size:14px;box-shadow:0 6px 20px rgba(0,61,165,.3);max-width:92vw;text-align:center}
 @media (max-width:720px){.vj-nums{grid-template-columns:1fr 1fr}.vj-end{display:none}}
 
 /* ---- mobile: tabelas viram cartões empilhados (sem scroll lateral) ---- */
