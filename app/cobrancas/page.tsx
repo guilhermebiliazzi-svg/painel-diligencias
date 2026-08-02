@@ -1,101 +1,77 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Linha = {
-  repasse_id: number;
   contrato_id: number;
-  locador_id: number;
-  competencia: string;
-  locador: string;
-  locador_doc: string | null;
-  locador_email: string | null;
-  imovel: string | null;
-  valor_aluguel: number;
-  total_recebido: number;
-  taxa_percentual: number | null;
-  taxa_adm_valor: number;
-  taxa_esperada: number;
-  status_nota: "a_emitir" | "emitida" | "cancelada" | "dispensada";
-  nota_id: number | null;
-  numero_nota: string | null;
-  data_emissao: string | null;
-  rps_serie: string | null;
-  rps_numero: number | null;
-  emissao_erro: string | null;
-  tomador_endereco: any | null;
-  pdf_url: string | null;
-  observacao: string | null;
+  locatario: string;
+  endereco: string;
+  aluguel: number;
+  estado: "pronto" | "aguardando" | "gravada";
+  total: number | null;
+  vencimento: string | null;
+  cobranca_id: number | null;
+  status_cobranca?: string | null;
+  comp?: { aluguel: number; condominio: number; iptu: number; outros: number } | null;
 };
-type Fat = {
-  competencia: string;
-  qtd_contratos: number;
-  total_aluguel: number;
-  total_recebido: number;
-  faturamento_adm: number;
-  faturamento_com_nota: number;
-  faturamento_sem_nota: number;
-  notas_emitidas: number;
-  notas_pendentes: number;
+type Resumo = { total: number; gravadas: number; prontas: number; aguardando: number };
+type Aviso = {
+  contrato_id: number;
+  locatario: string;
+  endereco: string;
+  tipo: "reajuste" | "renovacao";
+  cor: "amarelo" | "vermelho";
+  data_evento: string;
+  indice: string | null;
+  detalhe: string;
+};
+type AvisosResp = {
+  resumo: { total: number; vermelhos: number; amarelos: number; reajustes: number; renovacoes: number };
+  avisos: Aviso[];
 };
 
-const brl = (v: number | null | undefined) =>
-  (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-const brlCurto = (v: number) =>
-  (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-const dataBR = (d?: string | null) => (d ? String(d).slice(0, 10).split("-").reverse().join("/") : "—");
-const mesLabel = (c: string) => {
-  const [y, m] = c.split("-");
-  const nomes = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
-  return `${nomes[Number(m) - 1] || m}/${y.slice(2)}`;
-};
+const brl = (n: number | null) =>
+  n == null ? "—" : Number(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-export default function NotasFiscais() {
+const brlComp = (n: number | null | undefined) =>
+  n == null || n === 0 ? "—" : Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+export default function FechamentoMes() {
   const [competencia, setCompetencia] = useState<string>(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   });
+  const [resumo, setResumo] = useState<Resumo | null>(null);
   const [linhas, setLinhas] = useState<Linha[]>([]);
-  const [fat, setFat] = useState<Fat | null>(null);
-  const [serie, setSerie] = useState<Fat[]>([]);
-  const [acumuladoAno, setAcumuladoAno] = useState(0);
+  const [avisos, setAvisos] = useState<Aviso[]>([]);
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-
-  // formulário de registro (aberto para um repasse por vez)
-  const [editando, setEditando] = useState<number | null>(null);
-  const [fNumero, setFNumero] = useState("");
-  const [fData, setFData] = useState("");
-  const [fCodigo, setFCodigo] = useState("");
-  const [fPdf, setFPdf] = useState("");
-  const [fObs, setFObs] = useState("");
-  const [salvando, setSalvando] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-
-  const [emitindo, setEmitindo] = useState(false);
-  const [conciliando, setConciliando] = useState(false);
-  const [progresso, setProgresso] = useState<string | null>(null);
-  const [msgEmissao, setMsgEmissao] = useState<string | null>(null);
-
-  const [filtro, setFiltro] = useState<string>("todas");
-  const [busca, setBusca] = useState("");
 
   async function carregar(comp: string) {
     setCarregando(true);
     setErro(null);
     try {
-      const res = await fetch(`/api/adm/notas?competencia=${comp}`);
+      const res = await fetch(`/api/adm/fechamento?competencia=${comp}`);
       const d = await res.json();
       if (!res.ok) {
         setErro(d?.error || "Falha ao carregar.");
         setLinhas([]);
-        setFat(null);
-        setSerie([]);
+        setResumo(null);
       } else {
+        setResumo(d.resumo);
         setLinhas(d.linhas || []);
-        setFat(d.faturamento || null);
-        setSerie(d.serie || []);
-        setAcumuladoAno(Number(d.acumulado_ano) || 0);
+      }
+      // avisos (reajuste/renovação) — não bloqueia a tela se falhar
+      try {
+        const av = await fetch(`/api/adm/avisos?competencia=${comp}`);
+        if (av.ok) {
+          const aj = (await av.json()) as AvisosResp;
+          setAvisos(aj.avisos || []);
+        } else {
+          setAvisos([]);
+        }
+      } catch {
+        setAvisos([]);
       }
     } catch {
       setErro("Erro de rede.");
@@ -109,218 +85,164 @@ export default function NotasFiscais() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [competencia]);
 
-  function abrir(l: Linha) {
-    setEditando(l.repasse_id);
-    setFNumero(l.numero_nota || "");
-    setFData(l.data_emissao ? String(l.data_emissao).slice(0, 10) : new Date().toISOString().slice(0, 10));
-    setFCodigo("");
-    setFPdf(l.pdf_url || "");
-    setFObs(l.observacao || "");
-    setMsg(null);
-  }
-  function fechar() {
-    setEditando(null);
-    setMsg(null);
-  }
+  const aGravar = useMemo(() => linhas.filter((l) => l.estado !== "gravada"), [linhas]);
 
-  async function gravar(repasse_id: number, status: string) {
-    if (salvando) return;
-    setSalvando(true);
-    setMsg(null);
+  // mapa de avisos por contrato: prioriza vermelho sobre amarelo
+  const avisosPorContrato = useMemo(() => {
+    const m = new Map<number, Aviso[]>();
+    for (const a of avisos) {
+      const arr = m.get(a.contrato_id) || [];
+      arr.push(a);
+      m.set(a.contrato_id, arr);
+    }
+    return m;
+  }, [avisos]);
+  const temVermelho = (cid: number) =>
+    (avisosPorContrato.get(cid) || []).some((a) => a.cor === "vermelho");
+  const temAmarelo = (cid: number) =>
+    (avisosPorContrato.get(cid) || []).some((a) => a.cor === "amarelo");
+  const gravadas = useMemo(() => linhas.filter((l) => l.estado === "gravada"), [linhas]);
+  const pendentesEmissao = useMemo(
+    () => gravadas.filter((l) => l.status_cobranca === "a_emitir" && l.cobranca_id),
+    [gravadas]
+  );
+  const pct = resumo && resumo.total ? Math.round((resumo.gravadas / resumo.total) * 100) : 0;
+
+  // ---- filtros / ordenação / busca (só na seção Gravadas) ----
+  const [filtroSit, setFiltroSit] = useState<string>("todas");
+  const [ordenar, setOrdenar] = useState<string>("vencimento");
+  const [busca, setBusca] = useState<string>("");
+
+  // "em aberto" = emitido sem situação de pagamento resolvida (emitido/null)
+  const ehAberto = (s?: string | null) => s === "emitido" || s == null;
+  const contagem = useMemo(() => {
+    const c: Record<string, number> = {
+      todas: gravadas.length, aberto: 0, pago: 0, atrasado: 0, expirado: 0, cancelado: 0, a_emitir: 0,
+    };
+    for (const l of gravadas) {
+      const s = l.status_cobranca;
+      if (s === "pago") c.pago++;
+      else if (s === "atrasado") c.atrasado++;
+      else if (s === "expirado") c.expirado++;
+      else if (s === "cancelado") c.cancelado++;
+      else if (s === "a_emitir") c.a_emitir++;
+      else if (s === "emitindo") {/* em trânsito, não conta */}
+      else c.aberto++;
+    }
+    return c;
+  }, [gravadas]);
+
+  const gravadasView = useMemo(() => {
+    let arr = gravadas;
+    if (filtroSit !== "todas") {
+      arr = arr.filter((l) =>
+        filtroSit === "aberto" ? ehAberto(l.status_cobranca) : l.status_cobranca === filtroSit
+      );
+    }
+    const q = busca.trim().toLowerCase();
+    if (q) {
+      arr = arr.filter(
+        (l) => l.locatario?.toLowerCase().includes(q) || String(l.contrato_id).includes(q)
+      );
+    }
+    const cmp = (a: Linha, b: Linha) => {
+      switch (ordenar) {
+        case "valor": return (b.total ?? 0) - (a.total ?? 0);
+        case "nome": return (a.locatario || "").localeCompare(b.locatario || "", "pt-BR");
+        case "contrato": return a.contrato_id - b.contrato_id;
+        case "vencimento":
+        default:
+          return String(a.vencimento || "").localeCompare(String(b.vencimento || ""));
+      }
+    };
+    return [...arr].sort(cmp);
+  }, [gravadas, filtroSit, ordenar, busca]);
+
+  const [emitindo, setEmitindo] = useState(false);
+  const [progresso, setProgresso] = useState<string | null>(null);
+  const [msgEmissao, setMsgEmissao] = useState<string | null>(null);
+  const [conciliando, setConciliando] = useState(false);
+
+  async function conciliar() {
+    if (conciliando) return;
+    setConciliando(true);
+    setMsgEmissao("Consultando o Banco Inter e atualizando os status…");
     try {
-      const res = await fetch("/api/adm/notas", {
+      const res = await fetch("/api/adm/conciliar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          repasse_id,
-          status,
-          numero_nota: fNumero,
-          codigo_verificacao: fCodigo,
-          data_emissao: fData,
-          pdf_url: fPdf,
-          observacao: fObs,
-        }),
+        body: JSON.stringify({ competencia }),
       });
       const d = await res.json();
       if (!res.ok) {
-        setMsg(d?.error || "Falha ao gravar.");
+        setMsgEmissao(`Erro ao atualizar: ${d?.error || "falha"}.`);
       } else {
-        setEditando(null);
-        await carregar(competencia);
+        setMsgEmissao(
+          `Status atualizado — pagos: ${d?.pago ?? 0} · em aberto: ${d?.em_aberto ?? 0} · atrasados: ${d?.atrasado ?? 0} · cancelados: ${d?.cancelado ?? 0}.`
+        );
+        carregar(competencia);
       }
     } catch {
-      setMsg("Erro de rede ao gravar.");
+      setMsgEmissao("Erro de rede ao atualizar status.");
     } finally {
-      setSalvando(false);
+      setConciliando(false);
     }
   }
 
-  async function desfazer(repasse_id: number) {
-    if (!confirm("Desfazer o registro desta nota? A linha volta para “a emitir”.")) return;
-    setSalvando(true);
-    try {
-      await fetch("/api/adm/notas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repasse_id, status: "a_emitir" }),
-      });
-      await carregar(competencia);
-    } finally {
-      setSalvando(false);
-    }
-  }
-
-  // Emite uma nota por requisição, em série. Cada chamada reserva seu
-  // próprio número de RPS e grava o desfecho — uma falha não contamina
-  // as outras nem deixa número em estado indefinido.
-  async function emitirNotas(ids: number[]) {
+  // Emissão EM SÉRIE, uma cobrança por requisição.
+  // Antes: todos os ids iam num POST só — a rota marcava o lote inteiro como
+  // 'emitindo', emitia a primeira e a função morria no timeout da Vercel,
+  // deixando o resto travado num estado sem retorno.
+  // Agora: cada id vai sozinho, num POST curto. Uma falha não contamina as
+  // outras, e o que travar trava só a si mesmo.
+  async function emitir(ids: number[]) {
     if (ids.length === 0 || emitindo) return;
     const qtd = ids.length;
-    if (
-      !confirm(
-        `Emitir ${qtd} nota(s) fiscal(is) na Prefeitura de São Paulo?\n\n` +
-          "Isso gera documento fiscal real. Cancelar NFS-e tem prazo e regras."
-      )
-    )
-      return;
+    if (!confirm(`Emitir ${qtd} boleto(s) no Banco Inter? Isso gera cobrança real.`)) return;
 
     setEmitindo(true);
     setMsgEmissao(null);
+
     let ok = 0;
     const falhas: string[] = [];
 
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
       setProgresso(
-        `Emitindo ${i + 1} de ${qtd}… não feche a página.` +
+        `Emitindo ${i + 1} de ${qtd} (cobrança #${id})… não feche a página.` +
           (ok || falhas.length ? ` — ${ok} ok · ${falhas.length} falha(s)` : "")
       );
       try {
-        const res = await fetch("/api/adm/notas/emitir", {
+        const res = await fetch("/api/adm/emitir", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ repasse_id: id }),
+          body: JSON.stringify({ cobranca_ids: [id] }),
         });
         const d = await res.json().catch(() => ({} as any));
-        if (!res.ok) falhas.push(`#${id}: ${d?.error || `HTTP ${res.status}`}`);
-        else if (d?.ok) ok++;
-        else falhas.push(`#${id}: ${d?.erro || "falha na emissão"}`);
+        if (!res.ok) {
+          falhas.push(`#${id}: ${d?.error || `HTTP ${res.status}`}`);
+        } else if ((d?.falhas ?? 0) > 0) {
+          const det = (d?.detalhe_falhas || [])
+            .map((f: any) => f?.erro)
+            .filter(Boolean)
+            .join("; ");
+          falhas.push(`#${id}: ${det || "falha na emissão"}`);
+        } else {
+          ok += d?.emitidos ?? 1;
+        }
       } catch {
-        falhas.push(`#${id}: erro de rede`);
+        falhas.push(`#${id}: erro de rede / tempo esgotado`);
       }
     }
 
-    let msg = `✓ ${ok} de ${qtd} nota(s) emitida(s)`;
-    if (falhas.length) msg += ` · ⚠ ${falhas.length} falha(s) — ${falhas.join(" · ")}`;
+    let msg = `✓ ${ok} de ${qtd} emitido(s)`;
+    if (falhas.length > 0) {
+      msg += ` · ⚠ ${falhas.length} falha(s) — ${falhas.join(" · ")}`;
+    }
     setProgresso(null);
     setMsgEmissao(msg);
     setEmitindo(false);
-    await carregar(competencia);
-  }
-
-  // Pergunta à Prefeitura se os RPS reservados viraram nota. Recupera o
-  // desfecho quando a emissão deu certo lá e o registro falhou aqui.
-  async function conciliar() {
-    if (conciliando || emitindo) return;
-    setConciliando(true);
-    setMsgEmissao("Consultando a Prefeitura pelos RPS reservados…");
-    try {
-      const res = await fetch("/api/adm/notas/conciliar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ competencia }),
-      });
-      const d = await res.json().catch(() => ({} as any));
-      if (!res.ok) {
-        setMsgEmissao(`Erro ao conciliar: ${d?.error || "falha"}.`);
-      } else if (d?.mensagem) {
-        setMsgEmissao(d.mensagem);
-      } else {
-        let m = `Conciliação: ${d.verificadas} verificada(s) · ${d.recuperadas} recuperada(s)`;
-        if (d.sem_nota > 0) {
-          m += ` · ${d.sem_nota} sem nota localizada — status inalterado, confira no portal antes de reemitir`;
-        }
-        setMsgEmissao(m);
-      }
-      await carregar(competencia);
-    } catch {
-      setMsgEmissao("Erro de rede ao conciliar.");
-    } finally {
-      setConciliando(false);
-    }
-  }
-
-  // Uma linha só pode ser emitida se tiver base, documento e — para PJ — endereço.
-  function bloqueio(l: Linha): string | null {
-    if (l.taxa_adm_valor <= 0) return "Taxa zerada — nada a faturar";
-    const doc = String(l.locador_doc || "").replace(/\D/g, "");
-    if (doc.length !== 11 && doc.length !== 14) return "Locador sem CPF/CNPJ";
-    if (doc.length === 14 && !l.tomador_endereco) return "Tomador PJ exige endereço no cadastro";
-    if (l.competencia.slice(0, 7) !== new Date().toISOString().slice(0, 7))
-      return "Fora do mês da competência";
-    return null;
-  }
-
-  const emitiveis = useMemo(
-    () => linhas.filter((l) => l.status_nota === "a_emitir" && !bloqueio(l)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [linhas]
-  );
-
-  const contagem = useMemo(() => {
-    const c: Record<string, number> = { todas: linhas.length, a_emitir: 0, emitida: 0, cancelada: 0, dispensada: 0 };
-    for (const l of linhas) c[l.status_nota] = (c[l.status_nota] || 0) + 1;
-    return c;
-  }, [linhas]);
-
-  const view = useMemo(() => {
-    let arr = linhas;
-    if (filtro !== "todas") arr = arr.filter((l) => l.status_nota === filtro);
-    const q = busca.trim().toLowerCase();
-    if (q) {
-      arr = arr.filter(
-        (l) =>
-          (l.locador || "").toLowerCase().includes(q) ||
-          (l.imovel || "").toLowerCase().includes(q) ||
-          String(l.contrato_id).includes(q)
-      );
-    }
-    return arr;
-  }, [linhas, filtro, busca]);
-
-  const maxSerie = useMemo(
-    () => Math.max(1, ...serie.map((s) => s.faturamento_adm)),
-    [serie]
-  );
-
-  function baixarCsv() {
-    const cab = [
-      "contrato", "locador", "cpf_cnpj", "email", "imovel",
-      "competencia", "aluguel", "taxa_pct", "taxa_valor",
-      "situacao", "numero_nota", "data_emissao",
-    ];
-    const linhasCsv = view.map((l) =>
-      [
-        l.contrato_id,
-        l.locador,
-        l.locador_doc || "",
-        l.locador_email || "",
-        (l.imovel || "").replace(/;/g, ","),
-        l.competencia,
-        l.valor_aluguel.toFixed(2).replace(".", ","),
-        l.taxa_percentual ?? "",
-        l.taxa_adm_valor.toFixed(2).replace(".", ","),
-        l.status_nota,
-        l.numero_nota || "",
-        l.data_emissao ? String(l.data_emissao).slice(0, 10) : "",
-      ].join(";")
-    );
-    const csv = "\uFEFF" + [cab.join(";"), ...linhasCsv].join("\n");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    a.download = `notas-taxa-adm-${competencia}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    carregar(competencia);
   }
 
   return (
@@ -329,17 +251,14 @@ export default function NotasFiscais() {
 
       <header className="vj-top">
         <a href="/cobrancas" className="vj-mark vj-marklink">RE/MAX <span>Ville</span></a>
-        <div className="vj-crumb">Administração · Notas fiscais</div>
+        <div className="vj-crumb">Administração · Fechamento do mês</div>
       </header>
 
       <main className="vj-main">
         <div className="vj-head">
           <div>
-            <h1 className="vj-h1">Notas fiscais da taxa de administração</h1>
-            <p className="vj-sub">
-              Uma nota por contrato, sobre o que foi efetivamente recebido no mês.
-              Emita na Prefeitura e registre aqui o número e o link.
-            </p>
+            <h1 className="vj-h1">Fechamento do mês</h1>
+            <p className="vj-sub">Acompanhe o que já virou cobrança e o que ainda falta.</p>
           </div>
           <label className="vj-field">
             <span>Competência</span>
@@ -347,291 +266,222 @@ export default function NotasFiscais() {
           </label>
         </div>
 
-        {erro && <div className="vj-erro">{erro}</div>}
-
-        {/* FATURAMENTO */}
-        {fat && (
-          <section className="vj-card">
-            <h2 className="vj-h2">Faturamento</h2>
-            <div className="vj-nums">
-              <div className="vj-num vj-num-t">
-                <b>{brl(fat.faturamento_adm)}</b>
-                <span>Taxa de administração · {mesLabel(competencia)}</span>
+        {/* avisos da competência (reajuste / renovação) */}
+        {avisos.length > 0 && (
+          <section className="vj-avisos">
+            {avisos.map((a, i) => (
+              <div key={i} className={`vj-aviso vj-aviso-${a.cor}`}>
+                <span className="vj-aviso-tag">
+                  {a.tipo === "reajuste" ? "Reajuste" : "Renovação"}
+                </span>
+                <span className="vj-aviso-txt">
+                  <b>{a.locatario}</b> (contrato #{a.contrato_id}) — {a.detalhe}
+                </span>
+                <span className="vj-aviso-data">
+                  {a.data_evento.split("-").reverse().slice(0, 2).join("/")}
+                </span>
               </div>
-              <div className="vj-num">
-                <b>{brl(fat.total_aluguel)}</b>
-                <span>Aluguéis recebidos (base da taxa)</span>
-              </div>
-              <div className="vj-num vj-num-w">
-                <b>{brl(fat.faturamento_sem_nota)}</b>
-                <span>Ainda sem nota</span>
-              </div>
-              <div className="vj-num vj-num-a">
-                <b>{brl(acumuladoAno)}</b>
-                <span>Acumulado {competencia.slice(0, 4)}</span>
-              </div>
-            </div>
-
-            {serie.length > 1 ? (
-              <div className="vj-serie">
-                {serie.map((s) => (
-                  <div
-                    key={s.competencia}
-                    className={`vj-serie-col${s.competencia === competencia ? " vj-serie-on" : ""}`}
-                    title={`${mesLabel(s.competencia)} — ${brl(s.faturamento_adm)}`}
-                    onClick={() => setCompetencia(s.competencia)}
-                  >
-                    <div className="vj-serie-val">{brlCurto(s.faturamento_adm)}</div>
-                    <div
-                      className="vj-serie-bar"
-                      style={{ height: `${Math.max(4, (s.faturamento_adm / maxSerie) * 100)}%` }}
-                    />
-                    <div className="vj-serie-lbl">{mesLabel(s.competencia)}</div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="vj-note vj-serie-vazia">
-                Histórico aparece aqui conforme as competências forem fechando.
-              </p>
-            )}
+            ))}
           </section>
         )}
 
-        {/* LISTA */}
+        {/* progresso */}
+        {resumo && (
+          <section className="vj-card vj-resumo">
+            <div className="vj-nums">
+              <div className="vj-num"><b>{resumo.gravadas}</b><span>Gravadas</span></div>
+              <div className="vj-num"><b>{resumo.prontas}</b><span>Prontas</span></div>
+              <div className="vj-num vj-num-w"><b>{resumo.aguardando}</b><span>Aguardando condomínio</span></div>
+              <div className="vj-num vj-num-t"><b>{resumo.total}</b><span>Contratos ativos</span></div>
+            </div>
+            <div className="vj-bar"><div className="vj-fill" style={{ width: `${pct}%` }} /></div>
+            <div className="vj-barlbl">{resumo.gravadas} de {resumo.total} fechadas · {pct}%</div>
+          </section>
+        )}
+
+        {erro && <div className="vj-erro">{erro}</div>}
+
+        {/* A GRAVAR */}
+        <section className="vj-card">
+          <h2 className="vj-h2">A gravar <span className="vj-count">{aGravar.length}</span></h2>
+          {aGravar.length === 0 ? (
+            <p className="vj-empty">Tudo fechado nesta competência. 🎉</p>
+          ) : (
+            <table className="vj-tab">
+              <thead><tr><th>Contrato</th><th>Locatário</th><th>Situação</th><th></th></tr></thead>
+              <tbody>
+                {aGravar.map((l) => (
+                  <tr key={l.contrato_id} className="vj-click">
+                    <td className="vj-id">
+                      <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>#{l.contrato_id}</a>
+                    </td>
+                    <td>
+                      <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>
+                        <div className="vj-nome">
+                          {temVermelho(l.contrato_id) && <span className="vj-dot vj-dot-v" title="Reajuste/renovação nesta competência" />}
+                          {!temVermelho(l.contrato_id) && temAmarelo(l.contrato_id) && <span className="vj-dot vj-dot-a" title="Reajuste/renovação no mês seguinte" />}
+                          {l.locatario}
+                        </div>
+                        <div className="vj-end">{l.endereco}</div>
+                      </a>
+                    </td>
+                    <td>
+                      {l.estado === "pronto" ? (
+                        <span className="vj-tag vj-tag-ok">Pronta pra fechar</span>
+                      ) : (
+                        <span className="vj-tag vj-tag-wait">Falta informar condomínio</span>
+                      )}
+                    </td>
+                    <td className="vj-go">
+                      <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>Conferir →</a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+
+        {/* GRAVADAS */}
         <section className="vj-card">
           <div className="vj-ajhead">
-            <h2 className="vj-h2">
-              Notas <span className="vj-count">{contagem.a_emitir} a emitir</span>
-            </h2>
-            {linhas.length > 0 && (
-              <button className="vj-btn-status" disabled={emitindo} onClick={baixarCsv}>
-                ⭳ CSV para a contabilidade
-              </button>
-            )}
-            {linhas.length > 0 && (
-              <button
-                className="vj-btn-status"
-                disabled={conciliando || emitindo}
-                onClick={conciliar}
-                title="Pergunta à Prefeitura se os RPS reservados já viraram nota"
-              >
-                {conciliando ? "Conciliando…" : "↻ Conciliar com a Prefeitura"}
-              </button>
-            )}
-            {emitiveis.length > 0 && (
-              <button
-                className="vj-btn-emitir"
-                disabled={emitindo || conciliando}
-                onClick={() => emitirNotas(emitiveis.map((l) => l.repasse_id))}
-              >
-                {emitindo ? "Emitindo…" : `Emitir ${emitiveis.length} nota(s) na Prefeitura`}
-              </button>
-            )}
+            <h2 className="vj-h2">Gravadas <span className="vj-count">{gravadas.length}</span></h2>
+            <div className="vj-acoes-cab">
+              {gravadas.length > 0 && (
+                <button className="vj-btn-status" disabled={conciliando || emitindo} onClick={conciliar}>
+                  {conciliando ? "Atualizando…" : "↻ Atualizar status"}
+                </button>
+              )}
+              {pendentesEmissao.length > 0 && (
+                <button
+                  className="vj-btn-emitir"
+                  disabled={emitindo || conciliando}
+                  onClick={() => emitir(pendentesEmissao.map((l) => l.cobranca_id as number))}
+                >
+                  Emitir {pendentesEmissao.length} pendente(s) no Inter
+                </button>
+              )}
+            </div>
           </div>
-
-          {progresso && <div className="vj-msg vj-msgprog">{progresso}</div>}
-          {msgEmissao && <div className="vj-msg">{msgEmissao}</div>}
-
-          {linhas.length === 0 ? (
-            <p className="vj-empty">
-              Nenhum repasse nesta competência — as notas aparecem depois que os repasses são gerados.
-            </p>
+          {progresso && <div className="vj-msgemissao vj-msgprog">{progresso}</div>}
+          {msgEmissao && <div className="vj-msgemissao">{msgEmissao}</div>}
+          {gravadas.length === 0 ? (
+            <p className="vj-empty">Nenhuma cobrança gravada ainda.</p>
           ) : (
             <>
-              <div className="vj-filtros">
-                <label className="vj-filtro">
-                  <span>Situação</span>
-                  <select value={filtro} onChange={(e) => setFiltro(e.target.value)}>
-                    <option value="todas">Todas ({contagem.todas})</option>
-                    <option value="a_emitir">A emitir ({contagem.a_emitir})</option>
-                    <option value="emitida">Emitidas ({contagem.emitida})</option>
-                    <option value="dispensada">Dispensadas ({contagem.dispensada})</option>
-                    <option value="cancelada">Canceladas ({contagem.cancelada})</option>
-                  </select>
-                </label>
-                <label className="vj-filtro vj-filtro-busca">
-                  <span>Buscar</span>
-                  <input
-                    type="text"
-                    placeholder="Locador, imóvel ou nº do contrato…"
-                    value={busca}
-                    onChange={(e) => setBusca(e.target.value)}
-                  />
-                </label>
-                <div className="vj-filtro-contagem">{view.length} de {linhas.length}</div>
+            <div className="vj-filtros">
+              <label className="vj-filtro">
+                <span>Situação</span>
+                <select value={filtroSit} onChange={(e) => setFiltroSit(e.target.value)}>
+                  <option value="todas">Todas ({contagem.todas})</option>
+                  <option value="aberto">Em aberto ({contagem.aberto})</option>
+                  <option value="pago">Pagos ({contagem.pago})</option>
+                  <option value="atrasado">Atrasados ({contagem.atrasado})</option>
+                  <option value="expirado">Vencidos ({contagem.expirado})</option>
+                  <option value="cancelado">Cancelados ({contagem.cancelado})</option>
+                  <option value="a_emitir">A emitir ({contagem.a_emitir})</option>
+                </select>
+              </label>
+              <label className="vj-filtro">
+                <span>Ordenar por</span>
+                <select value={ordenar} onChange={(e) => setOrdenar(e.target.value)}>
+                  <option value="vencimento">Vencimento</option>
+                  <option value="valor">Maior valor</option>
+                  <option value="nome">Nome</option>
+                  <option value="contrato">Nº do contrato</option>
+                </select>
+              </label>
+              <label className="vj-filtro vj-filtro-busca">
+                <span>Buscar</span>
+                <input
+                  type="text"
+                  placeholder="Nome do locatário ou nº do contrato…"
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                />
+              </label>
+              <div className="vj-filtro-contagem">
+                {gravadasView.length} de {gravadas.length}
               </div>
-
-              <table className="vj-tab">
-                <thead>
-                  <tr>
-                    <th>Contrato</th>
-                    <th>Locador (tomador)</th>
-                    <th className="vj-r vj-comp">Aluguel</th>
-                    <th className="vj-r vj-comp">%</th>
-                    <th className="vj-r">Taxa</th>
-                    <th>Nota</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {view.map((l) => (
-                    <Fragment key={l.repasse_id}>
-                      <tr className="vj-click">
-                        <td className="vj-id" data-label="Contrato">#{l.contrato_id}</td>
-                        <td>
-                          <div className="vj-nome">{l.locador}</div>
-                          <div className="vj-end">{l.locador_doc || "sem CPF/CNPJ"} · {l.imovel}</div>
-                        </td>
-                        <td className="vj-r vj-comp vj-compval" data-label="Aluguel">
-                          {brl(l.valor_aluguel)}
-                        </td>
-                        <td className="vj-r vj-comp vj-compval">
-                          {l.taxa_percentual != null ? `${l.taxa_percentual}%` : "—"}
-                        </td>
-                        <td className="vj-r vj-money" data-label="Taxa">
-                          {brl(l.taxa_adm_valor)}
-                          {Math.abs(l.taxa_adm_valor - l.taxa_esperada) > 0.02 && (
-                            <span
-                              className="vj-diverge"
-                              title={`Pelo percentual (${l.taxa_percentual}% de ${brl(
-                                l.valor_aluguel
-                              )}) seria ${brl(l.taxa_esperada)}`}
-                            >
-                              ≠
-                            </span>
-                          )}
-                        </td>
-                        <td data-label="Nota">
-                          {l.status_nota === "emitida" ? (
-                            <span className="vj-tag vj-tag-pago">
-                              ✓ nº {l.numero_nota} · {dataBR(l.data_emissao)}
-                            </span>
-                          ) : l.status_nota === "dispensada" ? (
-                            <span className="vj-tag vj-tag-canc">dispensada</span>
-                          ) : l.status_nota === "cancelada" ? (
-                            <span className="vj-tag vj-tag-exp">cancelada</span>
-                          ) : (
-                            <>
-                              <span className="vj-tag vj-tag-wait">a emitir</span>
-                              {l.emissao_erro && (
-                                <div className="vj-erroinline" title={l.emissao_erro}>
-                                  ⚠ {l.emissao_erro.slice(0, 90)}
-                                  {l.rps_numero ? ` (RPS ${l.rps_serie} ${l.rps_numero} queimado)` : ""}
-                                </div>
-                              )}
-                            </>
-                          )}
-                        </td>
-                        <td className="vj-go">
-                          {l.pdf_url && (
-                            <a
-                              className="vj-boleto"
-                              href={l.pdf_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              title="Abrir a nota no portal da Prefeitura"
-                            >
-                              ↗ Abrir nota
-                            </a>
-                          )}
-                          {l.status_nota === "a_emitir" ? (
-                            <>
-                              {bloqueio(l) ? (
-                                <span className="vj-bloq" title={bloqueio(l) as string}>
-                                  {bloqueio(l)}
-                                </span>
-                              ) : (
-                                <button
-                                  className="vj-btn-emitir vj-btn-emitir-sm"
-                                  disabled={emitindo}
-                                  onClick={() => emitirNotas([l.repasse_id])}
-                                >
-                                  Emitir
-                                </button>
-                              )}
-                              <button className="vj-linkbtn" onClick={() => abrir(l)}>
-                                Registrar manual
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button className="vj-linkbtn" onClick={() => abrir(l)}>Editar</button>
-                              <button className="vj-linkbtn vj-linkbtn-d" onClick={() => desfazer(l.repasse_id)}>
-                                Desfazer
-                              </button>
-                            </>
-                          )}
-                        </td>
-                      </tr>
-
-                      {editando === l.repasse_id && (
-                        <tr className="vj-formrow">
-                          <td colSpan={7}>
-                            <div className="vj-form">
-                              <div className="vj-formhead">
-                                Contrato #{l.contrato_id} · {l.locador} · {l.taxa_percentual}% sobre
-                                aluguel de {brl(l.valor_aluguel)} · serviço de {brl(l.taxa_adm_valor)}
-                              </div>
-                              <div className="vj-formgrid">
-                                <label className="vj-field">
-                                  <span>Número da nota *</span>
-                                  <input value={fNumero} onChange={(e) => setFNumero(e.target.value)} />
-                                </label>
-                                <label className="vj-field">
-                                  <span>Data de emissão *</span>
-                                  <input type="date" value={fData} onChange={(e) => setFData(e.target.value)} />
-                                </label>
-                                <label className="vj-field">
-                                  <span>Código de verificação</span>
-                                  <input value={fCodigo} onChange={(e) => setFCodigo(e.target.value)} />
-                                </label>
-                              </div>
-                              <label className="vj-field">
-                                <span>Link do PDF da nota</span>
-                                <input
-                                  placeholder="https://nfe.prefeitura.sp.gov.br/..."
-                                  value={fPdf}
-                                  onChange={(e) => setFPdf(e.target.value)}
-                                />
-                              </label>
-                              <label className="vj-field">
-                                <span>Observação</span>
-                                <input value={fObs} onChange={(e) => setFObs(e.target.value)} />
-                              </label>
-                              {msg && <div className="vj-erro vj-erroform">{msg}</div>}
-                              <div className="vj-formacoes">
-                                <button
-                                  className="vj-btn vj-confirm vj-btnauto"
-                                  disabled={salvando}
-                                  onClick={() => gravar(l.repasse_id, "emitida")}
-                                >
-                                  {salvando ? "Gravando…" : "Gravar como emitida"}
-                                </button>
-                                <button
-                                  className="vj-btn vj-ghost"
-                                  disabled={salvando}
-                                  onClick={() => gravar(l.repasse_id, "dispensada")}
-                                >
-                                  Dispensar
-                                </button>
-                                <button className="vj-btn vj-ghost" disabled={salvando} onClick={fechar}>
-                                  Cancelar
-                                </button>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
+            </div>
+            {gravadasView.length === 0 ? (
+              <p className="vj-empty">Nenhuma cobrança com esse filtro.</p>
+            ) : (
+            <table className="vj-tab">
+              <thead><tr><th>Contrato</th><th>Locatário</th><th>Vencimento</th><th className="vj-r vj-comp">Aluguel</th><th className="vj-r vj-comp">Cond.</th><th className="vj-r vj-comp">IPTU</th><th className="vj-r vj-comp">Outros</th><th className="vj-r">Total</th><th>Situação</th><th></th></tr></thead>
+              <tbody>
+                {gravadasView.map((l) => (
+                  <tr key={l.contrato_id} className="vj-click">
+                    <td className="vj-id">
+                      <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>#{l.contrato_id}</a>
+                    </td>
+                    <td>
+                      <a className="vj-rowlink" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>
+                        <div className="vj-nome">
+                          {temVermelho(l.contrato_id) && <span className="vj-dot vj-dot-v" title="Reajuste/renovação nesta competência" />}
+                          {!temVermelho(l.contrato_id) && temAmarelo(l.contrato_id) && <span className="vj-dot vj-dot-a" title="Reajuste/renovação no mês seguinte" />}
+                          {l.locatario}
+                        </div>
+                      </a>
+                    </td>
+                    <td data-label="Vencimento">{l.vencimento}</td>
+                    <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.aluguel)}</td>
+                    <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.condominio)}</td>
+                    <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.iptu)}</td>
+                    <td className={`vj-r vj-comp vj-compval${(l.comp?.outros ?? 0) < 0 ? " vj-neg" : ""}`}>{brlComp(l.comp?.outros)}</td>
+                    <td className="vj-r vj-money" data-label="Total">{brl(l.total)}</td>
+                    <td data-label="Situação">
+                      {l.status_cobranca === "a_emitir" ? (
+                        <button
+                          className="vj-btn-emitir vj-btn-emitir-sm"
+                          disabled={emitindo || !l.cobranca_id}
+                          onClick={() => emitir([l.cobranca_id as number])}
+                        >
+                          Emitir
+                        </button>
+                      ) : l.status_cobranca === "emitindo" ? (
+                        <span className="vj-emitindo">emitindo…</span>
+                      ) : l.status_cobranca === "pago" ? (
+                        <span className="vj-tag vj-tag-pago">✓ pago</span>
+                      ) : l.status_cobranca === "atrasado" ? (
+                        <span className="vj-tag vj-tag-atras">⚠ atrasado</span>
+                      ) : l.status_cobranca === "expirado" ? (
+                        <span className="vj-tag vj-tag-exp">vencido</span>
+                      ) : l.status_cobranca === "cancelado" ? (
+                        <span className="vj-tag vj-tag-canc">cancelado</span>
+                      ) : (
+                        <span className="vj-tag vj-tag-aberto">em aberto</span>
                       )}
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
+                    </td>
+                    <td className="vj-go">
+                      {l.cobranca_id &&
+                        l.status_cobranca !== "a_emitir" &&
+                        l.status_cobranca !== "emitindo" &&
+                        l.status_cobranca !== "cancelado" && (
+                          <a
+                            className="vj-boleto"
+                            href={`/api/adm/boleto-pdf?cobranca=${l.cobranca_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Abrir o boleto em PDF"
+                          >
+                            ⭳ Boleto
+                          </a>
+                        )}
+                      <a className="vj-rowlink vj-revisar" href={`/cobrancas/nova?contrato=${l.contrato_id}&competencia=${competencia}`}>Revisar →</a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            )}
             </>
           )}
         </section>
 
-        {carregando && <div className="vj-load">Carregando…</div>}
+        {(carregando || emitindo) && (
+          <div className="vj-load">{emitindo ? progresso || "Emitindo no Inter…" : "Carregando…"}</div>
+        )}
       </main>
     </div>
   );
@@ -645,37 +495,70 @@ const CSS = `
 .vj-mark{font-weight:800;letter-spacing:.5px;font-size:18px}.vj-mark span{color:#BFD3FF;font-weight:600}
 .vj-marklink{color:#fff;text-decoration:none}
 .vj-crumb{font-size:13px;color:#C9D8F5}
-.vj-main{max-width:1040px;margin:0 auto;padding:32px 20px 80px}
+.vj-main{max-width:960px;margin:0 auto;padding:32px 20px 80px}
 .vj-head{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap;margin-bottom:22px}
 .vj-h1{font-family:Fraunces,Georgia,serif;font-size:30px;font-weight:600;margin:0 0 6px}
-.vj-sub{color:var(--mut);margin:0;max-width:60ch;line-height:1.5}
-.vj-field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+.vj-sub{color:var(--mut);margin:0}
+.vj-field{display:flex;flex-direction:column;gap:6px}
 .vj-field>span{font-size:12px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
-.vj-field input,.vj-field select{font:inherit;padding:10px 12px;border:1px solid var(--linha);border-radius:9px;background:#fff;color:var(--txt)}
-.vj-field input:focus,.vj-field select:focus{outline:2px solid var(--azul);outline-offset:1px;border-color:var(--azul)}
+.vj-field input{font:inherit;padding:10px 12px;border:1px solid var(--linha);border-radius:9px;background:#fff;color:var(--txt)}
+.vj-field input:focus{outline:2px solid var(--azul);outline-offset:1px;border-color:var(--azul)}
 .vj-card{background:var(--card);border:1px solid var(--linha);border-radius:14px;padding:22px;margin-bottom:20px;box-shadow:0 1px 2px rgba(16,35,59,.04)}
-.vj-h2{font-family:Fraunces,Georgia,serif;font-size:19px;font-weight:600;margin:0 0 14px;display:flex;align-items:center;gap:10px}
-.vj-count{background:#FBF3E2;color:var(--wait);font-family:Archivo,sans-serif;font-size:13px;font-weight:700;padding:2px 10px;border-radius:20px}
-.vj-nums{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+.vj-avisos{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.vj-aviso{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:10px;font-size:14px;border:1px solid}
+.vj-aviso-vermelho{background:#FDECEE;border-color:#F5C2C7;color:#8B1A24}
+.vj-aviso-amarelo{background:#FFF8E6;border-color:#F5E1A8;color:#7A5B00}
+.vj-aviso-tag{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:3px 9px;border-radius:20px;white-space:nowrap}
+.vj-aviso-vermelho .vj-aviso-tag{background:#DC1C2E;color:#fff}
+.vj-aviso-amarelo .vj-aviso-tag{background:#B8860B;color:#fff}
+.vj-aviso-txt{flex:1;line-height:1.4}
+.vj-aviso-data{font-variant-numeric:tabular-nums;font-weight:600;font-size:13px;white-space:nowrap;opacity:.85}
+.vj-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:middle}
+.vj-dot-v{background:var(--verm)}
+.vj-dot-a{background:#B8860B}
+.vj-resumo{padding-bottom:18px}
+.vj-nums{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
 .vj-num{border-left:3px solid var(--linha);padding-left:12px}
-.vj-num b{display:block;font-size:23px;font-family:Fraunces,Georgia,serif;line-height:1.15}
+.vj-num b{display:block;font-size:26px;font-family:Fraunces,Georgia,serif;line-height:1}
 .vj-num span{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
-.vj-num-t{border-left-color:var(--azul)}
-.vj-num-w{border-left-color:var(--wait)}
-.vj-num-a{border-left-color:var(--ok)}
-.vj-serie{display:flex;align-items:flex-end;gap:8px;height:150px;padding-top:8px;border-top:1px solid var(--linha)}
-.vj-serie-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;cursor:pointer;gap:4px}
-.vj-serie-bar{width:100%;max-width:46px;background:#C9D8F5;border-radius:5px 5px 0 0;transition:background .15s}
-.vj-serie-col:hover .vj-serie-bar{background:var(--azul)}
-.vj-serie-on .vj-serie-bar{background:var(--azul)}
-.vj-serie-val{font-size:11px;color:var(--mut);font-variant-numeric:tabular-nums}
-.vj-serie-on .vj-serie-val{color:var(--azul);font-weight:700}
-.vj-serie-lbl{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.3px}
-.vj-serie-vazia{border-top:1px solid var(--linha);padding-top:12px;margin:0}
-.vj-note{font-size:13px;color:var(--mut)}
+.vj-num-w{border-left-color:var(--wait)}.vj-num-t{border-left-color:var(--azul)}
+.vj-bar{height:8px;background:#EAF0FA;border-radius:20px;overflow:hidden}
+.vj-fill{height:100%;background:var(--azul);border-radius:20px;transition:width .4s}
+.vj-barlbl{font-size:13px;color:var(--mut);margin-top:8px}
+.vj-h2{font-family:Fraunces,Georgia,serif;font-size:19px;font-weight:600;margin:0 0 14px;display:flex;align-items:center;gap:10px}
+.vj-count{background:#EAF0FA;color:var(--azul);font-family:Archivo,sans-serif;font-size:13px;font-weight:700;padding:2px 10px;border-radius:20px}
+.vj-tab{width:100%;border-collapse:collapse}
+.vj-tab th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--mut);padding:0 10px 10px;border-bottom:1px solid var(--linha)}
+.vj-tab td{padding:12px 10px;border-bottom:1px solid var(--linha);font-size:14px;vertical-align:middle}
+.vj-r{text-align:right}
+.vj-click{cursor:pointer;transition:background .12s}
+.vj-click:hover{background:#F5F9FF}
+.vj-rowlink{display:block;color:inherit;text-decoration:none}
+.vj-id{font-weight:700;color:var(--azul);font-variant-numeric:tabular-nums}
+.vj-nome{font-weight:600}
+.vj-end{font-size:12px;color:var(--mut);margin-top:2px}
+.vj-money{font-variant-numeric:tabular-nums;font-weight:600}
+.vj-compval{font-variant-numeric:tabular-nums;color:var(--mut);font-size:13px;white-space:nowrap}
+.vj-neg{color:var(--verm)}
+@media (max-width:900px){.vj-comp{display:none}}
+.vj-tag{display:inline-block;font-size:12px;font-weight:600;padding:4px 10px;border-radius:20px}
+.vj-tag-ok{background:#EAF7F0;color:var(--ok)}
+.vj-tag-wait{background:#FBF3E2;color:var(--wait)}
+.vj-go{text-align:right;color:var(--azul);font-weight:600;font-size:13px;white-space:nowrap}
+.vj-boleto{display:inline-block;margin-right:12px;color:var(--azul);text-decoration:none;font-weight:600;font-size:13px;padding:4px 10px;border:1px solid var(--linha);border-radius:8px;background:#fff}
+.vj-boleto:hover{background:#F2F7FF;border-color:var(--azul)}
+.vj-revisar{display:inline-block}
+.vj-empty{color:var(--mut);margin:6px 0}
 .vj-ajhead{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.vj-acoes-cab{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .vj-btn-status{background:#fff;border:1px solid var(--azul);color:var(--azul);font:inherit;font-weight:600;font-size:14px;padding:9px 16px;border-radius:9px;cursor:pointer}
-.vj-btn-status:hover{background:#F2F7FF}
+.vj-btn-status:hover:not(:disabled){background:#F2F7FF}
+.vj-btn-status:disabled{opacity:.5;cursor:not-allowed}
+.vj-tag-pago{background:#EAF7F0;color:var(--ok)}
+.vj-tag-aberto{background:#EAF0FA;color:var(--azul)}
+.vj-tag-atras{background:#FBF3E2;color:var(--wait)}
+.vj-tag-exp{background:#FDECEE;color:var(--verm)}
+.vj-tag-canc{background:#EEE;color:#777}
 .vj-filtros{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin:4px 0 16px;padding-bottom:14px;border-bottom:1px solid var(--linha)}
 .vj-filtro{display:flex;flex-direction:column;gap:5px}
 .vj-filtro>span{font-size:11px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
@@ -684,70 +567,51 @@ const CSS = `
 .vj-filtro-busca{flex:1;min-width:180px}
 .vj-filtro-busca input{width:100%}
 .vj-filtro-contagem{font-size:13px;color:var(--mut);padding-bottom:9px;margin-left:auto}
-.vj-tab{width:100%;border-collapse:collapse}
-.vj-tab th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--mut);padding:0 10px 10px;border-bottom:1px solid var(--linha)}
-.vj-tab td{padding:12px 10px;border-bottom:1px solid var(--linha);font-size:14px;vertical-align:middle}
-.vj-r{text-align:right}
-.vj-click:hover{background:#F5F9FF}
-.vj-id{font-weight:700;color:var(--azul);font-variant-numeric:tabular-nums}
-.vj-nome{font-weight:600}
-.vj-end{font-size:12px;color:var(--mut);margin-top:2px}
-.vj-money{font-variant-numeric:tabular-nums;font-weight:600}
-.vj-compval{font-variant-numeric:tabular-nums;color:var(--mut);font-size:13px;white-space:nowrap}
-@media (max-width:900px){.vj-comp{display:none}}
-.vj-tag{display:inline-block;font-size:12px;font-weight:600;padding:4px 10px;border-radius:20px}
-.vj-tag-pago{background:#EAF7F0;color:var(--ok)}
-.vj-tag-wait{background:#FBF3E2;color:var(--wait)}
-.vj-tag-exp{background:#FDECEE;color:var(--verm)}
-.vj-tag-canc{background:#EEE;color:#777}
-.vj-go{text-align:right;white-space:nowrap}
-.vj-boleto{display:inline-block;margin-right:10px;color:var(--azul);text-decoration:none;font-weight:600;font-size:13px;padding:4px 10px;border:1px solid var(--linha);border-radius:8px;background:#fff}
-.vj-boleto:hover{background:#F2F7FF;border-color:var(--azul)}
-.vj-linkbtn{background:none;border:none;color:var(--azul);font:inherit;font-weight:600;font-size:13px;cursor:pointer;padding:4px 8px}
-.vj-linkbtn:hover{text-decoration:underline}
-.vj-linkbtn-d{color:var(--mut)}
 .vj-btn-emitir{background:var(--verm);color:#fff;border:none;font:inherit;font-weight:600;font-size:14px;padding:9px 16px;border-radius:9px;cursor:pointer}
 .vj-btn-emitir:hover:not(:disabled){background:#B4131F}
+.vj-btn-emitir:disabled{opacity:.5;cursor:not-allowed}
 .vj-btn-emitir-sm{padding:6px 12px;font-size:13px}
-.vj-empty{color:var(--mut);margin:6px 0}
-.vj-msg{background:#EAF0FA;border:1px solid #C9D8F5;color:var(--azul);padding:10px 14px;border-radius:9px;font-size:14px;margin:10px 0}
+.vj-emitido{color:var(--ok);font-weight:600;font-size:13px;white-space:nowrap}
+.vj-emitindo{color:var(--wait);font-weight:600;font-size:13px;white-space:nowrap}
+.vj-msgemissao{background:#EAF0FA;border:1px solid #C9D8F5;color:var(--azul);padding:10px 14px;border-radius:9px;font-size:14px;margin:10px 0}
 .vj-msgprog{background:#FBF3E2;border-color:#F0DFB8;color:#6B5410;font-weight:600}
-.vj-bloq{display:inline-block;font-size:12px;color:var(--mut);background:#F1F3F7;border:1px solid var(--linha);padding:4px 9px;border-radius:8px;white-space:normal;max-width:190px;line-height:1.3}
-.vj-erroinline{margin-top:5px;font-size:11px;color:var(--verm);line-height:1.35;max-width:260px}
-.vj-diverge{display:inline-block;margin-left:6px;color:var(--verm);font-weight:700;cursor:help}
-.vj-formrow td{background:#F7FAFF;border-bottom:2px solid var(--linha)}
-.vj-form{padding:6px 2px}
-.vj-formhead{font-weight:600;margin-bottom:14px;color:var(--azul)}
-.vj-formgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
-.vj-formacoes{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
-.vj-btn{font:inherit;font-weight:600;padding:11px 18px;border-radius:9px;border:1px solid transparent;cursor:pointer}
-.vj-btn:disabled{opacity:.5;cursor:not-allowed}
-.vj-ghost{background:#fff;border-color:var(--linha);color:var(--azul)}
-.vj-ghost:hover:not(:disabled){background:#F2F7FF}
-.vj-confirm{background:var(--verm);color:#fff}
-.vj-confirm:hover:not(:disabled){background:#B4131F}
-.vj-btnauto{width:auto}
 .vj-erro{background:#FDECEE;border:1px solid #F6C6CC;color:#9B1420;padding:11px 14px;border-radius:9px;font-size:14px;margin-bottom:16px}
-.vj-erroform{margin:4px 0 12px}
-.vj-load{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--azul);color:#fff;padding:10px 20px;border-radius:24px;font-size:14px;box-shadow:0 6px 20px rgba(0,61,165,.3)}
-@media (max-width:720px){
-  .vj-nums{grid-template-columns:1fr 1fr}
-  .vj-formgrid{grid-template-columns:1fr}
-  .vj-serie{height:120px}
-  .vj-serie-val{display:none}
-}
+.vj-load{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--azul);color:#fff;padding:10px 20px;border-radius:24px;font-size:14px;box-shadow:0 6px 20px rgba(0,61,165,.3);max-width:92vw;text-align:center}
+@media (max-width:720px){.vj-nums{grid-template-columns:1fr 1fr}.vj-end{display:none}}
+
+/* ---- mobile: tabelas viram cartões empilhados (sem scroll lateral) ---- */
 @media (max-width:640px){
   .vj-tab, .vj-tab tbody, .vj-tab tr, .vj-tab td { display:block; width:100% }
   .vj-tab thead { display:none }
-  .vj-tab tr { border:1px solid var(--linha); border-radius:12px; padding:12px 14px; margin-bottom:12px; background:#fff }
-  .vj-tab td { border:0; padding:5px 0; text-align:left !important; display:flex; justify-content:space-between; align-items:center; gap:12px }
-  .vj-tab td[data-label]::before { content: attr(data-label); font-size:11px; font-weight:600; color:var(--mut); text-transform:uppercase; letter-spacing:.4px }
-  .vj-tab td.vj-id { font-size:16px }
+  .vj-tab tr {
+    border:1px solid var(--linha); border-radius:12px;
+    padding:12px 14px; margin-bottom:12px; background:#fff;
+  }
+  .vj-tab td {
+    border:0; padding:5px 0; text-align:left !important;
+    display:flex; justify-content:space-between; align-items:center; gap:12px;
+  }
+  /* rótulo à esquerda para as células marcadas */
+  .vj-tab td[data-label]::before {
+    content: attr(data-label);
+    font-size:11px; font-weight:600; color:var(--mut);
+    text-transform:uppercase; letter-spacing:.4px;
+  }
+  /* contrato + nome em destaque no topo do cartão */
+  .vj-tab td.vj-id { font-size:16px; padding-bottom:8px }
+  .vj-tab td.vj-id::after { content:none }
   .vj-nome { font-size:16px; font-weight:700 }
-  .vj-go { padding-top:10px !important; border-top:1px solid var(--linha) !important; display:flex; gap:10px; justify-content:flex-start; flex-wrap:wrap }
-  .vj-formrow td { display:block; padding:12px 0 }
-  .vj-filtros { flex-direction:column; align-items:stretch }
-  .vj-filtro-contagem { margin-left:0 }
+  .vj-money { font-size:17px }
+  /* ações ocupam a largura, botões maiores para toque */
+  .vj-go { padding-top:10px !important; border-top:1px solid var(--linha) !important; margin-top:4px;
+           display:flex; gap:10px; justify-content:flex-start }
+  .vj-boleto, .vj-revisar { padding:9px 14px; font-size:14px }
+  .vj-btn-emitir-sm { padding:9px 16px; font-size:14px }
+  /* filtros empilham */
+  .vj-filtros { flex-direction:column; align-items:stretch; gap:10px }
+  .vj-filtro-contagem { margin-left:0; padding-bottom:0 }
+  .vj-acoes-cab { width:100%; }
+  .vj-btn-status, .vj-btn-emitir { width:100% }
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 `;
