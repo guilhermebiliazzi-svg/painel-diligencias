@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// A emissão passa por: Vercel → Render (cold start no plano free) → mTLS →
+// Prefeitura. Com o padrão de 10s a função morre DEPOIS de a nota ser
+// emitida, e o desfecho não é gravado — foi o que aconteceu com a nota 187.
+export const maxDuration = 60;
 
 /**
  * Emissão de NFS-e da taxa de administração — uma nota por requisição.
