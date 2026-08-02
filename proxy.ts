@@ -10,7 +10,7 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr';
 
 type CookieParaGravar = { name: string; value: string; options: CookieOptions };
 
-const ADMIN_PREFIXOS = ['/admin', '/cobrancas', '/repasses', '/seguros', '/contratos', '/api/adm'];
+const ADMIN_PREFIXOS = ['/admin', '/cobrancas', '/repasses', '/notas', '/seguros', '/contratos', '/api/adm'];
 
 export default async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
