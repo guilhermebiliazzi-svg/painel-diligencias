@@ -38,8 +38,10 @@ export default async function LocadorPage() {
   const email = user.email.toLowerCase();
   const adm = supabaseAdmin();
 
-  const { data: locador } = await adm
-    .from('adm_locadores').select('id,nome').ilike('email', email).maybeSingle();
+  // tolerante a e-mail duplicado: pega o primeiro em vez de quebrar
+  const { data: locList } = await adm
+    .from('adm_locadores').select('id,nome').ilike('email', email).order('id').limit(1);
+  const locador = locList?.[0] ?? null;
 
   if (!locador) {
     return (
