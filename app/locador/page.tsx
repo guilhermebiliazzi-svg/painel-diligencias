@@ -6,7 +6,7 @@ import LocadorLogin from './login-form';
 import { sairLocador } from './actions';
 
 export const dynamic = 'force-dynamic';
-export const metadata = { title: 'Meus repasses — RE/MAX Ville' };
+export const metadata = { title: 'Meus repasses — Ville Jardins' };
 
 type Repasse = {
   id: number; contrato_id: number; competencia: string;
@@ -45,10 +45,10 @@ export default async function LocadorPage() {
     return (
       <Shell>
         <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">RE/MAX Ville</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Ville Jardins</p>
           <h1 className="mt-2 text-xl font-semibold text-slate-900">Cadastro não encontrado</h1>
           <p className="mt-2 text-sm leading-relaxed text-slate-600">
-            Não encontramos um locador com o e-mail <b>{email}</b>. Fale com a RE/MAX Ville para atualizar seu cadastro.
+            Não encontramos um locador com o e-mail <b>{email}</b>. Fale com a Ville Jardins para atualizar seu cadastro.
           </p>
           <form action={sairLocador} className="mt-6">
             <button className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Sair</button>
@@ -91,7 +91,7 @@ export default async function LocadorPage() {
       <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">RE/MAX Ville — Portal do locador</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Ville Jardins — Portal do locador</p>
             <h1 className="mt-1 text-2xl font-semibold text-slate-900 sm:text-3xl">Olá, {primeiroNome}</h1>
             <p className="mt-1 text-sm text-slate-600">Seus recibos de repasse.</p>
           </div>
@@ -136,7 +136,7 @@ export default async function LocadorPage() {
           </div>
         )}
 
-        <footer className="mt-10 text-center text-xs text-slate-400">RE/MAX Ville — Jardins/Itaim, São Paulo · {email}</footer>
+        <footer className="mt-10 text-center text-xs text-slate-400">Ville Jardins Negócios Imobiliários — Rua Batataes, nº 148, Jardim Paulista, São Paulo · {email}</footer>
       </main>
     </div>
   );

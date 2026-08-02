@@ -24,7 +24,7 @@ export default function LocadorLogin() {
   if (enviado) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">RE/MAX Ville</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Ville Jardins</p>
         <h1 className="mt-2 text-xl font-semibold text-slate-900">Confira seu e-mail</h1>
         <p className="mt-2 text-sm leading-relaxed text-slate-600">
           Enviamos um link de acesso para <b>{email}</b>. Abra o e-mail e clique no link para ver seus repasses.
@@ -35,7 +35,7 @@ export default function LocadorLogin() {
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-      <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">RE/MAX Ville</p>
+      <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Ville Jardins</p>
       <h1 className="mt-2 text-xl font-semibold text-slate-900">Portal do locador</h1>
       <p className="mt-1 text-sm text-slate-600">Informe seu e-mail para receber um link de acesso.</p>
       <form onSubmit={enviar} className="mt-6 space-y-3">
