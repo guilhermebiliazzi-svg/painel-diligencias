@@ -22,6 +22,21 @@ export const dynamic = "force-dynamic";
 
 const SERIE = "VJ01";
 
+/**
+ * Link direto para a nota no portal da Prefeitura.
+ * O web service não devolve o PDF — só número e código de verificação —
+ * então o melhor que dá para fazer é montar o endereço da página de
+ * impressão, que abre a nota em um clique.
+ * O código vai SEM hífen: "LHDC-NUU9" na nota vira "LHDCNUU9" na URL.
+ */
+function linkNota(im: string, numero: string | number, verificacao: string) {
+  const cod = String(verificacao || "").replace(/[^A-Za-z0-9]/g, "");
+  return (
+    `https://nfe.prefeitura.sp.gov.br/contribuinte/notaprint.aspx` +
+    `?inscricao=${im}&nf=${numero}&verificacao=${cod}`
+  );
+}
+
 function creds() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -267,6 +282,11 @@ export async function POST(req: Request) {
           status: "emitida",
           numero_nota: resultado.numeroNota,
           codigo_verificacao: resultado.codigoVerificacao,
+          pdf_url: linkNota(
+            process.env.NFSE_SP_IM || "69033951",
+            resultado.numeroNota,
+            resultado.codigoVerificacao
+          ),
           data_emissao: dataEmissao,
           emissao_erro: null,
           enviado_em: new Date().toISOString(),
@@ -278,6 +298,11 @@ export async function POST(req: Request) {
       ok: true,
       numeroNota: resultado.numeroNota,
       codigoVerificacao: resultado.codigoVerificacao,
+      link: linkNota(
+        process.env.NFSE_SP_IM || "69033951",
+        resultado.numeroNota,
+        resultado.codigoVerificacao
+      ),
       rps: { serie: SERIE, numero: numeroRps },
       dataEmissao,
       alertas: resultado.alertas || [],
