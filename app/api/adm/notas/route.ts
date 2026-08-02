@@ -4,15 +4,23 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Notas fiscais da taxa de administração.
+ * Emissão de NFS-e da taxa de administração — uma nota por requisição.
  *
- * Âncora: adm_repasses (1 por contrato/competência, só existe do que foi
- * recebido). A view adm_v_notas traz todo repasse com a nota se já houver;
- * adm_v_faturamento agrega o faturamento por competência.
+ * Fluxo:
+ *   1. lê o repasse em adm_v_notas e valida o que pode barrar
+ *   2. reserva o próximo número de RPS (adm_proximo_rps, atômico)
+ *   3. grava a nota como 'enviando' com o número já reservado
+ *   4. chama o Render, que assina e envia à Prefeitura
+ *   5. grava 'emitida' com número e código, ou volta para 'a_emitir'
+ *      registrando o erro
  *
- * GET  /api/adm/notas?competencia=2026-07
- * POST /api/adm/notas   { repasse_id, status, numero_nota, data_emissao, ... }
+ * O número de RPS fica gravado mesmo em falha: número queimado é visível
+ * em vez de ser reutilizado às cegas.
+ *
+ * POST /api/adm/notas/emitir  { repasse_id, teste? }
  */
+
+const SERIE = "VJ01";
 
 function creds() {
   const url = process.env.SUPABASE_URL;
@@ -23,93 +31,37 @@ function creds() {
 
 const n = (v: any) => (v == null ? 0 : Number(v) || 0);
 
-/* ------------------------------------------------------------------ */
-/* GET — linhas da competência + faturamento + série histórica         */
-/* ------------------------------------------------------------------ */
-export async function GET(req: Request) {
-  const c = creds();
-  if (!c) return NextResponse.json({ error: "Supabase não configurado." }, { status: 500 });
-
-  const { searchParams } = new URL(req.url);
-  const comp = searchParams.get("competencia"); // "YYYY-MM"
-  if (!comp || !/^\d{4}-\d{2}$/.test(comp)) {
-    return NextResponse.json({ error: "competencia (YYYY-MM) é obrigatória." }, { status: 400 });
-  }
-  const competenciaData = `${comp}-01`;
-
-  try {
-    const [rLinhas, rFat] = await Promise.all([
-      fetch(
-        `${c.url}/rest/v1/adm_v_notas?competencia=eq.${competenciaData}&order=locador.asc,contrato_id.asc`,
-        { headers: c.headers, cache: "no-store" }
-      ),
-      fetch(`${c.url}/rest/v1/adm_v_faturamento?order=competencia.desc&limit=12`, {
-        headers: c.headers,
-        cache: "no-store",
-      }),
-    ]);
-
-    if (!rLinhas.ok) {
-      const detail = await rLinhas.text();
-      return NextResponse.json({ error: "Falha ao carregar as notas", detail }, { status: 502 });
-    }
-
-    const linhas = ((await rLinhas.json()) as any[]).map((l) => ({
-      ...l,
-      valor_aluguel: n(l.valor_aluguel),
-      total_recebido: n(l.total_recebido),
-      taxa_adm_valor: n(l.taxa_adm_valor),
-      taxa_esperada: n(l.taxa_esperada),
-      taxa_percentual: l.taxa_percentual == null ? null : Number(l.taxa_percentual),
-    }));
-
-    // série histórica (mais antiga → mais recente, para o gráfico)
-    const serieBruta = rFat.ok ? ((await rFat.json()) as any[]) : [];
-    const serie = serieBruta
-      .map((f) => ({
-        competencia: String(f.competencia).slice(0, 7),
-        qtd_contratos: n(f.qtd_contratos),
-        total_aluguel: n(f.total_aluguel),
-        total_recebido: n(f.total_recebido),
-        faturamento_adm: n(f.faturamento_adm),
-        faturamento_com_nota: n(f.faturamento_com_nota),
-        faturamento_sem_nota: n(f.faturamento_sem_nota),
-        notas_emitidas: n(f.notas_emitidas),
-        notas_pendentes: n(f.notas_pendentes),
-      }))
-      .reverse();
-
-    const faturamento =
-      serie.find((s) => s.competencia === comp) || {
-        competencia: comp,
-        qtd_contratos: 0,
-        total_aluguel: 0,
-        total_recebido: 0,
-        faturamento_adm: 0,
-        faturamento_com_nota: 0,
-        faturamento_sem_nota: 0,
-        notas_emitidas: 0,
-        notas_pendentes: 0,
-      };
-
-    // acumulado do ano da competência selecionada
-    const ano = comp.slice(0, 4);
-    const acumulado_ano = serie
-      .filter((s) => s.competencia.startsWith(ano))
-      .reduce((a, s) => a + s.faturamento_adm, 0);
-
-    return NextResponse.json({ competencia: comp, faturamento, acumulado_ano, serie, linhas });
-  } catch (e: any) {
-    return NextResponse.json({ error: "Erro de rede", detail: String(e) }, { status: 502 });
-  }
+/** Data de hoje em São Paulo (o servidor roda em UTC). */
+function hojeSP(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
-/* ------------------------------------------------------------------ */
-/* POST — registra / atualiza / desfaz o registro da nota              */
-/* ------------------------------------------------------------------ */
+/**
+ * Discriminação no mesmo formato das notas emitidas manualmente:
+ *   "Taxa de Administração de locação do imóvel:"
+ *   "<endereço completo do imóvel>"
+ * A quebra de linha vira pipe no módulo do Render (tpDiscriminacao).
+ */
+function montarDiscriminacao(imovel: string | null) {
+  return `Taxa de Administração de locação do imóvel:\n${imovel || ""}`.trim();
+}
+
 export async function POST(req: Request) {
   const c = creds();
   if (!c) return NextResponse.json({ error: "Supabase não configurado." }, { status: 500 });
+
+  const base = process.env.NFSE_RENDER_URL;
+  if (!base) {
+    return NextResponse.json(
+      { error: "NFSE_RENDER_URL não configurada (URL do serviço no Render)." },
+      { status: 500 }
+    );
+  }
 
   let body: any;
   try {
@@ -122,92 +74,216 @@ export async function POST(req: Request) {
   if (!repasse_id) {
     return NextResponse.json({ error: "repasse_id é obrigatório." }, { status: 400 });
   }
-
-  const status = String(body?.status || "emitida");
-  const validos = ["a_emitir", "emitida", "cancelada", "dispensada"];
-  if (!validos.includes(status)) {
-    return NextResponse.json({ error: `status inválido: ${status}` }, { status: 400 });
-  }
-
-  const numero_nota = (body?.numero_nota ?? "").toString().trim() || null;
-  const codigo_verificacao = (body?.codigo_verificacao ?? "").toString().trim() || null;
-  const data_emissao = (body?.data_emissao ?? "").toString().trim() || null;
-  const pdf_url = (body?.pdf_url ?? "").toString().trim() || null;
-  const observacao = (body?.observacao ?? "").toString().trim() || null;
-
-  // espelha o CHECK do banco, mas com mensagem legível
-  if (status === "emitida" && (!numero_nota || !data_emissao)) {
-    return NextResponse.json(
-      { error: "Para marcar como emitida, informe o número da nota e a data de emissão." },
-      { status: 400 }
-    );
-  }
-  if (data_emissao && !/^\d{4}-\d{2}-\d{2}$/.test(data_emissao)) {
-    return NextResponse.json({ error: "data_emissao deve ser AAAA-MM-DD." }, { status: 400 });
-  }
+  const teste = body?.teste === true;
 
   try {
-    // "a_emitir" = desfazer o registro: apaga a linha e volta ao estado limpo
-    if (status === "a_emitir") {
-      const del = await fetch(
-        `${c.url}/rest/v1/adm_notas_fiscais?repasse_id=eq.${repasse_id}`,
-        { method: "DELETE", headers: c.headers, cache: "no-store" }
-      );
-      if (!del.ok) {
-        const detail = await del.text();
-        return NextResponse.json({ error: "Falha ao desfazer", detail }, { status: 502 });
-      }
-      return NextResponse.json({ ok: true, desfeito: true });
-    }
-
-    // busca o repasse para congelar os valores na nota
-    const rRep = await fetch(
-      `${c.url}/rest/v1/adm_repasses?id=eq.${repasse_id}&select=id,contrato_id,locador_id,competencia,total_recebido,taxa_adm_valor`,
+    /* ---------------------------------------------------------- */
+    /* 1. lê a linha e valida                                       */
+    /* ---------------------------------------------------------- */
+    const rLinha = await fetch(
+      `${c.url}/rest/v1/adm_v_notas?repasse_id=eq.${repasse_id}&limit=1`,
       { headers: c.headers, cache: "no-store" }
     );
-    if (!rRep.ok) {
-      const detail = await rRep.text();
-      return NextResponse.json({ error: "Falha ao ler o repasse", detail }, { status: 502 });
+    if (!rLinha.ok) {
+      return NextResponse.json(
+        { error: "Falha ao ler o repasse", detail: await rLinha.text() },
+        { status: 502 }
+      );
     }
-    const rep = ((await rRep.json()) as any[])[0];
-    if (!rep) {
+    const linha = ((await rLinha.json()) as any[])[0];
+    if (!linha) {
       return NextResponse.json({ error: `Repasse #${repasse_id} não encontrado.` }, { status: 404 });
     }
 
-    const payload = {
-      repasse_id,
-      contrato_id: rep.contrato_id,
-      locador_id: rep.locador_id,
-      competencia: rep.competencia,
-      valor_servico: n(rep.taxa_adm_valor),
-      base_recebida: n(rep.total_recebido),
-      status,
-      numero_nota,
-      codigo_verificacao,
-      data_emissao,
-      pdf_url,
-      observacao,
-    };
-
-    const up = await fetch(`${c.url}/rest/v1/adm_notas_fiscais?on_conflict=repasse_id`, {
-      method: "POST",
-      headers: {
-        ...c.headers,
-        "Content-Type": "application/json",
-        Prefer: "return=representation,resolution=merge-duplicates",
-      },
-      body: JSON.stringify(payload),
-      cache: "no-store",
-    });
-
-    if (!up.ok) {
-      const detail = await up.text();
-      return NextResponse.json({ error: "Falha ao gravar a nota", detail }, { status: 502 });
+    if (linha.status_nota === "emitida") {
+      return NextResponse.json(
+        { error: `Já existe nota emitida (nº ${linha.numero_nota}) para este repasse.` },
+        { status: 409 }
+      );
+    }
+    if (linha.status_nota === "enviando") {
+      return NextResponse.json(
+        { error: "Esta nota está em envio. Aguarde ou verifique o resultado antes de repetir." },
+        { status: 409 }
+      );
     }
 
-    const nota = ((await up.json()) as any[])[0] || null;
-    return NextResponse.json({ ok: true, nota });
+    const valor = n(linha.taxa_adm_valor);
+    if (!(valor > 0)) {
+      return NextResponse.json(
+        { error: "Taxa de administração zerada — não há serviço a faturar (erro 303)." },
+        { status: 400 }
+      );
+    }
+
+    const doc = String(linha.locador_doc || "").replace(/\D/g, "");
+    if (doc.length !== 11 && doc.length !== 14) {
+      return NextResponse.json(
+        { error: `Locador sem CPF/CNPJ válido: "${linha.locador}". Complete o cadastro antes de emitir.` },
+        { status: 400 }
+      );
+    }
+    // tomador PJ exige endereço (erros 317 e 318)
+    const end = linha.tomador_endereco || null;
+    if (doc.length === 14 && !(end && end.logradouro)) {
+      return NextResponse.json(
+        { error: `Tomador PJ ("${linha.locador}") exige endereço no cadastro do locador.` },
+        { status: 400 }
+      );
+    }
+
+    /* ---------------------------------------------------------- */
+    /* 2. a nota tem que sair dentro do mês da competência          */
+    /* ---------------------------------------------------------- */
+    const dataEmissao = hojeSP();
+    const mesCompetencia = String(linha.competencia).slice(0, 7);
+    const mesHoje = dataEmissao.slice(0, 7);
+    if (mesHoje !== mesCompetencia) {
+      return NextResponse.json(
+        {
+          error:
+            `A nota precisa ser emitida dentro do mês da competência. ` +
+            `Competência ${mesCompetencia}, hoje ${mesHoje}. ` +
+            `Emissão bloqueada para não gerar fato gerador em mês errado.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    /* ---------------------------------------------------------- */
+    /* 3. reserva o número de RPS (atômico no banco)                */
+    /* ---------------------------------------------------------- */
+    const rNum = await fetch(`${c.url}/rest/v1/rpc/adm_proximo_rps`, {
+      method: "POST",
+      headers: { ...c.headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_serie: SERIE }),
+      cache: "no-store",
+    });
+    if (!rNum.ok) {
+      return NextResponse.json(
+        { error: "Falha ao reservar número de RPS", detail: await rNum.text() },
+        { status: 502 }
+      );
+    }
+    const numeroRps = Number(await rNum.json());
+    if (!numeroRps) {
+      return NextResponse.json({ error: "Número de RPS inválido." }, { status: 502 });
+    }
+
+    /* ---------------------------------------------------------- */
+    /* 4. grava 'enviando' com o número já reservado                */
+    /* ---------------------------------------------------------- */
+    const gravar = (campos: any) =>
+      fetch(`${c.url}/rest/v1/adm_notas_fiscais?on_conflict=repasse_id`, {
+        method: "POST",
+        headers: {
+          ...c.headers,
+          "Content-Type": "application/json",
+          Prefer: "return=representation,resolution=merge-duplicates",
+        },
+        body: JSON.stringify({
+          repasse_id,
+          contrato_id: linha.contrato_id,
+          locador_id: linha.locador_id,
+          competencia: linha.competencia,
+          valor_servico: valor,
+          base_recebida: n(linha.total_recebido),
+          rps_serie: SERIE,
+          rps_numero: numeroRps,
+          rps_data_emissao: dataEmissao,
+          ...campos,
+        }),
+        cache: "no-store",
+      });
+
+    if (!teste) await gravar({ status: "enviando", emissao_erro: null });
+
+    /* ---------------------------------------------------------- */
+    /* 5. chama o Render                                            */
+    /* ---------------------------------------------------------- */
+    const headersRender: Record<string, string> = { "Content-Type": "application/json" };
+    if (process.env.NFSE_SP_TOKEN) headersRender["x-nfse-token"] = process.env.NFSE_SP_TOKEN;
+
+    let resultado: any = null;
+    let erroRede: string | null = null;
+    try {
+      const rEmitir = await fetch(`${base.replace(/\/$/, "")}/nfse-sp/emitir`, {
+        method: "POST",
+        headers: headersRender,
+        body: JSON.stringify({
+          serie: SERIE,
+          numero: numeroRps,
+          dataEmissao,
+          valorServicos: valor,
+          tomadorDoc: doc,
+          tomadorNome: linha.locador,
+          tomadorEmail: linha.locador_email || undefined,
+          tomadorEndereco: end || undefined,
+          discriminacao: montarDiscriminacao(linha.imovel),
+          teste,
+        }),
+        cache: "no-store",
+      });
+      resultado = await rEmitir.json().catch(() => null);
+      if (!rEmitir.ok && !resultado) erroRede = `HTTP ${rEmitir.status}`;
+    } catch (e: any) {
+      erroRede = String((e && e.message) || e);
+    }
+
+    /* ---------------------------------------------------------- */
+    /* 6. grava o desfecho                                          */
+    /* ---------------------------------------------------------- */
+    if (teste) {
+      // teste não grava nada — devolve o diagnóstico e libera o número
+      return NextResponse.json({
+        teste: true,
+        rps: { serie: SERIE, numero: numeroRps },
+        dataEmissao,
+        resultado,
+        aviso: "Número de RPS consumido pelo contador. Ajuste adm_rps_serie se for repetir.",
+      });
+    }
+
+    if (erroRede || !resultado || resultado.sucesso !== true) {
+      const motivo =
+        erroRede ||
+        (resultado?.erros || []).map((e: any) => `${e.codigo}: ${e.descricao}`).join(" · ") ||
+        "falha desconhecida";
+      await gravar({ status: "a_emitir", emissao_erro: motivo.slice(0, 1000) });
+      return NextResponse.json(
+        {
+          ok: false,
+          erro: motivo,
+          rps: { serie: SERIE, numero: numeroRps },
+          detalhe: resultado?.erros || null,
+        },
+        { status: 200 }
+      );
+    }
+
+    const nota = (
+      await (
+        await gravar({
+          status: "emitida",
+          numero_nota: resultado.numeroNota,
+          codigo_verificacao: resultado.codigoVerificacao,
+          data_emissao: dataEmissao,
+          emissao_erro: null,
+          enviado_em: new Date().toISOString(),
+        })
+      ).json()
+    )[0];
+
+    return NextResponse.json({
+      ok: true,
+      numeroNota: resultado.numeroNota,
+      codigoVerificacao: resultado.codigoVerificacao,
+      rps: { serie: SERIE, numero: numeroRps },
+      dataEmissao,
+      alertas: resultado.alertas || [],
+      nota,
+    });
   } catch (e: any) {
-    return NextResponse.json({ error: "Erro de rede", detail: String(e) }, { status: 502 });
+    return NextResponse.json({ error: "Erro inesperado", detail: String(e) }, { status: 500 });
   }
 }
