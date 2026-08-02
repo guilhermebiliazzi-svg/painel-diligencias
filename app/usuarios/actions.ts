@@ -17,8 +17,6 @@ function lerPermissoes(fd: FormData) {
   };
 }
 
-// Convidar: cria/atualiza o perfil (allowlist) e dispara o e-mail de convite.
-// Não mexe em is_admin (preserva se a pessoa já for admin).
 export async function convidarUsuario(_prev: AcaoState, fd: FormData): Promise<AcaoState> {
   await exigirAdmin();
   const email = String(fd.get('email') || '').trim().toLowerCase();
@@ -37,11 +35,7 @@ export async function convidarUsuario(_prev: AcaoState, fd: FormData): Promise<A
 
   revalidatePath('/usuarios');
   if (e2) {
-    return {
-      ok: true,
-      aviso:
-        'Perfil salvo. O e-mail de convite não saiu agora (a conta pode já existir) — use "Reenviar convite" se precisar.',
-    };
+    return { ok: true, aviso: 'Perfil salvo. O e-mail de convite não saiu agora (a conta pode já existir) — use "Reenviar convite" se precisar.' };
   }
   return { ok: true };
 }
@@ -51,12 +45,9 @@ export async function salvarUsuario(fd: FormData): Promise<void> {
   const email = String(fd.get('email') || '').toLowerCase();
   const ativo = fd.get('ativo') === 'on';
   const is_admin = fd.get('is_admin') === 'on';
-
-  // Trava anti-lockout: você não pode se desativar nem tirar o próprio admin.
   if (email === eu.email && (!ativo || !is_admin)) {
     throw new Error('Você não pode remover o próprio acesso de admin.');
   }
-
   const admin = supabaseAdmin();
   await admin.from('perfis').update({ ativo, is_admin, ...lerPermissoes(fd) }).eq('email', email);
   revalidatePath('/usuarios');
