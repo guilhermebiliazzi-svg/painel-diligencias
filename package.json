@@ -13,7 +13,9 @@
     "next": "16.2.4",
     "pg": "^8.20.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "docx": "^9.7.1",
+    "@supabase/ssr": "^0.6.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
