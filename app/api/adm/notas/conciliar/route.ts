@@ -114,20 +114,16 @@ export async function POST(req: Request) {
       const achou = achadas.get(`${cand.rps_serie}|${Number(cand.rps_numero)}`);
 
       if (!achou || !achou.numeroNota) {
-        // RPS não virou nota: o envio realmente não chegou. Volta para a fila.
-        if (cand.status === "enviando") {
-          await fetch(`${c.url}/rest/v1/adm_notas_fiscais?id=eq.${cand.id}`, {
-            method: "PATCH",
-            headers: { ...c.headers, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              status: "a_emitir",
-              emissao_erro:
-                `RPS ${cand.rps_serie} ${cand.rps_numero} não consta na Prefeitura — ` +
-                `o envio não chegou. Número queimado; a próxima tentativa usa outro.`,
-            }),
-            cache: "no-store",
-          });
-        }
+        // REGRA: conciliação só ACRESCENTA informação, nunca rebaixa status.
+        //
+        // "Não achei a nota" e "não consegui ler a resposta" são
+        // indistinguíveis daqui, e tratar os dois como "não foi emitida"
+        // libera para reemissão algo que pode já existir — o pior desfecho
+        // possível, porque gera nota fiscal duplicada. Foi o que essa rota
+        // fez com a nota 187 antes de eu corrigir a leitura do XML.
+        //
+        // Então: apenas registra a observação e deixa a decisão com quem
+        // pode conferir no portal.
         semNota.push({ repasse_id: cand.repasse_id, rps: `${cand.rps_serie} ${cand.rps_numero}` });
         continue;
       }
@@ -161,6 +157,11 @@ export async function POST(req: Request) {
       verificadas: candidatas.length,
       recuperadas: recuperadas.length,
       sem_nota: semNota.length,
+      aviso:
+        semNota.length > 0
+          ? "Os RPS sem nota não tiveram o status alterado. Confira no portal " +
+            "antes de reemitir: a nota pode existir e a consulta não tê-la encontrado."
+          : undefined,
       detalhe: { recuperadas, semNota },
     });
   } catch (e: any) {
