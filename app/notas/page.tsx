@@ -487,8 +487,9 @@ export default function NotasFiscais() {
                               href={l.pdf_url}
                               target="_blank"
                               rel="noopener noreferrer"
+                              title="Abrir a nota no portal da Prefeitura"
                             >
-                              ⭳ PDF
+                              ↗ Abrir nota
                             </a>
                           )}
                           {l.status_nota === "a_emitir" ? (
