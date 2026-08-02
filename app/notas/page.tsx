@@ -11,9 +11,11 @@ type Linha = {
   locador_doc: string | null;
   locador_email: string | null;
   imovel: string | null;
+  valor_aluguel: number;
   total_recebido: number;
   taxa_percentual: number | null;
   taxa_adm_valor: number;
+  taxa_esperada: number;
   status_nota: "a_emitir" | "emitida" | "cancelada" | "dispensada";
   nota_id: number | null;
   numero_nota: string | null;
@@ -24,6 +26,7 @@ type Linha = {
 type Fat = {
   competencia: string;
   qtd_contratos: number;
+  total_aluguel: number;
   total_recebido: number;
   faturamento_adm: number;
   faturamento_com_nota: number;
@@ -187,7 +190,7 @@ export default function NotasFiscais() {
   function baixarCsv() {
     const cab = [
       "contrato", "locador", "cpf_cnpj", "email", "imovel",
-      "competencia", "recebido", "taxa_pct", "taxa_valor",
+      "competencia", "aluguel", "taxa_pct", "taxa_valor",
       "situacao", "numero_nota", "data_emissao",
     ];
     const linhasCsv = view.map((l) =>
@@ -198,7 +201,7 @@ export default function NotasFiscais() {
         l.locador_email || "",
         (l.imovel || "").replace(/;/g, ","),
         l.competencia,
-        l.total_recebido.toFixed(2).replace(".", ","),
+        l.valor_aluguel.toFixed(2).replace(".", ","),
         l.taxa_percentual ?? "",
         l.taxa_adm_valor.toFixed(2).replace(".", ","),
         l.status_nota,
@@ -250,8 +253,8 @@ export default function NotasFiscais() {
                 <span>Taxa de administração · {mesLabel(competencia)}</span>
               </div>
               <div className="vj-num">
-                <b>{brl(fat.total_recebido)}</b>
-                <span>Recebido dos locatários</span>
+                <b>{brl(fat.total_aluguel)}</b>
+                <span>Aluguéis recebidos (base da taxa)</span>
               </div>
               <div className="vj-num vj-num-w">
                 <b>{brl(fat.faturamento_sem_nota)}</b>
@@ -334,7 +337,7 @@ export default function NotasFiscais() {
                   <tr>
                     <th>Contrato</th>
                     <th>Locador (tomador)</th>
-                    <th className="vj-r vj-comp">Recebido</th>
+                    <th className="vj-r vj-comp">Aluguel</th>
                     <th className="vj-r vj-comp">%</th>
                     <th className="vj-r">Taxa</th>
                     <th>Nota</th>
@@ -350,11 +353,25 @@ export default function NotasFiscais() {
                           <div className="vj-nome">{l.locador}</div>
                           <div className="vj-end">{l.locador_doc || "sem CPF/CNPJ"} · {l.imovel}</div>
                         </td>
-                        <td className="vj-r vj-comp vj-compval">{brl(l.total_recebido)}</td>
+                        <td className="vj-r vj-comp vj-compval" data-label="Aluguel">
+                          {brl(l.valor_aluguel)}
+                        </td>
                         <td className="vj-r vj-comp vj-compval">
                           {l.taxa_percentual != null ? `${l.taxa_percentual}%` : "—"}
                         </td>
-                        <td className="vj-r vj-money" data-label="Taxa">{brl(l.taxa_adm_valor)}</td>
+                        <td className="vj-r vj-money" data-label="Taxa">
+                          {brl(l.taxa_adm_valor)}
+                          {Math.abs(l.taxa_adm_valor - l.taxa_esperada) > 0.02 && (
+                            <span
+                              className="vj-diverge"
+                              title={`Pelo percentual (${l.taxa_percentual}% de ${brl(
+                                l.valor_aluguel
+                              )}) seria ${brl(l.taxa_esperada)}`}
+                            >
+                              ≠
+                            </span>
+                          )}
+                        </td>
                         <td data-label="Nota">
                           {l.status_nota === "emitida" ? (
                             <span className="vj-tag vj-tag-pago">
@@ -399,7 +416,8 @@ export default function NotasFiscais() {
                           <td colSpan={7}>
                             <div className="vj-form">
                               <div className="vj-formhead">
-                                Contrato #{l.contrato_id} · {l.locador} · serviço de {brl(l.taxa_adm_valor)}
+                                Contrato #{l.contrato_id} · {l.locador} · {l.taxa_percentual}% sobre
+                                aluguel de {brl(l.valor_aluguel)} · serviço de {brl(l.taxa_adm_valor)}
                               </div>
                               <div className="vj-formgrid">
                                 <label className="vj-field">
@@ -538,6 +556,7 @@ const CSS = `
 .vj-btn-emitir:hover:not(:disabled){background:#B4131F}
 .vj-btn-emitir-sm{padding:6px 12px;font-size:13px}
 .vj-empty{color:var(--mut);margin:6px 0}
+.vj-diverge{display:inline-block;margin-left:6px;color:var(--verm);font-weight:700;cursor:help}
 .vj-formrow td{background:#F7FAFF;border-bottom:2px solid var(--linha)}
 .vj-form{padding:6px 2px}
 .vj-formhead{font-weight:600;margin-bottom:14px;color:var(--azul)}
