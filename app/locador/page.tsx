@@ -11,7 +11,7 @@ export const metadata = { title: 'Meus repasses — Ville Jardins' };
 type Repasse = {
   id: number; contrato_id: number; competencia: string;
   total_liquido: number | null; deducao_iptu: number | null; deducao_condominio: number | null;
-  pdf_url: string | null; status_envio: string | null;
+  pdf_url: string | null; status_envio: string | null; link?: string | null;
 };
 
 const brl = (n: number | null | undefined) =>
@@ -65,7 +65,24 @@ export default async function LocadorPage() {
     .select('id,contrato_id,competencia,total_liquido,deducao_iptu,deducao_condominio,pdf_url,status_envio')
     .eq('locador_id', locador.id)
     .order('competencia', { ascending: false });
-  const repasses = (repRows ?? []) as Repasse[];
+  const brutos = (repRows ?? []) as Repasse[];
+  // Quando o PDF está no Storage do Supabase (bucket privado), gera um link
+  // assinado temporário. Se for URL externa, usa direto.
+  const repasses = await Promise.all(
+    brutos.map(async (r) => {
+      let link: string | null = r.pdf_url;
+      if (r.pdf_url) {
+        const m = r.pdf_url.match(/\/storage\/v1\/object\/(?:public\/)?([^/]+)\/(.+)$/);
+        if (m) {
+          const { data: sg } = await adm.storage
+            .from(m[1])
+            .createSignedUrl(decodeURIComponent(m[2]), 3600);
+          link = sg?.signedUrl ?? r.pdf_url;
+        }
+      }
+      return { ...r, link };
+    })
+  );
 
   // Endereço de cada contrato (mesmo padrão de embed usado no admin)
   const ids = [...new Set(repasses.map((r) => r.contrato_id).filter(Boolean))];
@@ -122,8 +139,8 @@ export default async function LocadorPage() {
                           {Number(r.deducao_condominio) ? ` · Condomínio ${brl(r.deducao_condominio)}` : ''}
                         </p>
                       </div>
-                      {r.pdf_url ? (
-                        <a href={r.pdf_url} target="_blank" rel="noopener noreferrer"
+                      {r.link ? (
+                        <a href={r.link} target="_blank" rel="noopener noreferrer"
                           className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-blue-600 transition hover:bg-slate-50">
                           Abrir recibo (PDF)
                         </a>
