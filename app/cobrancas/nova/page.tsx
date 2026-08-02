@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import DocumentosLocador from "../../_components/DocumentosLocador";
 
 /* ---------- tipos ---------- */
 type Contrato = {
@@ -710,6 +711,10 @@ export default function ConferenciaCobranca() {
               Nova cobrança
             </button>
           </section>
+        )}
+
+        {contratoId && /^\d{4}-\d{2}$/.test(competencia) && (
+          <DocumentosLocador contratoId={contratoId} competencia={competencia} origem="cobranca" />
         )}
 
         {carregando && <div className="vj-load">Processando…</div>}

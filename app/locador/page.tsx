@@ -96,6 +96,34 @@ export default async function LocadorPage() {
     }
   }
 
+  // Documentos (boletos e comprovantes de IPTU/condomínio) por contrato+competência.
+  // Gera link assinado temporário para cada arquivo do bucket privado.
+  const docsPorChave = new Map<string, { tipo: string; nome: string | null; url: string | null }[]>();
+  if (ids.length) {
+    const { data: docRows } = await adm
+      .from('adm_documentos')
+      .select('contrato_id,competencia,tipo,nome,bucket,path')
+      .in('contrato_id', ids);
+    for (const d of (docRows ?? []) as { contrato_id: number; competencia: string; tipo: string; nome: string | null; bucket: string | null; path: string }[]) {
+      const chave = `${d.contrato_id}|${String(d.competencia).slice(0, 7)}`;
+      const { data: sg } = await adm.storage.from(d.bucket || 'documentos').createSignedUrl(d.path, 3600);
+      const arr = docsPorChave.get(chave) ?? [];
+      arr.push({ tipo: d.tipo, nome: d.nome ?? null, url: sg?.signedUrl ?? null });
+      docsPorChave.set(chave, arr);
+    }
+  }
+  const ORDEM_DOC = ['boleto_iptu', 'boleto_condominio', 'comprovante_iptu', 'comprovante_condominio'];
+  const DOC_LABEL: Record<string, string> = {
+    boleto_iptu: 'Boleto IPTU',
+    boleto_condominio: 'Boleto condomínio',
+    comprovante_iptu: 'Comprovante IPTU',
+    comprovante_condominio: 'Comprovante condomínio',
+  };
+  const docsDoRepasse = (r: Repasse) => {
+    const arr = docsPorChave.get(`${r.contrato_id}|${String(r.competencia).slice(0, 7)}`) ?? [];
+    return ORDEM_DOC.map((t) => arr.find((d) => d.tipo === t)).filter(Boolean) as { tipo: string; nome: string | null; url: string | null }[];
+  };
+
   // Agrupa por imóvel/contrato
   const grupos = new Map<number, { titulo: string; itens: Repasse[] }>();
   for (const r of repasses) {
@@ -112,7 +140,7 @@ export default async function LocadorPage() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Ville Jardins — Portal do locador</p>
             <h1 className="mt-1 text-2xl font-semibold text-slate-900 sm:text-3xl">Olá, {primeiroNome}</h1>
-            <p className="mt-1 text-sm text-slate-600">Seus recibos de repasse.</p>
+            <p className="mt-1 text-sm text-slate-600">Seus recibos, boletos e comprovantes de IPTU e condomínio.</p>
           </div>
           <form action={sairLocador}>
             <button className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 hover:text-slate-900">Sair</button>
@@ -129,26 +157,43 @@ export default async function LocadorPage() {
               <section key={g.titulo} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <h2 className="text-base font-semibold text-slate-900">{g.titulo}</h2>
                 <div className="mt-3 divide-y divide-slate-100">
-                  {g.itens.map((r) => (
-                    <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                      <div>
-                        <p className="text-sm font-medium text-slate-900">{mesAno(r.competencia)}</p>
-                        <p className="text-xs text-slate-500">
-                          Líquido {brl(r.total_liquido)}
-                          {Number(r.deducao_iptu) ? ` · IPTU ${brl(r.deducao_iptu)}` : ''}
-                          {Number(r.deducao_condominio) ? ` · Condomínio ${brl(r.deducao_condominio)}` : ''}
-                        </p>
+                  {g.itens.map((r) => {
+                    const docs = docsDoRepasse(r);
+                    return (
+                    <div key={r.id} className="py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium text-slate-900">{mesAno(r.competencia)}</p>
+                          <p className="text-xs text-slate-500">
+                            Líquido {brl(r.total_liquido)}
+                            {Number(r.deducao_iptu) ? ` · IPTU ${brl(r.deducao_iptu)}` : ''}
+                            {Number(r.deducao_condominio) ? ` · Condomínio ${brl(r.deducao_condominio)}` : ''}
+                          </p>
+                        </div>
+                        {r.link ? (
+                          <a href={r.link} target="_blank" rel="noopener noreferrer"
+                            className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-blue-600 transition hover:bg-slate-50">
+                            Abrir recibo (PDF)
+                          </a>
+                        ) : (
+                          <span className="shrink-0 text-xs text-slate-400">recibo em breve</span>
+                        )}
                       </div>
-                      {r.link ? (
-                        <a href={r.link} target="_blank" rel="noopener noreferrer"
-                          className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-blue-600 transition hover:bg-slate-50">
-                          Abrir recibo (PDF)
-                        </a>
-                      ) : (
-                        <span className="shrink-0 text-xs text-slate-400">recibo em breve</span>
+                      {docs.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {docs.map((d) =>
+                            d.url ? (
+                              <a key={d.tipo} href={d.url} target="_blank" rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100 hover:text-blue-600">
+                                📄 {DOC_LABEL[d.tipo] || d.tipo}
+                              </a>
+                            ) : null
+                          )}
+                        </div>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </section>
             ))}

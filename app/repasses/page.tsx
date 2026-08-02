@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import DocumentosLocador from "../_components/DocumentosLocador";
 
 type Contrato = { id: number; locatario: string; endereco: string };
 type Linha = { descricao: string; categoria: string; valor: number | string };
@@ -233,6 +234,10 @@ export default function Repasse() {
                 {salvando ? "Gerando…" : "Salvar e gerar recibo"}
               </button>
             </div>
+
+            {contratoId && (
+              <DocumentosLocador contratoId={contratoId} competencia={competencia} origem="repasse" />
+            )}
           </>
         )}
       </main>
