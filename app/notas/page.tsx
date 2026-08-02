@@ -73,6 +73,7 @@ export default function NotasFiscais() {
   const [msg, setMsg] = useState<string | null>(null);
 
   const [emitindo, setEmitindo] = useState(false);
+  const [conciliando, setConciliando] = useState(false);
   const [progresso, setProgresso] = useState<string | null>(null);
   const [msgEmissao, setMsgEmissao] = useState<string | null>(null);
 
@@ -215,6 +216,36 @@ export default function NotasFiscais() {
     setMsgEmissao(msg);
     setEmitindo(false);
     await carregar(competencia);
+  }
+
+  // Pergunta à Prefeitura se os RPS reservados viraram nota. Recupera o
+  // desfecho quando a emissão deu certo lá e o registro falhou aqui.
+  async function conciliar() {
+    if (conciliando || emitindo) return;
+    setConciliando(true);
+    setMsgEmissao("Consultando a Prefeitura pelos RPS reservados…");
+    try {
+      const res = await fetch("/api/adm/notas/conciliar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ competencia }),
+      });
+      const d = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        setMsgEmissao(`Erro ao conciliar: ${d?.error || "falha"}.`);
+      } else if (d?.mensagem) {
+        setMsgEmissao(d.mensagem);
+      } else {
+        let m = `Conciliação: ${d.verificadas} verificada(s) · ${d.recuperadas} recuperada(s)`;
+        if (d.sem_nota > 0) m += ` · ${d.sem_nota} sem nota na Prefeitura (RPS queimado)`;
+        setMsgEmissao(m);
+      }
+      await carregar(competencia);
+    } catch {
+      setMsgEmissao("Erro de rede ao conciliar.");
+    } finally {
+      setConciliando(false);
+    }
   }
 
   // Uma linha só pode ser emitida se tiver base, documento e — para PJ — endereço.
@@ -376,10 +407,20 @@ export default function NotasFiscais() {
                 ⭳ CSV para a contabilidade
               </button>
             )}
+            {linhas.length > 0 && (
+              <button
+                className="vj-btn-status"
+                disabled={conciliando || emitindo}
+                onClick={conciliar}
+                title="Pergunta à Prefeitura se os RPS reservados já viraram nota"
+              >
+                {conciliando ? "Conciliando…" : "↻ Conciliar com a Prefeitura"}
+              </button>
+            )}
             {emitiveis.length > 0 && (
               <button
                 className="vj-btn-emitir"
-                disabled={emitindo}
+                disabled={emitindo || conciliando}
                 onClick={() => emitirNotas(emitiveis.map((l) => l.repasse_id))}
               >
                 {emitindo ? "Emitindo…" : `Emitir ${emitiveis.length} nota(s) na Prefeitura`}
