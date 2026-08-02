@@ -20,6 +20,10 @@ type Linha = {
   nota_id: number | null;
   numero_nota: string | null;
   data_emissao: string | null;
+  rps_serie: string | null;
+  rps_numero: number | null;
+  emissao_erro: string | null;
+  tomador_endereco: any | null;
   pdf_url: string | null;
   observacao: string | null;
 };
@@ -67,6 +71,10 @@ export default function NotasFiscais() {
   const [fObs, setFObs] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+
+  const [emitindo, setEmitindo] = useState(false);
+  const [progresso, setProgresso] = useState<string | null>(null);
+  const [msgEmissao, setMsgEmissao] = useState<string | null>(null);
 
   const [filtro, setFiltro] = useState<string>("todas");
   const [busca, setBusca] = useState("");
@@ -160,6 +168,71 @@ export default function NotasFiscais() {
       setSalvando(false);
     }
   }
+
+  // Emite uma nota por requisição, em série. Cada chamada reserva seu
+  // próprio número de RPS e grava o desfecho — uma falha não contamina
+  // as outras nem deixa número em estado indefinido.
+  async function emitirNotas(ids: number[]) {
+    if (ids.length === 0 || emitindo) return;
+    const qtd = ids.length;
+    if (
+      !confirm(
+        `Emitir ${qtd} nota(s) fiscal(is) na Prefeitura de São Paulo?\n\n` +
+          "Isso gera documento fiscal real. Cancelar NFS-e tem prazo e regras."
+      )
+    )
+      return;
+
+    setEmitindo(true);
+    setMsgEmissao(null);
+    let ok = 0;
+    const falhas: string[] = [];
+
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      setProgresso(
+        `Emitindo ${i + 1} de ${qtd}… não feche a página.` +
+          (ok || falhas.length ? ` — ${ok} ok · ${falhas.length} falha(s)` : "")
+      );
+      try {
+        const res = await fetch("/api/adm/notas/emitir", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ repasse_id: id }),
+        });
+        const d = await res.json().catch(() => ({} as any));
+        if (!res.ok) falhas.push(`#${id}: ${d?.error || `HTTP ${res.status}`}`);
+        else if (d?.ok) ok++;
+        else falhas.push(`#${id}: ${d?.erro || "falha na emissão"}`);
+      } catch {
+        falhas.push(`#${id}: erro de rede`);
+      }
+    }
+
+    let msg = `✓ ${ok} de ${qtd} nota(s) emitida(s)`;
+    if (falhas.length) msg += ` · ⚠ ${falhas.length} falha(s) — ${falhas.join(" · ")}`;
+    setProgresso(null);
+    setMsgEmissao(msg);
+    setEmitindo(false);
+    await carregar(competencia);
+  }
+
+  // Uma linha só pode ser emitida se tiver base, documento e — para PJ — endereço.
+  function bloqueio(l: Linha): string | null {
+    if (l.taxa_adm_valor <= 0) return "Taxa zerada — nada a faturar";
+    const doc = String(l.locador_doc || "").replace(/\D/g, "");
+    if (doc.length !== 11 && doc.length !== 14) return "Locador sem CPF/CNPJ";
+    if (doc.length === 14 && !l.tomador_endereco) return "Tomador PJ exige endereço no cadastro";
+    if (l.competencia.slice(0, 7) !== new Date().toISOString().slice(0, 7))
+      return "Fora do mês da competência";
+    return null;
+  }
+
+  const emitiveis = useMemo(
+    () => linhas.filter((l) => l.status_nota === "a_emitir" && !bloqueio(l)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [linhas]
+  );
 
   const contagem = useMemo(() => {
     const c: Record<string, number> = { todas: linhas.length, a_emitir: 0, emitida: 0, cancelada: 0, dispensada: 0 };
@@ -299,9 +372,23 @@ export default function NotasFiscais() {
               Notas <span className="vj-count">{contagem.a_emitir} a emitir</span>
             </h2>
             {linhas.length > 0 && (
-              <button className="vj-btn-status" onClick={baixarCsv}>⭳ CSV para a contabilidade</button>
+              <button className="vj-btn-status" disabled={emitindo} onClick={baixarCsv}>
+                ⭳ CSV para a contabilidade
+              </button>
+            )}
+            {emitiveis.length > 0 && (
+              <button
+                className="vj-btn-emitir"
+                disabled={emitindo}
+                onClick={() => emitirNotas(emitiveis.map((l) => l.repasse_id))}
+              >
+                {emitindo ? "Emitindo…" : `Emitir ${emitiveis.length} nota(s) na Prefeitura`}
+              </button>
             )}
           </div>
+
+          {progresso && <div className="vj-msg vj-msgprog">{progresso}</div>}
+          {msgEmissao && <div className="vj-msg">{msgEmissao}</div>}
 
           {linhas.length === 0 ? (
             <p className="vj-empty">
@@ -382,7 +469,15 @@ export default function NotasFiscais() {
                           ) : l.status_nota === "cancelada" ? (
                             <span className="vj-tag vj-tag-exp">cancelada</span>
                           ) : (
-                            <span className="vj-tag vj-tag-wait">a emitir</span>
+                            <>
+                              <span className="vj-tag vj-tag-wait">a emitir</span>
+                              {l.emissao_erro && (
+                                <div className="vj-erroinline" title={l.emissao_erro}>
+                                  ⚠ {l.emissao_erro.slice(0, 90)}
+                                  {l.rps_numero ? ` (RPS ${l.rps_serie} ${l.rps_numero} queimado)` : ""}
+                                </div>
+                              )}
+                            </>
                           )}
                         </td>
                         <td className="vj-go">
@@ -397,9 +492,24 @@ export default function NotasFiscais() {
                             </a>
                           )}
                           {l.status_nota === "a_emitir" ? (
-                            <button className="vj-btn-emitir vj-btn-emitir-sm" onClick={() => abrir(l)}>
-                              Registrar nota
-                            </button>
+                            <>
+                              {bloqueio(l) ? (
+                                <span className="vj-bloq" title={bloqueio(l) as string}>
+                                  {bloqueio(l)}
+                                </span>
+                              ) : (
+                                <button
+                                  className="vj-btn-emitir vj-btn-emitir-sm"
+                                  disabled={emitindo}
+                                  onClick={() => emitirNotas([l.repasse_id])}
+                                >
+                                  Emitir
+                                </button>
+                              )}
+                              <button className="vj-linkbtn" onClick={() => abrir(l)}>
+                                Registrar manual
+                              </button>
+                            </>
                           ) : (
                             <>
                               <button className="vj-linkbtn" onClick={() => abrir(l)}>Editar</button>
@@ -556,6 +666,10 @@ const CSS = `
 .vj-btn-emitir:hover:not(:disabled){background:#B4131F}
 .vj-btn-emitir-sm{padding:6px 12px;font-size:13px}
 .vj-empty{color:var(--mut);margin:6px 0}
+.vj-msg{background:#EAF0FA;border:1px solid #C9D8F5;color:var(--azul);padding:10px 14px;border-radius:9px;font-size:14px;margin:10px 0}
+.vj-msgprog{background:#FBF3E2;border-color:#F0DFB8;color:#6B5410;font-weight:600}
+.vj-bloq{display:inline-block;font-size:12px;color:var(--mut);background:#F1F3F7;border:1px solid var(--linha);padding:4px 9px;border-radius:8px;white-space:normal;max-width:190px;line-height:1.3}
+.vj-erroinline{margin-top:5px;font-size:11px;color:var(--verm);line-height:1.35;max-width:260px}
 .vj-diverge{display:inline-block;margin-left:6px;color:var(--verm);font-weight:700;cursor:help}
 .vj-formrow td{background:#F7FAFF;border-bottom:2px solid var(--linha)}
 .vj-form{padding:6px 2px}
