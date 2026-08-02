@@ -56,8 +56,10 @@ export async function GET(req: Request) {
 
     const linhas = ((await rLinhas.json()) as any[]).map((l) => ({
       ...l,
+      valor_aluguel: n(l.valor_aluguel),
       total_recebido: n(l.total_recebido),
       taxa_adm_valor: n(l.taxa_adm_valor),
+      taxa_esperada: n(l.taxa_esperada),
       taxa_percentual: l.taxa_percentual == null ? null : Number(l.taxa_percentual),
     }));
 
@@ -67,6 +69,7 @@ export async function GET(req: Request) {
       .map((f) => ({
         competencia: String(f.competencia).slice(0, 7),
         qtd_contratos: n(f.qtd_contratos),
+        total_aluguel: n(f.total_aluguel),
         total_recebido: n(f.total_recebido),
         faturamento_adm: n(f.faturamento_adm),
         faturamento_com_nota: n(f.faturamento_com_nota),
@@ -80,6 +83,7 @@ export async function GET(req: Request) {
       serie.find((s) => s.competencia === comp) || {
         competencia: comp,
         qtd_contratos: 0,
+        total_aluguel: 0,
         total_recebido: 0,
         faturamento_adm: 0,
         faturamento_com_nota: 0,
