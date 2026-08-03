@@ -18,6 +18,8 @@ type Pagamento = {
 type Item = {
   contrato_id: number;
   endereco: string;
+  complemento?: string | null;
+  locatario?: string | null;
   subtipo: "iptu" | "condominio";
   rotulo: string;
   valor: number;
@@ -270,6 +272,7 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
         <div>
           <span className="vj-tag">{item.rotulo}</span>
           <b className="vj-endereco">{item.endereco}</b>
+          <span className="vj-sub-id">Contrato #{item.contrato_id}{item.locatario ? ` · Locatário: ${item.locatario}` : ""}</span>
         </div>
         <div className="vj-valor-ref">
           {item.valor > 0 ? <>Valor de referência <b>{brl(item.valor)}</b></> : <span className="vj-semvalor">sem valor lançado</span>}
@@ -367,6 +370,7 @@ const CSS = `
 .vj-boleto-cab{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:10px}
 .vj-tag{display:inline-block;background:#EEF2FB;color:var(--azul);font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
 .vj-endereco{display:block;font-size:15px}
+.vj-sub-id{display:block;font-size:12px;color:var(--mut);margin-top:3px}
 .vj-valor-ref{font-size:13px;color:var(--mut);text-align:right}
 .vj-valor-ref b{color:var(--txt)}
 .vj-semvalor{color:#B7791F}

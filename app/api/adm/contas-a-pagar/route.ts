@@ -22,7 +22,7 @@ export async function GET(req: Request) {
   // contratos em que a imobiliária paga IPTU e/ou condomínio
   const { data: contratos, error } = await adm
     .from("adm_contratos")
-    .select("id,iptu_responsavel,condominio_responsavel,imovel:adm_imoveis(rua,numero,bairro)")
+    .select("id,iptu_responsavel,condominio_responsavel,imovel:adm_imoveis(rua,numero,complemento,bairro),locatario:adm_locatarios(nome)")
     .or("iptu_responsavel.eq.imobiliaria,condominio_responsavel.eq.imobiliaria");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -75,7 +75,12 @@ export async function GET(req: Request) {
   const backfills: Promise<any>[] = [];
   for (const c of contratos as any[]) {
     const im = c.imovel || {};
-    const endereco = [im.rua, im.numero, im.bairro].filter(Boolean).join(", ") || `Contrato #${c.id}`;
+    const complemento = im.complemento ? String(im.complemento).trim() : "";
+    const endereco =
+      [im.rua, im.numero].filter(Boolean).join(", ") +
+      (complemento ? ` — ${complemento}` : "") +
+      (im.bairro ? `, ${im.bairro}` : "") || `Contrato #${c.id}`;
+    const locatario = c.locatario?.nome || null;
     const dv = despPor[c.id] || { iptu: 0, condominio: 0 };
 
     for (const sub of ["iptu", "condominio"] as const) {
@@ -93,6 +98,8 @@ export async function GET(req: Request) {
       itens.push({
         contrato_id: c.id,
         endereco,
+        complemento: complemento || null,
+        locatario,
         subtipo: sub,
         rotulo: sub === "iptu" ? "IPTU" : "Condomínio",
         valor,

@@ -114,10 +114,11 @@ export default async function LocadorPage({ searchParams }: { searchParams: Prom
   const endPorContrato: Record<number, string> = {};
   if (ids.length) {
     const { data: cs } = await adm
-      .from('adm_contratos').select('id,imovel:adm_imoveis(rua,numero,bairro)').in('id', ids);
-    for (const c of (cs ?? []) as { id: number; imovel: { rua?: string; numero?: string; bairro?: string } | null }[]) {
+      .from('adm_contratos').select('id,imovel:adm_imoveis(rua,numero,complemento,bairro)').in('id', ids);
+    for (const c of (cs ?? []) as { id: number; imovel: { rua?: string; numero?: string; complemento?: string; bairro?: string } | null }[]) {
       const im = c.imovel || {};
-      endPorContrato[c.id] = [im.rua, im.numero, im.bairro].filter(Boolean).join(', ') || `Contrato #${c.id}`;
+      const compl = im.complemento ? ` — ${String(im.complemento).trim()}` : '';
+      endPorContrato[c.id] = ([im.rua, im.numero].filter(Boolean).join(', ') + compl + (im.bairro ? `, ${im.bairro}` : '')) || `Contrato #${c.id}`;
     }
   }
 
