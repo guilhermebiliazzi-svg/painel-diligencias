@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { salvarComprovanteBoleto } from "@/lib/salvar-comprovante";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,7 +55,7 @@ export async function GET(req: Request) {
   // pagamentos já lançados
   const { data: pgs } = await adm
     .from("adm_pagamentos")
-    .select("id,contrato_id,subtipo,status,inter_codigo,inter_status,valor,vencimento,linha_digitavel")
+    .select("id,contrato_id,subtipo,status,inter_codigo,inter_status,valor,vencimento,linha_digitavel,comprovante_path")
     .eq("tipo", "boleto")
     .eq("competencia", compData)
     .in("contrato_id", ids);
@@ -71,6 +72,7 @@ export async function GET(req: Request) {
   }
 
   const itens: any[] = [];
+  const backfills: Promise<any>[] = [];
   for (const c of contratos as any[]) {
     const im = c.imovel || {};
     const endereco = [im.rua, im.numero, im.bairro].filter(Boolean).join(", ") || `Contrato #${c.id}`;
@@ -84,6 +86,10 @@ export async function GET(req: Request) {
       // só entra na lista se há valor a pagar ou um boleto anexado
       if (!(valor > 0) && !boleto) continue;
       const pg = pgPor[`${c.id}|${sub}`] || null;
+      // boleto pago mas sem comprovante ainda → gera (retroativo), best-effort
+      if (pg && pg.status === "efetivado" && !pg.comprovante_path) {
+        backfills.push(salvarComprovanteBoleto(pg.id, { subtipo: sub }).catch(() => null));
+      }
       itens.push({
         contrato_id: c.id,
         endereco,
@@ -105,5 +111,6 @@ export async function GET(req: Request) {
     }
   }
 
+  if (backfills.length) await Promise.all(backfills);
   return NextResponse.json({ competencia: comp, itens });
 }

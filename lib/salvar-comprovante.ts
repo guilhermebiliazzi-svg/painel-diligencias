@@ -67,7 +67,7 @@ export async function salvarComprovantePix(
 // comprovante_condominio — assim aparece no portal do locador, no slot certo.
 export async function salvarComprovanteBoleto(
   pagamentoId: number,
-  extra?: { beneficiario?: string | null; autenticacao?: string | null; nsu?: string | null; dataPagamento?: string | null; valorPago?: number | null }
+  extra?: { beneficiario?: string | null; autenticacao?: string | null; nsu?: string | null; dataPagamento?: string | null; valorPago?: number | null; subtipo?: "iptu" | "condominio" | null }
 ): Promise<{ path: string; url: string | null } | null> {
   const adm = supabaseAdmin();
   const bucket = "documentos";
@@ -77,7 +77,9 @@ export async function salvarComprovanteBoleto(
     .select("id,subtipo,contrato_id,competencia,valor,linha_digitavel,vencimento,inter_codigo,comprovante_bucket,comprovante_path")
     .eq("id", pagamentoId)
     .single();
-  if (!pg || (pg.subtipo !== "iptu" && pg.subtipo !== "condominio")) return null;
+  if (!pg) return null;
+  const subtipo = (extra?.subtipo ?? pg.subtipo) as "iptu" | "condominio" | null;
+  if (subtipo !== "iptu" && subtipo !== "condominio") return null;
 
   if (pg.comprovante_path) {
     const { data: sg } = await adm.storage.from(pg.comprovante_bucket || bucket).createSignedUrl(pg.comprovante_path, 3600);
@@ -86,7 +88,7 @@ export async function salvarComprovanteBoleto(
 
   const comp = String(pg.competencia).slice(0, 7);
   const pdf = await gerarComprovanteBoletoPDF({
-    subtipo: pg.subtipo as "iptu" | "condominio",
+    subtipo,
     valorPago: Number(extra?.valorPago ?? pg.valor),
     beneficiario: extra?.beneficiario ?? null,
     linhaDigitavel: pg.linha_digitavel ?? null,
@@ -112,10 +114,10 @@ export async function salvarComprovanteBoleto(
     {
       contrato_id: pg.contrato_id,
       competencia: pg.competencia,
-      tipo: `comprovante_${pg.subtipo}`,
+      tipo: `comprovante_${subtipo}`,
       bucket,
       path,
-      nome: `Comprovante ${pg.subtipo === "iptu" ? "IPTU" : "condomínio"} ${comp}.pdf`,
+      nome: `Comprovante ${subtipo === "iptu" ? "IPTU" : "condomínio"} ${comp}.pdf`,
       origem: "pagamento",
       atualizado_em: new Date().toISOString(),
     },
