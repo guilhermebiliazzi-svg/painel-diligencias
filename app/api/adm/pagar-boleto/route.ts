@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { interFetch } from "@/lib/inter";
+import { salvarComprovanteBoleto } from "@/lib/salvar-comprovante";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -154,7 +155,20 @@ export async function GET(req: Request) {
         .from("adm_pagamentos")
         .update({ status: novo, inter_status: statusInter || null, inter_retorno: item, atualizado_em: new Date().toISOString() })
         .eq("id", pagamento.id);
-      return NextResponse.json({ pagamento: { ...pagamento, status: novo, inter_status: statusInter } });
+      let comprovante_url: string | null = null;
+      if (efetivado) {
+        try {
+          const comp = await salvarComprovanteBoleto(pagamento.id, {
+            beneficiario: item.nomeBeneficiario ?? null,
+            autenticacao: item.autenticacao != null ? String(item.autenticacao) : null,
+            nsu: item.nsu != null ? String(item.nsu) : null,
+            dataPagamento: item.dataPagamento ?? null,
+            valorPago: item.valorPago != null ? Number(item.valorPago) : null,
+          });
+          comprovante_url = comp?.url ?? null;
+        } catch (e) {}
+      }
+      return NextResponse.json({ pagamento: { ...pagamento, status: novo, inter_status: statusInter }, comprovante_url });
     }
   }
 

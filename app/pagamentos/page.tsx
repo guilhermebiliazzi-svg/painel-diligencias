@@ -111,6 +111,7 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
   const [enviando, setEnviando] = useState(false);
   const [checando, setChecando] = useState(false);
   const [cancelando, setCancelando] = useState(false);
+  const [comprovante, setComprovante] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [lida, setLida] = useState(false);
@@ -222,6 +223,7 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
       const r = await fetch(`/api/adm/pagar-boleto?pagamento=${pagamentoId}`, { cache: "no-store" });
       const d = await r.json();
       if (d.pagamento) setPg((p) => (p ? { ...p, status: d.pagamento.status, inter_status: d.pagamento.inter_status } : p));
+      if (d.comprovante_url) setComprovante(d.comprovante_url);
     } catch {
       /* silencioso */
     } finally {
@@ -279,6 +281,9 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
             Valor {brl(pg!.valor)}
             {pg!.inter_codigo ? <> · transação {pg!.inter_codigo}</> : null}
           </p>
+          {pg!.status === "efetivado" && comprovante && (
+            <a className="vj-link" href={comprovante} target="_blank" rel="noopener noreferrer">📄 Baixar comprovante (PDF)</a>
+          )}
           {pg!.status !== "efetivado" && pg!.status !== "cancelado" && pagamentoId && (
             <div className="vj-status-acoes">
               <button className="vj-link" onClick={checar} disabled={checando}>

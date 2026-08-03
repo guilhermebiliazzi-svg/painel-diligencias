@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { salvarComprovantePix } from "@/lib/salvar-comprovante";
+import { salvarComprovantePix, salvarComprovanteBoleto } from "@/lib/salvar-comprovante";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -75,9 +75,26 @@ export async function POST(req: Request, ctx: { params: Promise<{ secret: string
         if (!codigo) continue;
         const status = String(ev.status || ev.statusPagamento || "").toUpperCase();
         const efetivado = processado(status);
+        const { data: bpgs } = await adm
+          .from("adm_pagamentos")
+          .select("id")
+          .eq("tipo", "boleto")
+          .eq("inter_codigo", codigo)
+          .limit(1);
+        const bpg = bpgs?.[0];
+        if (!bpg) continue;
         const upd: any = { inter_status: status || null, inter_retorno: ev, atualizado_em: new Date().toISOString() };
         if (efetivado) upd.status = "efetivado";
-        await adm.from("adm_pagamentos").update(upd).eq("tipo", "boleto").eq("inter_codigo", codigo);
+        await adm.from("adm_pagamentos").update(upd).eq("id", bpg.id);
+        if (efetivado) {
+          await salvarComprovanteBoleto(bpg.id, {
+            beneficiario: ev.nomeBeneficiario ?? ev.recebedor?.nome ?? null,
+            autenticacao: ev.autenticacao != null ? String(ev.autenticacao) : null,
+            nsu: ev.nsu != null ? String(ev.nsu) : null,
+            dataPagamento: ev.dataPagamento ?? ev.dataHoraMovimento ?? null,
+            valorPago: ev.valorPago != null ? Number(ev.valorPago) : ev.valor != null ? Number(ev.valor) : null,
+          });
+        }
       }
     } catch (e) {
       // não falha o webhook inteiro por causa de um evento

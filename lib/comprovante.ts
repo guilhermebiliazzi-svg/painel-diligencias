@@ -95,3 +95,78 @@ export async function gerarComprovantePixPDF(d: DadosComprovantePix): Promise<Ui
 
   return pdf.save();
 }
+
+export type DadosComprovanteBoleto = {
+  subtipo: "iptu" | "condominio";
+  valorPago: number;
+  beneficiario?: string | null;
+  linhaDigitavel?: string | null;
+  vencimento?: string | null;
+  dataPagamento?: string | null;
+  codigoTransacao?: string | null;
+  autenticacao?: string | null;
+  nsu?: string | null;
+  referencia?: string | null;
+  pagador?: string;
+};
+
+// Comprovante de pagamento de boleto (IPTU/condomínio pago pela imobiliária).
+export async function gerarComprovanteBoletoPDF(d: DadosComprovanteBoleto): Promise<Uint8Array> {
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([595.28, 841.89]);
+  const { width, height } = page.getSize();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const rotuloTipo = d.subtipo === "iptu" ? "IPTU" : "Condomínio";
+
+  page.drawRectangle({ x: 0, y: height - 90, width, height: 90, color: AZUL });
+  page.drawText("Ville Jardins", { x: 40, y: height - 45, size: 20, font: bold, color: rgb(1, 1, 1) });
+  page.drawText("Negócios Imobiliários", { x: 40, y: height - 65, size: 11, font, color: rgb(0.85, 0.9, 1) });
+  page.drawText("COMPROVANTE", { x: width - 200, y: height - 40, size: 12, font: bold, color: rgb(1, 1, 1) });
+  page.drawText(`Pagamento de boleto`, { x: width - 200, y: height - 58, size: 10, font, color: rgb(0.85, 0.9, 1) });
+
+  let y = height - 130;
+  const L = 40;
+  page.drawText(`Comprovante de pagamento — ${rotuloTipo}`, { x: L, y, size: 15, font: bold, color: PRETO });
+  y -= 10;
+  page.drawLine({ start: { x: L, y }, end: { x: width - L, y }, thickness: 1, color: rgb(0.9, 0.92, 0.95) });
+  y -= 28;
+
+  page.drawText("Valor pago", { x: L, y, size: 10, font, color: CINZA });
+  page.drawText(brl(d.valorPago), { x: L, y: y - 22, size: 24, font: bold, color: AZUL });
+  y -= 60;
+
+  const linha = (rotulo: string, valor?: string | null) => {
+    if (!valor) return;
+    page.drawText(rotulo, { x: L, y, size: 9, font, color: CINZA });
+    page.drawText(String(valor), { x: L, y: y - 15, size: 12, font: bold, color: PRETO });
+    y -= 40;
+  };
+
+  linha("Beneficiário", d.beneficiario || undefined);
+  linha("Linha digitável", d.linhaDigitavel || undefined);
+  linha("Vencimento", fmtData(d.vencimento) || undefined);
+  linha("Data do pagamento", fmtData(d.dataPagamento) || undefined);
+  linha("Pagador", d.pagador || "Ville Jardins Negócios Imobiliários");
+  linha("Referência", d.referencia || undefined);
+
+  y -= 6;
+  page.drawLine({ start: { x: L, y }, end: { x: width - L, y }, thickness: 1, color: rgb(0.9, 0.92, 0.95) });
+  y -= 24;
+  page.drawText("Identificação da transação (Banco Inter)", { x: L, y, size: 10, font: bold, color: PRETO });
+  y -= 22;
+  linha("Código de transação", d.codigoTransacao || undefined);
+  linha("Autenticação", d.autenticacao || undefined);
+  linha("NSU", d.nsu || undefined);
+
+  page.drawText(
+    "Documento gerado eletronicamente pela Ville Jardins a partir da confirmação do pagamento no Banco Inter.",
+    { x: L, y: 70, size: 8, font, color: CINZA }
+  );
+  page.drawText(
+    "Rua Batataes, nº 148, Jardim Paulista, São Paulo.",
+    { x: L, y: 60, size: 8, font, color: CINZA }
+  );
+
+  return pdf.save();
+}
