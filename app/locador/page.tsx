@@ -124,6 +124,22 @@ export default async function LocadorPage() {
     return ORDEM_DOC.map((t) => arr.find((d) => d.tipo === t)).filter(Boolean) as { tipo: string; nome: string | null; url: string | null }[];
   };
 
+  // Comprovante de repasse (Pix) por repasse.
+  const compPorRepasse = new Map<number, string>();
+  const repIds = repasses.map((r) => r.id).filter(Boolean);
+  if (repIds.length) {
+    const { data: pgRows } = await adm
+      .from('adm_pagamentos')
+      .select('repasse_id,comprovante_bucket,comprovante_path')
+      .eq('tipo', 'pix_repasse')
+      .in('repasse_id', repIds)
+      .not('comprovante_path', 'is', null);
+    for (const p of (pgRows ?? []) as { repasse_id: number; comprovante_bucket: string | null; comprovante_path: string }[]) {
+      const { data: sg } = await adm.storage.from(p.comprovante_bucket || 'documentos').createSignedUrl(p.comprovante_path, 3600);
+      if (sg?.signedUrl) compPorRepasse.set(p.repasse_id, sg.signedUrl);
+    }
+  }
+
   // Agrupa por imóvel/contrato
   const grupos = new Map<number, { titulo: string; itens: Repasse[] }>();
   for (const r of repasses) {
@@ -159,6 +175,7 @@ export default async function LocadorPage() {
                 <div className="mt-3 divide-y divide-slate-100">
                   {g.itens.map((r) => {
                     const docs = docsDoRepasse(r);
+                    const comprovante = compPorRepasse.get(r.id) || null;
                     return (
                     <div key={r.id} className="py-3">
                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -179,8 +196,14 @@ export default async function LocadorPage() {
                           <span className="shrink-0 text-xs text-slate-400">recibo em breve</span>
                         )}
                       </div>
-                      {docs.length > 0 && (
+                      {(docs.length > 0 || comprovante) && (
                         <div className="mt-2 flex flex-wrap gap-2">
+                          {comprovante && (
+                            <a href={comprovante} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100">
+                              📄 Comprovante do repasse
+                            </a>
+                          )}
                           {docs.map((d) =>
                             d.url ? (
                               <a key={d.tipo} href={d.url} target="_blank" rel="noopener noreferrer"

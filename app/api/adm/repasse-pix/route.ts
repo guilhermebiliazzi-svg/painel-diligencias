@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { interFetch, novoUuid } from "@/lib/inter";
+import { salvarComprovantePix } from "@/lib/salvar-comprovante";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -209,11 +210,11 @@ export async function GET(req: Request) {
     const r = await interFetch<any>(`/banking/v2/pix/${encodeURIComponent(pagamento.inter_codigo)}`, { method: "GET" });
     if (r.ok && r.data) {
       const d = r.data;
-      const statusInter = String(
-        d.status || d.tipoRetorno || d?.transacaoPix?.status || d?.transacao?.status || ""
-      ).toUpperCase();
-      const e2e = d.endToEndId || d?.transacaoPix?.endToEndId || null;
-      const efetivado = /EFETIVAD|REALIZAD|PAGO|CONCLU/.test(statusInter);
+      const tx = d.transacaoPix || d.transacao || {};
+      const statusInter = String(tx.status || d.status || d.tipoRetorno || "").toUpperCase();
+      const e2e = tx.endToEnd || tx.endToEndId || d.endToEnd || null;
+      const dataHora = tx.dataHoraMovimento || tx.dataHoraSolicitacao || null;
+      const efetivado = /EFETIVAD|REALIZAD|PAGO|CONCLU|PROCESSAD/.test(statusInter);
       const cancelado = /CANCELAD|DEVOLVID|FALHA|ERRO|REJEITAD/.test(statusInter);
       const novo = efetivado ? "efetivado" : cancelado ? "cancelado" : pagamento.status;
 
@@ -222,15 +223,33 @@ export async function GET(req: Request) {
         .update({ status: novo, inter_status: statusInter || null, inter_retorno: d, atualizado_em: new Date().toISOString() })
         .eq("id", pagamento.id);
 
-      if (efetivado && pagamento.repasse_id) {
-        const upd: any = { updated_at: new Date().toISOString() };
-        if (e2e) upd.pix_e2e_id = e2e;
-        upd.data_pagamento = d.dataOperacao || d.dataPagamento || new Date().toISOString().slice(0, 10);
-        await adm.from("adm_repasses").update(upd).eq("id", pagamento.repasse_id);
+      let comprovante_url: string | null = null;
+      if (efetivado) {
+        if (pagamento.repasse_id) {
+          const upd: any = { updated_at: new Date().toISOString() };
+          if (e2e) upd.pix_e2e_id = e2e;
+          upd.data_pagamento = (dataHora || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
+          await adm.from("adm_repasses").update(upd).eq("id", pagamento.repasse_id);
+        }
+        // gera e salva o comprovante (idempotente)
+        try {
+          const comp = await salvarComprovantePix(pagamento.id, { endToEnd: e2e, dataHora });
+          comprovante_url = comp?.url ?? null;
+        } catch (e) {
+          /* não bloqueia a consulta se o comprovante falhar */
+        }
       }
-      return NextResponse.json({ pagamento: { ...pagamento, status: novo, inter_status: statusInter } });
+      return NextResponse.json({ pagamento: { ...pagamento, status: novo, inter_status: statusInter }, comprovante_url });
     }
   }
 
-  return NextResponse.json({ pagamento });
+  // já efetivado antes: devolve o comprovante existente (gera se faltar)
+  let comprovante_url: string | null = null;
+  if (pagamento.status === "efetivado") {
+    try {
+      const comp = await salvarComprovantePix(pagamento.id);
+      comprovante_url = comp?.url ?? null;
+    } catch (e) {}
+  }
+  return NextResponse.json({ pagamento, comprovante_url });
 }

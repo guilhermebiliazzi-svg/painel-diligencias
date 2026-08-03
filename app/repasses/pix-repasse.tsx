@@ -42,12 +42,14 @@ export default function PixRepasse({
   const [msg, setMsg] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [checando, setChecando] = useState(false);
+  const [comprovante, setComprovante] = useState<string | null>(null);
 
   const carregarStatus = useCallback(async () => {
     try {
       const r = await fetch(`/api/adm/repasse-pix?contrato=${contratoId}&competencia=${competencia}`, { cache: "no-store" });
       const d = await r.json();
       setPg(d.pagamento || null);
+      if (d.comprovante_url) setComprovante(d.comprovante_url);
     } catch {
       /* silencioso */
     }
@@ -113,6 +115,7 @@ export default function PixRepasse({
       const r = await fetch(`/api/adm/repasse-pix?contrato=${contratoId}&competencia=${competencia}`, { cache: "no-store" });
       const d = await r.json();
       setPg(d.pagamento || null);
+      if (d.comprovante_url) setComprovante(d.comprovante_url);
     } catch {
       setErro("Erro ao consultar status.");
     } finally {
@@ -140,6 +143,11 @@ export default function PixRepasse({
             Valor {brl(pg!.valor)}
             {pg!.inter_codigo ? <> · código {pg!.inter_codigo}</> : null}
           </p>
+          {pg!.status === "efetivado" && comprovante && (
+            <a className="vjpix-link" href={comprovante} target="_blank" rel="noopener noreferrer">
+              📄 Baixar comprovante (PDF)
+            </a>
+          )}
           {pg!.status !== "efetivado" && (
             <button className="vjpix-link" onClick={checar} disabled={checando}>
               {checando ? "Consultando…" : "Atualizar status"}
