@@ -34,16 +34,34 @@ export function extrairLinhaDigitavel(texto: string): { linha: string; tipo: str
   return null;
 }
 
-// Lê o PDF (buffer) e devolve a linha digitável, se encontrar.
+// Extrai o vencimento (YYYY-MM-DD) do texto do boleto: a data logo após a
+// palavra "vencimento"; se não achar, a maior data dd/mm/aaaa do documento.
+export function extrairVencimento(texto: string): string | null {
+  const t = texto || "";
+  const re = /vencimento/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(t))) {
+    const seg = t.slice(m.index + m[0].length, m.index + m[0].length + 80);
+    const d = /(\d{2})\/(\d{2})\/(\d{4})/.exec(seg);
+    if (d) return `${d[3]}-${d[2]}-${d[1]}`;
+  }
+  const datas = [...t.matchAll(/(\d{2})\/(\d{2})\/(\d{4})/g)].map((x) => `${x[3]}-${x[2]}-${x[1]}`);
+  if (datas.length) return datas.sort()[datas.length - 1];
+  return null;
+}
+
+// Lê o PDF (buffer) e devolve a linha digitável + vencimento, se encontrar.
 export async function lerLinhaDigitavelDoPdf(
   buffer: ArrayBuffer | Uint8Array
-): Promise<{ linha: string; tipo: string } | null> {
+): Promise<{ linha: string; tipo: string; vencimento: string | null } | null> {
   try {
     const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
     const pdf = await getDocumentProxy(bytes);
     const { text } = await extractText(pdf, { mergePages: true });
     const txt = Array.isArray(text) ? text.join("\n") : String(text || "");
-    return extrairLinhaDigitavel(txt);
+    const ld = extrairLinhaDigitavel(txt);
+    if (!ld) return null;
+    return { ...ld, vencimento: extrairVencimento(txt) };
   } catch {
     return null; // PDF escaneado (imagem) ou ilegível → sem sugestão
   }

@@ -111,10 +111,12 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
   const [erro, setErro] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [lida, setLida] = useState(false);
+  const [avisoVenc, setAvisoVenc] = useState<string | null>(null);
 
   const jaEnviado = pg && ["submetido", "aguardando_aprovacao", "efetivado"].includes(pg.status);
 
-  // Lê a linha digitável do boleto anexado e pré-preenche (só se ainda vazio).
+  // Lê a linha digitável + vencimento do boleto anexado, pré-preenche (só se
+  // vazio) e avisa quando o vencimento parece fora da competência.
   useEffect(() => {
     if (jaEnviado || !item.boleto) return;
     let vivo = true;
@@ -125,9 +127,22 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
           { cache: "no-store" }
         );
         const d = await r.json();
-        if (vivo && d.linha) {
+        if (!vivo) return;
+        if (d.linha) {
           setLinha((atual) => (atual.replace(/\D/g, "") ? atual : d.linha));
           setLida(true);
+        }
+        if (d.vencimento) {
+          setVenc((atual) => atual || d.vencimento);
+          const [cy, cm] = competencia.split("-").map(Number);
+          const [vy, vm] = String(d.vencimento).slice(0, 7).split("-").map(Number);
+          const diff = vy * 12 + vm - (cy * 12 + cm);
+          // condomínio: vence na competência ou no mês seguinte; IPTU: no mês da competência
+          const ok = item.subtipo === "condominio" ? diff >= 0 && diff <= 1 : diff === 0;
+          if (!ok) {
+            const [yy, mm, dd] = String(d.vencimento).split("-");
+            setAvisoVenc(`Este boleto vence em ${dd}/${mm}/${yy} — parece fora da competência ${competencia}. Confira se é o boleto certo.`);
+          }
         }
       } catch {
         /* silencioso — usuário digita manualmente */
@@ -228,6 +243,7 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
 
       {erro && <div className="vj-erro-in">{erro}</div>}
       {msg && <div className="vj-ok-in">{msg}</div>}
+      {!jaEnviado && avisoVenc && <div className="vj-aviso-in">⚠ {avisoVenc}</div>}
 
       {jaEnviado ? (
         <div className="vj-status">
@@ -310,6 +326,7 @@ const CSS = `
 .vj-f input{font:inherit;padding:9px 11px;border:1px solid var(--linha);border-radius:8px;background:#fff}
 .vj-frow{display:flex;gap:12px;flex-wrap:wrap}
 .vj-erro-in{background:#FDECEE;border:1px solid #F5C2C7;color:#8B1A24;padding:8px 11px;border-radius:8px;font-size:13px;margin-bottom:10px}
+.vj-aviso-in{background:#FFF7E6;border:1px solid #FADFA0;color:#8a6d00;padding:8px 11px;border-radius:8px;font-size:13px;margin-bottom:10px;font-weight:600}
 .vj-ok-in{background:#EAF7F0;border:1px solid #BCE3D0;color:#0F7B4F;padding:8px 11px;border-radius:8px;font-size:13px;margin-bottom:10px}
 .vj-status{display:flex;flex-direction:column;gap:6px}
 .vj-badge{margin:0;font-weight:700;font-size:14px}

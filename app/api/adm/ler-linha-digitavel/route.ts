@@ -38,5 +38,5 @@ export async function GET(req: Request) {
   const res = await lerLinhaDigitavelDoPdf(buf);
   if (!res) return NextResponse.json({ linha: null, motivo: "não foi possível ler (pode ser PDF escaneado)" });
 
-  return NextResponse.json({ linha: res.linha, tipo: res.tipo });
+  return NextResponse.json({ linha: res.linha, tipo: res.tipo, vencimento: res.vencimento });
 }
