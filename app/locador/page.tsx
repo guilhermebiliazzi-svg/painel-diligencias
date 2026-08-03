@@ -81,10 +81,14 @@ export default async function LocadorPage({ searchParams }: { searchParams: Prom
   }
   const modoAdmin = isAdmin;
 
+  // O portal do locador começa em agosto/2026 (não temos comprovantes anteriores).
+  // Ajustável pela env PORTAL_LOCADOR_INICIO (YYYY-MM).
+  const inicioPortal = `${process.env.PORTAL_LOCADOR_INICIO || '2026-08'}-01`;
   const { data: repRows } = await adm
     .from('adm_repasses')
     .select('id,contrato_id,competencia,total_liquido,deducao_iptu,deducao_condominio,pdf_url,status_envio')
     .eq('locador_id', locador.id)
+    .gte('competencia', inicioPortal)
     .order('competencia', { ascending: false });
   const brutos = (repRows ?? []) as Repasse[];
   // Quando o PDF está no Storage do Supabase (bucket privado), gera um link
