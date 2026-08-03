@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 // Contas a pagar: boletos de IPTU/condomínio de responsabilidade da imobiliária.
 // Cola-se a linha digitável, confere-se valor/vencimento e envia-se ao Inter.
@@ -110,8 +110,34 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
   const [checando, setChecando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [lida, setLida] = useState(false);
 
   const jaEnviado = pg && ["submetido", "aguardando_aprovacao", "efetivado"].includes(pg.status);
+
+  // Lê a linha digitável do boleto anexado e pré-preenche (só se ainda vazio).
+  useEffect(() => {
+    if (jaEnviado || !item.boleto) return;
+    let vivo = true;
+    (async () => {
+      try {
+        const r = await fetch(
+          `/api/adm/ler-linha-digitavel?contrato=${item.contrato_id}&competencia=${competencia}&subtipo=${item.subtipo}`,
+          { cache: "no-store" }
+        );
+        const d = await r.json();
+        if (vivo && d.linha) {
+          setLinha((atual) => (atual.replace(/\D/g, "") ? atual : d.linha));
+          setLida(true);
+        }
+      } catch {
+        /* silencioso — usuário digita manualmente */
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function enviar() {
     setErro(null);
@@ -223,8 +249,8 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
       ) : (
         <div className="vj-form">
           <label className="vj-f">
-            <span>Linha digitável / código de barras</span>
-            <input value={linha} onChange={(e) => setLinha(e.target.value)} placeholder="Só os números do boleto" inputMode="numeric" />
+            <span>Linha digitável / código de barras{lida ? <span className="vj-lida"> · lida do boleto, confira</span> : null}</span>
+            <input value={linha} onChange={(e) => { setLinha(e.target.value); setLida(false); }} placeholder="Só os números do boleto" inputMode="numeric" />
           </label>
           <div className="vj-frow">
             <label className="vj-f">
@@ -280,6 +306,7 @@ const CSS = `
 .vj-form{display:flex;flex-direction:column;gap:12px}
 .vj-f{display:flex;flex-direction:column;gap:6px;flex:1;min-width:150px}
 .vj-f>span{font-size:12px;font-weight:600;color:var(--mut)}
+.vj-lida{color:#0F7B4F;font-weight:600}
 .vj-f input{font:inherit;padding:9px 11px;border:1px solid var(--linha);border-radius:8px;background:#fff}
 .vj-frow{display:flex;gap:12px;flex-wrap:wrap}
 .vj-erro-in{background:#FDECEE;border:1px solid #F5C2C7;color:#8B1A24;padding:8px 11px;border-radius:8px;font-size:13px;margin-bottom:10px}
