@@ -6,14 +6,14 @@ import { useEffect, useState } from "react";
 // Cola-se a linha digitável, confere-se valor/vencimento e envia-se ao Inter.
 // O pagamento fica pendente da sua aprovação no app do banco.
 
-type Pagamento = {
-  id?: number;
+type PagamentoItem = {
+  id: number;
   status: string;
   inter_status: string | null;
   inter_codigo: string | null;
   valor: number;
   linha_digitavel: string | null;
-} | null;
+};
 
 type Item = {
   contrato_id: number;
@@ -24,7 +24,7 @@ type Item = {
   rotulo: string;
   valor: number;
   boleto: { url: string | null; nome: string | null } | null;
-  pagamento: Pagamento;
+  pagamentos: PagamentoItem[];
 };
 
 const brl = (n: number) =>
@@ -102,72 +102,18 @@ export default function PagamentosPage() {
   );
 }
 
-function LinhaBoleto({ item, competencia }: { item: Item; competencia: string }) {
-  const [linha, setLinha] = useState("");
-  const [valor, setValor] = useState<string>(item.valor ? String(item.valor) : "");
-  const [venc, setVenc] = useState("");
-  const [cpf, setCpf] = useState("");
-  const [dataPag, setDataPag] = useState("");
-  const [pg, setPg] = useState<Pagamento>(item.pagamento);
-  const [pagamentoId, setPagamentoId] = useState<number | null>(item.pagamento?.id ?? null);
-  const [enviando, setEnviando] = useState(false);
+function PagoRow({ pagamento }: { pagamento: PagamentoItem }) {
+  const [pg, setPg] = useState<PagamentoItem>(pagamento);
+  const [comprovante, setComprovante] = useState<string | null>(null);
   const [checando, setChecando] = useState(false);
   const [cancelando, setCancelando] = useState(false);
-  const [comprovante, setComprovante] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [lida, setLida] = useState(false);
-  const [avisoVenc, setAvisoVenc] = useState<string | null>(null);
 
-  const jaEnviado = pg && ["submetido", "aguardando_aprovacao", "efetivado"].includes(pg.status);
-
-  // Lê a linha digitável + vencimento do boleto anexado, pré-preenche (só se
-  // vazio) e avisa quando o vencimento parece fora da competência.
   useEffect(() => {
-    if (jaEnviado || !item.boleto) return;
-    let vivo = true;
+    if (pg.status !== "efetivado") return;
     (async () => {
       try {
-        const r = await fetch(
-          `/api/adm/ler-linha-digitavel?contrato=${item.contrato_id}&competencia=${competencia}&subtipo=${item.subtipo}`,
-          { cache: "no-store" }
-        );
-        const d = await r.json();
-        if (!vivo) return;
-        if (d.linha) {
-          setLinha((atual) => (atual.replace(/\D/g, "") ? atual : d.linha));
-          setLida(true);
-        }
-        if (d.vencimento) {
-          setVenc((atual) => atual || d.vencimento);
-          const [cy, cm] = competencia.split("-").map(Number);
-          const [vy, vm] = String(d.vencimento).slice(0, 7).split("-").map(Number);
-          const diff = vy * 12 + vm - (cy * 12 + cm);
-          // o que importa para o repasse é o mês do vencimento: tem que ser o
-          // mês da competência (vale para IPTU e condomínio).
-          const ok = diff === 0;
-          if (!ok) {
-            const [yy, mm, dd] = String(d.vencimento).split("-");
-            setAvisoVenc(`Este boleto vence em ${dd}/${mm}/${yy} — parece fora da competência ${competencia}. Confira se é o boleto certo.`);
-          }
-        }
-      } catch {
-        /* silencioso — usuário digita manualmente */
-      }
-    })();
-    return () => {
-      vivo = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Boleto já efetivado: garante que o comprovante existe (gera se faltar) e
-  // pega o link. Depois de gerado, só devolve o existente.
-  useEffect(() => {
-    if (!pagamentoId || item.pagamento?.status !== "efetivado") return;
-    (async () => {
-      try {
-        const r = await fetch(`/api/adm/pagar-boleto?pagamento=${pagamentoId}`, { cache: "no-store" });
+        const r = await fetch(`/api/adm/pagar-boleto?pagamento=${pg.id}`, { cache: "no-store" });
         const d = await r.json();
         if (d.comprovante_url) setComprovante(d.comprovante_url);
       } catch {
@@ -177,70 +123,12 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function enviar() {
-    setErro(null);
-    setMsg(null);
-    const linhaDig = linha.replace(/\D/g, "");
-    if (linhaDig.length < 44 || linhaDig.length > 48) {
-      setErro("Linha digitável inválida (44 a 48 dígitos).");
-      return;
-    }
-    if (!(Number(valor) > 0)) {
-      setErro("Informe o valor a pagar.");
-      return;
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(venc)) {
-      setErro("Informe o vencimento.");
-      return;
-    }
-    const quando = dataPag ? `agendado para ${dataPag.split("-").reverse().join("/")}` : "hoje";
-    if (!confirm(`Enviar pagamento de ${brl(Number(valor))} — ${item.rotulo} de ${item.endereco} (${quando})?\n\nVai ao Inter e fica pendente da sua aprovação no app do banco.`)) {
-      return;
-    }
-    setEnviando(true);
-    try {
-      const r = await fetch("/api/adm/pagar-boleto", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contrato_id: item.contrato_id,
-          competencia,
-          subtipo: item.subtipo,
-          linha_digitavel: linhaDig,
-          valor: Number(valor),
-          vencimento: venc,
-          cpfCnpjBeneficiario: cpf || undefined,
-          dataPagamento: dataPag || undefined,
-        }),
-      });
-      const d = await r.json();
-      if (!r.ok) {
-        setErro(d?.error || "Falha ao enviar.");
-      } else {
-        setPagamentoId(d.pagamento_id ?? null);
-        setPg({
-          status: d.status || "aguardando_aprovacao",
-          inter_status: d.statusPagamento || null,
-          inter_codigo: d.codigoTransacao || null,
-          valor: Number(valor),
-          linha_digitavel: linhaDig,
-        });
-        setMsg(d.jaExiste ? d.mensagem : "Enviado ao Inter.");
-      }
-    } catch {
-      setErro("Erro de rede.");
-    } finally {
-      setEnviando(false);
-    }
-  }
-
   async function checar() {
-    if (!pagamentoId) return;
     setChecando(true);
     try {
-      const r = await fetch(`/api/adm/pagar-boleto?pagamento=${pagamentoId}`, { cache: "no-store" });
+      const r = await fetch(`/api/adm/pagar-boleto?pagamento=${pg.id}`, { cache: "no-store" });
       const d = await r.json();
-      if (d.pagamento) setPg((p) => (p ? { ...p, status: d.pagamento.status, inter_status: d.pagamento.inter_status } : p));
+      if (d.pagamento) setPg((p) => ({ ...p, status: d.pagamento.status, inter_status: d.pagamento.inter_status }));
       if (d.comprovante_url) setComprovante(d.comprovante_url);
     } catch {
       /* silencioso */
@@ -250,19 +138,118 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
   }
 
   async function cancelar() {
-    if (!pagamentoId) return;
     if (!confirm("Cancelar o agendamento deste boleto no Inter?")) return;
     setCancelando(true);
     setErro(null);
     try {
-      const r = await fetch(`/api/adm/pagar-boleto?pagamento=${pagamentoId}`, { method: "DELETE" });
+      const r = await fetch(`/api/adm/pagar-boleto?pagamento=${pg.id}`, { method: "DELETE" });
       const d = await r.json();
       if (!r.ok) setErro(d?.error || "Falha ao cancelar.");
-      else setPg((p) => (p ? { ...p, status: "cancelado" } : p));
+      else setPg((p) => ({ ...p, status: "cancelado" }));
     } catch {
       setErro("Erro de rede ao cancelar.");
     } finally {
       setCancelando(false);
+    }
+  }
+
+  return (
+    <div className="vj-pago">
+      {erro && <div className="vj-erro-in">{erro}</div>}
+      {pg.status === "efetivado" ? (
+        <p className="vj-badge efet">✓ Pago</p>
+      ) : pg.status === "cancelado" ? (
+        <p className="vj-badge canc">Agendamento cancelado</p>
+      ) : (
+        <p className="vj-badge aguard">⏳ Enviado ao Inter — aguardando sua aprovação no app</p>
+      )}
+      <p className="vj-cod">
+        Valor {brl(pg.valor)}
+        {pg.inter_codigo ? <> · transação {pg.inter_codigo}</> : null}
+      </p>
+      {pg.status === "efetivado" && comprovante && (
+        <a className="vj-link" href={comprovante} target="_blank" rel="noopener noreferrer">📄 Baixar comprovante (PDF)</a>
+      )}
+      {pg.status !== "efetivado" && pg.status !== "cancelado" && (
+        <div className="vj-status-acoes">
+          <button className="vj-link" onClick={checar} disabled={checando}>{checando ? "Consultando…" : "Atualizar status"}</button>
+          <button className="vj-link vj-del-link" onClick={cancelar} disabled={cancelando}>{cancelando ? "Cancelando…" : "Cancelar agendamento"}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LinhaBoleto({ item, competencia }: { item: Item; competencia: string }) {
+  const [pagos, setPagos] = useState<PagamentoItem[]>(item.pagamentos || []);
+  const [linha, setLinha] = useState("");
+  const [valor, setValor] = useState("");
+  const [venc, setVenc] = useState("");
+  const [cpf, setCpf] = useState("");
+  const [dataPag, setDataPag] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [lida, setLida] = useState(false);
+  const [avisoVenc, setAvisoVenc] = useState<string | null>(null);
+
+  const temVivo = pagos.some((p) => ["submetido", "aguardando_aprovacao", "efetivado"].includes(p.status));
+
+  // Lê a linha do boleto anexado só quando ainda não há boleto lançado.
+  useEffect(() => {
+    if (temVivo || !item.boleto) return;
+    let vivo = true;
+    (async () => {
+      try {
+        const r = await fetch(`/api/adm/ler-linha-digitavel?contrato=${item.contrato_id}&competencia=${competencia}&subtipo=${item.subtipo}`, { cache: "no-store" });
+        const d = await r.json();
+        if (!vivo) return;
+        if (d.linha) { setLinha((a) => (a.replace(/\D/g, "") ? a : d.linha)); setLida(true); }
+        if (d.vencimento) {
+          setVenc((a) => a || d.vencimento);
+          const [cy, cm] = competencia.split("-").map(Number);
+          const [vy, vm] = String(d.vencimento).slice(0, 7).split("-").map(Number);
+          if (vy * 12 + vm - (cy * 12 + cm) !== 0) {
+            const [yy, mm, dd] = String(d.vencimento).split("-");
+            setAvisoVenc(`Este boleto vence em ${dd}/${mm}/${yy} — fora da competência ${competencia}. Confira.`);
+          }
+        }
+      } catch {
+        /* silencioso */
+      }
+    })();
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function enviar() {
+    setErro(null);
+    setMsg(null);
+    const linhaDig = linha.replace(/\D/g, "");
+    if (linhaDig.length < 44 || linhaDig.length > 48) { setErro("Linha digitável inválida (44 a 48 dígitos)."); return; }
+    if (!(Number(valor) > 0)) { setErro("Informe o valor a pagar."); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(venc)) { setErro("Informe o vencimento."); return; }
+    const quando = dataPag ? `agendado para ${dataPag.split("-").reverse().join("/")}` : "hoje";
+    if (!confirm(`Enviar pagamento de ${brl(Number(valor))} — ${item.rotulo} de ${item.endereco} (${quando})?\n\nVai ao Inter e fica pendente da sua aprovação no app do banco.`)) return;
+    setEnviando(true);
+    try {
+      const r = await fetch("/api/adm/pagar-boleto", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contrato_id: item.contrato_id, competencia, subtipo: item.subtipo, linha_digitavel: linhaDig, valor: Number(valor), vencimento: venc, cpfCnpjBeneficiario: cpf || undefined, dataPagamento: dataPag || undefined }),
+      });
+      const d = await r.json();
+      if (!r.ok) setErro(d?.error || "Falha ao enviar.");
+      else if (d.jaExiste) setErro(d.mensagem || "Este boleto já foi enviado.");
+      else {
+        setPagos((ps) => [...ps, { id: d.pagamento_id, status: d.status || "aguardando_aprovacao", inter_status: d.statusPagamento || null, inter_codigo: d.codigoTransacao || null, valor: Number(valor), linha_digitavel: linhaDig }]);
+        setMsg("Enviado ao Inter.");
+        setLinha(""); setValor(""); setVenc(""); setCpf(""); setDataPag(""); setLida(false); setAvisoVenc(null);
+      }
+    } catch {
+      setErro("Erro de rede.");
+    } finally {
+      setEnviando(false);
     }
   }
 
@@ -275,7 +262,7 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
           <span className="vj-sub-id">Contrato #{item.contrato_id}{item.locatario ? ` · Locatário: ${item.locatario}` : ""}</span>
         </div>
         <div className="vj-valor-ref">
-          {item.valor > 0 ? <>Valor de referência <b>{brl(item.valor)}</b></> : <span className="vj-semvalor">sem valor lançado</span>}
+          {item.valor > 0 ? <>Valor de referência <b>{brl(item.valor)}</b> <span className="vj-ref-obs">(total)</span></> : <span className="vj-semvalor">sem valor lançado</span>}
         </div>
       </div>
 
@@ -285,64 +272,30 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
         </a>
       )}
 
+      {pagos.map((p) => (
+        <PagoRow key={p.id} pagamento={p} />
+      ))}
+
       {erro && <div className="vj-erro-in">{erro}</div>}
       {msg && <div className="vj-ok-in">{msg}</div>}
-      {!jaEnviado && avisoVenc && <div className="vj-aviso-in">⚠ {avisoVenc}</div>}
+      {!temVivo && avisoVenc && <div className="vj-aviso-in">⚠ {avisoVenc}</div>}
 
-      {jaEnviado ? (
-        <div className="vj-status">
-          {pg!.status === "efetivado" ? (
-            <p className="vj-badge efet">✓ Pago</p>
-          ) : (
-            <p className="vj-badge aguard">⏳ Enviado ao Inter — aguardando sua aprovação no app do banco</p>
-          )}
-          <p className="vj-cod">
-            Valor {brl(pg!.valor)}
-            {pg!.inter_codigo ? <> · transação {pg!.inter_codigo}</> : null}
-          </p>
-          {pg!.status === "efetivado" && comprovante && (
-            <a className="vj-link" href={comprovante} target="_blank" rel="noopener noreferrer">📄 Baixar comprovante (PDF)</a>
-          )}
-          {pg!.status !== "efetivado" && pg!.status !== "cancelado" && pagamentoId && (
-            <div className="vj-status-acoes">
-              <button className="vj-link" onClick={checar} disabled={checando}>
-                {checando ? "Consultando…" : "Atualizar status"}
-              </button>
-              <button className="vj-link vj-del-link" onClick={cancelar} disabled={cancelando}>
-                {cancelando ? "Cancelando…" : "Cancelar agendamento"}
-              </button>
-            </div>
-          )}
+      <div className="vj-form">
+        {pagos.length > 0 && <div className="vj-add-h">Adicionar outro boleto</div>}
+        <label className="vj-f">
+          <span>Linha digitável / código de barras{lida ? <span className="vj-lida"> · lida do boleto, confira</span> : null}</span>
+          <input value={linha} onChange={(e) => { setLinha(e.target.value); setLida(false); }} placeholder="Só os números do boleto" inputMode="numeric" />
+        </label>
+        <div className="vj-frow">
+          <label className="vj-f"><span>Valor a pagar</span><input type="number" step="0.01" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0,00" /></label>
+          <label className="vj-f"><span>Vencimento</span><input type="date" value={venc} onChange={(e) => setVenc(e.target.value)} /></label>
+          <label className="vj-f"><span>CPF/CNPJ beneficiário (opcional)</span><input value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="só números" inputMode="numeric" /></label>
+          <label className="vj-f"><span>Data de pagamento (vazio = hoje; futura = agenda)</span><input type="date" value={dataPag} onChange={(e) => setDataPag(e.target.value)} /></label>
         </div>
-      ) : (
-        <div className="vj-form">
-          <label className="vj-f">
-            <span>Linha digitável / código de barras{lida ? <span className="vj-lida"> · lida do boleto, confira</span> : null}</span>
-            <input value={linha} onChange={(e) => { setLinha(e.target.value); setLida(false); }} placeholder="Só os números do boleto" inputMode="numeric" />
-          </label>
-          <div className="vj-frow">
-            <label className="vj-f">
-              <span>Valor a pagar</span>
-              <input type="number" step="0.01" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0,00" />
-            </label>
-            <label className="vj-f">
-              <span>Vencimento</span>
-              <input type="date" value={venc} onChange={(e) => setVenc(e.target.value)} />
-            </label>
-            <label className="vj-f">
-              <span>CPF/CNPJ beneficiário (opcional)</span>
-              <input value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="só números" inputMode="numeric" />
-            </label>
-            <label className="vj-f">
-              <span>Data de pagamento (vazio = hoje; futura = agenda)</span>
-              <input type="date" value={dataPag} onChange={(e) => setDataPag(e.target.value)} />
-            </label>
-          </div>
-          <button className="vj-btn vj-gerar" onClick={enviar} disabled={enviando}>
-            {enviando ? "Enviando…" : dataPag ? "Agendar pagamento no Inter" : "Enviar pagamento ao Inter"}
-          </button>
-        </div>
-      )}
+        <button className="vj-btn vj-gerar" onClick={enviar} disabled={enviando}>
+          {enviando ? "Enviando…" : dataPag ? "Agendar pagamento no Inter" : "Enviar pagamento ao Inter"}
+        </button>
+      </div>
     </section>
   );
 }
@@ -389,6 +342,10 @@ const CSS = `
 .vj-badge{margin:0;font-weight:700;font-size:14px}
 .vj-badge.aguard{color:#8a6d00}
 .vj-badge.efet{color:#0F7B4F}
+.vj-badge.canc{color:#8B1A24}
+.vj-pago{border:1px solid var(--linha);border-radius:11px;padding:12px 14px;margin-bottom:10px;background:#F8FAFD;display:flex;flex-direction:column;gap:6px}
+.vj-add-h{font-size:13px;font-weight:700;color:var(--azul);margin-bottom:2px}
+.vj-ref-obs{font-size:11px;color:var(--mut)}
 .vj-cod{margin:0;font-size:13px;color:var(--mut)}
 .vj-link{align-self:flex-start;background:none;border:none;color:var(--azul);font:inherit;font-weight:600;font-size:13px;cursor:pointer;padding:0;text-decoration:underline}
 .vj-status-acoes{display:flex;gap:16px;flex-wrap:wrap}

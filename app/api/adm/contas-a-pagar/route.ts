@@ -59,9 +59,9 @@ export async function GET(req: Request) {
     .eq("tipo", "boleto")
     .eq("competencia", compData)
     .in("contrato_id", ids);
-  const pgPor: Record<string, any> = {};
+  const pgPor: Record<string, any[]> = {};
   for (const p of (pgs || []) as any[]) {
-    pgPor[`${p.contrato_id}|${p.subtipo}`] = p;
+    (pgPor[`${p.contrato_id}|${p.subtipo}`] ||= []).push(p);
   }
 
   async function link(k: string): Promise<{ url: string | null; nome: string | null } | null> {
@@ -90,10 +90,12 @@ export async function GET(req: Request) {
       const boleto = await link(`${c.id}|boleto_${sub}`);
       // só entra na lista se há valor a pagar ou um boleto anexado
       if (!(valor > 0) && !boleto) continue;
-      const pg = pgPor[`${c.id}|${sub}`] || null;
-      // boleto pago mas sem comprovante ainda → gera (retroativo), best-effort
-      if (pg && pg.status === "efetivado" && !pg.comprovante_path) {
-        backfills.push(salvarComprovanteBoleto(pg.id, { subtipo: sub }).catch(() => null));
+      const lista = pgPor[`${c.id}|${sub}`] || [];
+      // boletos pagos sem comprovante ainda → gera (retroativo), best-effort
+      for (const pg of lista) {
+        if (pg.status === "efetivado" && !pg.comprovante_path) {
+          backfills.push(salvarComprovanteBoleto(pg.id, { subtipo: sub }).catch(() => null));
+        }
       }
       itens.push({
         contrato_id: c.id,
@@ -104,16 +106,14 @@ export async function GET(req: Request) {
         rotulo: sub === "iptu" ? "IPTU" : "Condomínio",
         valor,
         boleto,
-        pagamento: pg
-          ? {
-              id: pg.id,
-              status: pg.status,
-              inter_status: pg.inter_status,
-              inter_codigo: pg.inter_codigo,
-              valor: Number(pg.valor),
-              linha_digitavel: pg.linha_digitavel,
-            }
-          : null,
+        pagamentos: lista.map((pg: any) => ({
+          id: pg.id,
+          status: pg.status,
+          inter_status: pg.inter_status,
+          inter_codigo: pg.inter_codigo,
+          valor: Number(pg.valor),
+          linha_digitavel: pg.linha_digitavel,
+        })),
       });
     }
   }

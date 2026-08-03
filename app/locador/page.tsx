@@ -128,9 +128,11 @@ export default async function LocadorPage({ searchParams }: { searchParams: Prom
   if (ids.length) {
     const { data: docRows } = await adm
       .from('adm_documentos')
-      .select('contrato_id,competencia,tipo,nome,bucket,path')
+      .select('contrato_id,competencia,tipo,nome,bucket,path,origem')
       .in('contrato_id', ids);
-    for (const d of (docRows ?? []) as { contrato_id: number; competencia: string; tipo: string; nome: string | null; bucket: string | null; path: string }[]) {
+    for (const d of (docRows ?? []) as { contrato_id: number; competencia: string; tipo: string; nome: string | null; bucket: string | null; path: string; origem: string | null }[]) {
+      // comprovantes gerados automaticamente (origem=pagamento) vêm de adm_pagamentos — evita duplicar
+      if ((d.tipo === 'comprovante_iptu' || d.tipo === 'comprovante_condominio') && d.origem === 'pagamento') continue;
       const chave = `${d.contrato_id}|${String(d.competencia).slice(0, 7)}`;
       const { data: sg } = await adm.storage.from(d.bucket || 'documentos').createSignedUrl(d.path, 3600);
       const arr = docsPorChave.get(chave) ?? [];
@@ -165,6 +167,27 @@ export default async function LocadorPage({ searchParams }: { searchParams: Prom
       if (sg?.signedUrl) compPorRepasse.set(p.repasse_id, sg.signedUrl);
     }
   }
+
+  // Comprovantes de boletos (IPTU/condomínio) pagos — pode haver vários por competência.
+  const boletoCompPorChave = new Map<string, { subtipo: string; url: string }[]>();
+  if (ids.length) {
+    const { data: bRows } = await adm
+      .from('adm_pagamentos')
+      .select('contrato_id,competencia,subtipo,comprovante_bucket,comprovante_path')
+      .eq('tipo', 'boleto')
+      .in('contrato_id', ids)
+      .not('comprovante_path', 'is', null);
+    for (const b of (bRows ?? []) as { contrato_id: number; competencia: string; subtipo: string; comprovante_bucket: string | null; comprovante_path: string }[]) {
+      const chave = `${b.contrato_id}|${String(b.competencia).slice(0, 7)}`;
+      const { data: sg } = await adm.storage.from(b.comprovante_bucket || 'documentos').createSignedUrl(b.comprovante_path, 3600);
+      if (sg?.signedUrl) {
+        const arr = boletoCompPorChave.get(chave) ?? [];
+        arr.push({ subtipo: b.subtipo, url: sg.signedUrl });
+        boletoCompPorChave.set(chave, arr);
+      }
+    }
+  }
+  const boletoCompDoRepasse = (r: Repasse) => boletoCompPorChave.get(`${r.contrato_id}|${String(r.competencia).slice(0, 7)}`) ?? [];
 
   // Agrupa por imóvel/contrato
   const grupos = new Map<number, { titulo: string; itens: Repasse[] }>();
@@ -212,6 +235,7 @@ export default async function LocadorPage({ searchParams }: { searchParams: Prom
                   {g.itens.map((r) => {
                     const docs = docsDoRepasse(r);
                     const comprovante = compPorRepasse.get(r.id) || null;
+                    const compsBoleto = boletoCompDoRepasse(r);
                     return (
                     <div key={r.id} className="py-3">
                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -232,7 +256,7 @@ export default async function LocadorPage({ searchParams }: { searchParams: Prom
                           <span className="shrink-0 text-xs text-slate-400">recibo em breve</span>
                         )}
                       </div>
-                      {(docs.length > 0 || comprovante) && (
+                      {(docs.length > 0 || comprovante || compsBoleto.length > 0) && (
                         <div className="mt-2 flex flex-wrap gap-2">
                           {comprovante && (
                             <a href={comprovante} target="_blank" rel="noopener noreferrer"
@@ -240,6 +264,12 @@ export default async function LocadorPage({ searchParams }: { searchParams: Prom
                               📄 Comprovante do repasse
                             </a>
                           )}
+                          {compsBoleto.map((c, i) => (
+                            <a key={`bc${i}`} href={c.url} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100">
+                              📄 Comprovante {c.subtipo === 'iptu' ? 'IPTU' : 'condomínio'}
+                            </a>
+                          ))}
                           {docs.map((d) =>
                             d.url ? (
                               <a key={d.tipo} href={d.url} target="_blank" rel="noopener noreferrer"

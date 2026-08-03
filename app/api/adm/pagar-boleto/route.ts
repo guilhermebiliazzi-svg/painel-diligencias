@@ -49,7 +49,8 @@ export async function POST(req: Request) {
     .eq("contrato_id", contrato_id)
     .eq("competencia", compData)
     .in("status", ["submetido", "aguardando_aprovacao", "efetivado"]);
-  const jaVivo = (dups || []).find((d: any) => d.subtipo === subtipo || soDigitos(d.linha_digitavel) === linha);
+  // permite vários boletos do mesmo tipo (apto + vaga); só bloqueia a MESMA linha
+  const jaVivo = (dups || []).find((d: any) => soDigitos(d.linha_digitavel) === linha);
   if (jaVivo) {
     return NextResponse.json({
       ok: true,
