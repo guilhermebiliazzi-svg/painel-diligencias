@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import DocumentosLocador from "../_components/DocumentosLocador";
+import PixRepasse from "./pix-repasse";
 
 type Contrato = { id: number; locatario: string; endereco: string };
 type Linha = { descricao: string; categoria: string; valor: number | string };
@@ -234,6 +235,10 @@ export default function Repasse() {
                 {salvando ? "Gerando…" : "Salvar e gerar recibo"}
               </button>
             </div>
+
+            {contratoId && (
+              <PixRepasse contratoId={contratoId} competencia={competencia} valorLiquido={totais.liquido} />
+            )}
 
             {contratoId && (
               <DocumentosLocador contratoId={contratoId} competencia={competencia} origem="repasse" />
