@@ -54,7 +54,7 @@ export async function GET(req: Request) {
   // pagamentos já lançados
   const { data: pgs } = await adm
     .from("adm_pagamentos")
-    .select("contrato_id,subtipo,status,inter_codigo,inter_status,valor,vencimento,linha_digitavel")
+    .select("id,contrato_id,subtipo,status,inter_codigo,inter_status,valor,vencimento,linha_digitavel")
     .eq("tipo", "boleto")
     .eq("competencia", compData)
     .in("contrato_id", ids);
@@ -93,6 +93,7 @@ export async function GET(req: Request) {
         boleto,
         pagamento: pg
           ? {
+              id: pg.id,
               status: pg.status,
               inter_status: pg.inter_status,
               inter_codigo: pg.inter_codigo,

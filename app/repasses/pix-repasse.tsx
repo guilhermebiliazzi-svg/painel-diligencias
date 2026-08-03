@@ -43,6 +43,7 @@ export default function PixRepasse({
   const [enviando, setEnviando] = useState(false);
   const [checando, setChecando] = useState(false);
   const [comprovante, setComprovante] = useState<string | null>(null);
+  const [dataPix, setDataPix] = useState<string>("");
 
   const carregarStatus = useCallback(async () => {
     try {
@@ -82,7 +83,8 @@ export default function PixRepasse({
     }
     const c = contas.find((x) => x.id === contaId);
     const alvo = c ? `${c.titular || "conta"} — ag ${c.agencia}/${c.conta}` : "";
-    if (!confirm(`Enviar repasse de ${brl(valorLiquido)} via Pix para:\n${alvo}\n\nO pagamento vai ao Inter e fica pendente da sua aprovação no app do banco. Confirmar?`)) {
+    const quando = dataPix ? `agendado para ${dataPix.split("-").reverse().join("/")}` : "hoje";
+    if (!confirm(`Enviar repasse de ${brl(valorLiquido)} via Pix (${quando}) para:\n${alvo}\n\nO pagamento vai ao Inter e fica pendente da sua aprovação no app do banco. Confirmar?`)) {
       return;
     }
     setEnviando(true);
@@ -92,7 +94,7 @@ export default function PixRepasse({
       const r = await fetch("/api/adm/repasse-pix", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contrato_id: contratoId, competencia, conta_bancaria_id: contaId }),
+        body: JSON.stringify({ contrato_id: contratoId, competencia, conta_bancaria_id: contaId, dataPagamento: dataPix || undefined }),
       });
       const d = await r.json();
       if (!r.ok) {
@@ -174,12 +176,16 @@ export default function PixRepasse({
               </select>
             </label>
           )}
+          <label className="vjpix-field">
+            <span>Data do pagamento (deixe vazio = hoje; futura = agenda)</span>
+            <input type="date" value={dataPix} onChange={(e) => setDataPix(e.target.value)} />
+          </label>
           <button
             className="vjpix-btn"
             onClick={enviar}
             disabled={enviando || !contaId || !(valorLiquido > 0)}
           >
-            {enviando ? "Enviando…" : `Enviar repasse via Pix (${brl(valorLiquido)})`}
+            {enviando ? "Enviando…" : dataPix ? `Agendar repasse via Pix (${brl(valorLiquido)})` : `Enviar repasse via Pix (${brl(valorLiquido)})`}
           </button>
         </>
       )}
@@ -194,7 +200,7 @@ export default function PixRepasse({
 .vjpix-ok{background:#EAF7F0;border:1px solid #BCE3D0;color:#0F7B4F;padding:9px 12px;border-radius:9px;font-size:13px;margin-bottom:10px}
 .vjpix-field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
 .vjpix-field>span{font-size:12px;font-weight:600;color:#5A6B85;text-transform:uppercase;letter-spacing:.4px}
-.vjpix-field select{font:inherit;padding:10px 11px;border:1px solid #E4E9F2;border-radius:9px;background:#fff}
+.vjpix-field select,.vjpix-field input{font:inherit;padding:10px 11px;border:1px solid #E4E9F2;border-radius:9px;background:#fff}
 .vjpix-btn{background:#003DA5;color:#fff;border:none;font:inherit;font-weight:700;padding:12px 20px;border-radius:9px;cursor:pointer;width:100%}
 .vjpix-btn:disabled{opacity:.5;cursor:not-allowed}
 .vjpix-vazio{font-size:13px;color:#8B1A24;background:#FDECEE;border:1px solid #F5C2C7;padding:9px 12px;border-radius:9px}

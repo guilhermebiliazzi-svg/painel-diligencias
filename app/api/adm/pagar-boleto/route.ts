@@ -160,3 +160,36 @@ export async function GET(req: Request) {
 
   return NextResponse.json({ pagamento });
 }
+
+// Cancela o AGENDAMENTO de um boleto (só antes de pago).
+//   DELETE /api/adm/pagar-boleto?pagamento=123
+export async function DELETE(req: Request) {
+  const adm = supabaseAdmin();
+  const { searchParams } = new URL(req.url);
+  const pagamentoId = searchParams.get("pagamento");
+  if (!pagamentoId) return NextResponse.json({ error: "Informe pagamento." }, { status: 400 });
+
+  const { data: pg } = await adm
+    .from("adm_pagamentos")
+    .select("id,inter_codigo,status")
+    .eq("id", Number(pagamentoId))
+    .eq("tipo", "boleto")
+    .limit(1);
+  const pagamento = pg?.[0];
+  if (!pagamento) return NextResponse.json({ error: "Pagamento não encontrado." }, { status: 404 });
+  if (pagamento.status === "efetivado") {
+    return NextResponse.json({ error: "Boleto já pago — não é possível cancelar." }, { status: 409 });
+  }
+  if (!pagamento.inter_codigo) {
+    // ainda não foi ao Inter (ou falhou): apenas marca cancelado localmente
+    await adm.from("adm_pagamentos").update({ status: "cancelado", atualizado_em: new Date().toISOString() }).eq("id", pagamento.id);
+    return NextResponse.json({ ok: true, status: "cancelado" });
+  }
+
+  const r = await interFetch<any>(`/banking/v2/pagamento/${encodeURIComponent(pagamento.inter_codigo)}`, { method: "DELETE" });
+  if (!r.ok) {
+    return NextResponse.json({ error: `Inter não cancelou: ${r.error}` }, { status: 502 });
+  }
+  await adm.from("adm_pagamentos").update({ status: "cancelado", atualizado_em: new Date().toISOString() }).eq("id", pagamento.id);
+  return NextResponse.json({ ok: true, status: "cancelado" });
+}

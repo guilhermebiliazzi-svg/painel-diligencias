@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 // O pagamento fica pendente da sua aprovação no app do banco.
 
 type Pagamento = {
+  id?: number;
   status: string;
   inter_status: string | null;
   inter_codigo: string | null;
@@ -104,10 +105,12 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
   const [valor, setValor] = useState<string>(item.valor ? String(item.valor) : "");
   const [venc, setVenc] = useState("");
   const [cpf, setCpf] = useState("");
+  const [dataPag, setDataPag] = useState("");
   const [pg, setPg] = useState<Pagamento>(item.pagamento);
-  const [pagamentoId, setPagamentoId] = useState<number | null>(null);
+  const [pagamentoId, setPagamentoId] = useState<number | null>(item.pagamento?.id ?? null);
   const [enviando, setEnviando] = useState(false);
   const [checando, setChecando] = useState(false);
+  const [cancelando, setCancelando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [lida, setLida] = useState(false);
@@ -171,7 +174,8 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
       setErro("Informe o vencimento.");
       return;
     }
-    if (!confirm(`Enviar pagamento de ${brl(Number(valor))} — ${item.rotulo} de ${item.endereco}?\n\nVai ao Inter e fica pendente da sua aprovação no app do banco.`)) {
+    const quando = dataPag ? `agendado para ${dataPag.split("-").reverse().join("/")}` : "hoje";
+    if (!confirm(`Enviar pagamento de ${brl(Number(valor))} — ${item.rotulo} de ${item.endereco} (${quando})?\n\nVai ao Inter e fica pendente da sua aprovação no app do banco.`)) {
       return;
     }
     setEnviando(true);
@@ -187,6 +191,7 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
           valor: Number(valor),
           vencimento: venc,
           cpfCnpjBeneficiario: cpf || undefined,
+          dataPagamento: dataPag || undefined,
         }),
       });
       const d = await r.json();
@@ -224,6 +229,23 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
     }
   }
 
+  async function cancelar() {
+    if (!pagamentoId) return;
+    if (!confirm("Cancelar o agendamento deste boleto no Inter?")) return;
+    setCancelando(true);
+    setErro(null);
+    try {
+      const r = await fetch(`/api/adm/pagar-boleto?pagamento=${pagamentoId}`, { method: "DELETE" });
+      const d = await r.json();
+      if (!r.ok) setErro(d?.error || "Falha ao cancelar.");
+      else setPg((p) => (p ? { ...p, status: "cancelado" } : p));
+    } catch {
+      setErro("Erro de rede ao cancelar.");
+    } finally {
+      setCancelando(false);
+    }
+  }
+
   return (
     <section className="vj-card vj-boleto">
       <div className="vj-boleto-cab">
@@ -257,10 +279,15 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
             Valor {brl(pg!.valor)}
             {pg!.inter_codigo ? <> · transação {pg!.inter_codigo}</> : null}
           </p>
-          {pg!.status !== "efetivado" && pagamentoId && (
-            <button className="vj-link" onClick={checar} disabled={checando}>
-              {checando ? "Consultando…" : "Atualizar status"}
-            </button>
+          {pg!.status !== "efetivado" && pg!.status !== "cancelado" && pagamentoId && (
+            <div className="vj-status-acoes">
+              <button className="vj-link" onClick={checar} disabled={checando}>
+                {checando ? "Consultando…" : "Atualizar status"}
+              </button>
+              <button className="vj-link vj-del-link" onClick={cancelar} disabled={cancelando}>
+                {cancelando ? "Cancelando…" : "Cancelar agendamento"}
+              </button>
+            </div>
           )}
         </div>
       ) : (
@@ -282,9 +309,13 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
               <span>CPF/CNPJ beneficiário (opcional)</span>
               <input value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="só números" inputMode="numeric" />
             </label>
+            <label className="vj-f">
+              <span>Data de pagamento (vazio = hoje; futura = agenda)</span>
+              <input type="date" value={dataPag} onChange={(e) => setDataPag(e.target.value)} />
+            </label>
           </div>
           <button className="vj-btn vj-gerar" onClick={enviar} disabled={enviando}>
-            {enviando ? "Enviando…" : "Enviar pagamento ao Inter"}
+            {enviando ? "Enviando…" : dataPag ? "Agendar pagamento no Inter" : "Enviar pagamento ao Inter"}
           </button>
         </div>
       )}
@@ -335,5 +366,7 @@ const CSS = `
 .vj-badge.efet{color:#0F7B4F}
 .vj-cod{margin:0;font-size:13px;color:var(--mut)}
 .vj-link{align-self:flex-start;background:none;border:none;color:var(--azul);font:inherit;font-weight:600;font-size:13px;cursor:pointer;padding:0;text-decoration:underline}
+.vj-status-acoes{display:flex;gap:16px;flex-wrap:wrap}
+.vj-del-link{color:var(--verm)}
 @media (max-width:640px){.vj-sel{flex-direction:column;align-items:stretch}}
 `;
