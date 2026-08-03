@@ -131,14 +131,15 @@ export async function GET(req: Request) {
 
   const { data: pg } = await adm
     .from("adm_pagamentos")
-    .select("id,contrato_id,inter_codigo,status,inter_status,valor")
+    .select("id,contrato_id,inter_codigo,status,inter_status,valor,comprovante_path")
     .eq("id", Number(pagamentoId))
     .eq("tipo", "boleto")
     .limit(1);
   const pagamento = pg?.[0];
   if (!pagamento) return NextResponse.json({ pagamento: null });
 
-  if (pagamento.inter_codigo && pagamento.status !== "efetivado") {
+  // busca o Inter se ainda não efetivou OU se efetivou mas falta o comprovante
+  if (pagamento.inter_codigo && (pagamento.status !== "efetivado" || !pagamento.comprovante_path)) {
     const r = await interFetch<any>(
       `/banking/v2/pagamento?codigoTransacao=${encodeURIComponent(pagamento.inter_codigo)}`,
       { method: "GET" }
@@ -172,7 +173,15 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.json({ pagamento });
+  // já efetivado e com comprovante: devolve o link existente
+  let comprovante_url: string | null = null;
+  if (pagamento.status === "efetivado") {
+    try {
+      const comp = await salvarComprovanteBoleto(pagamento.id);
+      comprovante_url = comp?.url ?? null;
+    } catch (e) {}
+  }
+  return NextResponse.json({ pagamento, comprovante_url });
 }
 
 // Cancela o AGENDAMENTO de um boleto (só antes de pago).

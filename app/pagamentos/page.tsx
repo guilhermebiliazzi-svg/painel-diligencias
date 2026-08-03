@@ -159,6 +159,22 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Boleto já efetivado: garante que o comprovante existe (gera se faltar) e
+  // pega o link. Depois de gerado, só devolve o existente.
+  useEffect(() => {
+    if (!pagamentoId || item.pagamento?.status !== "efetivado") return;
+    (async () => {
+      try {
+        const r = await fetch(`/api/adm/pagar-boleto?pagamento=${pagamentoId}`, { cache: "no-store" });
+        const d = await r.json();
+        if (d.comprovante_url) setComprovante(d.comprovante_url);
+      } catch {
+        /* silencioso */
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function enviar() {
     setErro(null);
     setMsg(null);
