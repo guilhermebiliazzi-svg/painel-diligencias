@@ -137,8 +137,9 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
           const [cy, cm] = competencia.split("-").map(Number);
           const [vy, vm] = String(d.vencimento).slice(0, 7).split("-").map(Number);
           const diff = vy * 12 + vm - (cy * 12 + cm);
-          // condomínio: vence na competência ou no mês seguinte; IPTU: no mês da competência
-          const ok = item.subtipo === "condominio" ? diff >= 0 && diff <= 1 : diff === 0;
+          // o que importa para o repasse é o mês do vencimento: tem que ser o
+          // mês da competência (vale para IPTU e condomínio).
+          const ok = diff === 0;
           if (!ok) {
             const [yy, mm, dd] = String(d.vencimento).split("-");
             setAvisoVenc(`Este boleto vence em ${dd}/${mm}/${yy} — parece fora da competência ${competencia}. Confira se é o boleto certo.`);
