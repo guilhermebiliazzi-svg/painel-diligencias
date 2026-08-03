@@ -24,6 +24,7 @@ const REGRAS: Regra[] = [
   { re: /^\/repasses(\/|$)/, perm: 'pode_repasse', legacy: true },
   { re: /^\/seguros(\/|$)/, perm: 'admin', legacy: true },
   { re: /^\/notas(\/|$)/, perm: 'pode_notas', legacy: true },
+  { re: /^\/pagamentos(\/|$)/, perm: 'pode_cobrancas', legacy: false },
   { re: /^\/api\/adm(\/|$)/, perm: 'any', legacy: true },
   { re: /^\/usuarios(\/|$)/, perm: 'admin', legacy: false },
   { re: /^\/$/, perm: 'any', legacy: false },

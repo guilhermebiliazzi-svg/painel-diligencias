@@ -5,6 +5,7 @@
 create table if not exists public.adm_pagamentos (
   id            bigserial primary key,
   tipo          text not null check (tipo in ('pix_repasse','boleto')),
+  subtipo       text,              -- para boleto: 'iptu' | 'condominio'
 
   -- referências (nem todas preenchidas, conforme o tipo)
   repasse_id        bigint,
@@ -43,6 +44,9 @@ create table if not exists public.adm_pagamentos (
 create index if not exists idx_adm_pagamentos_repasse on public.adm_pagamentos (repasse_id);
 create index if not exists idx_adm_pagamentos_contrato_comp on public.adm_pagamentos (contrato_id, competencia);
 create index if not exists idx_adm_pagamentos_inter on public.adm_pagamentos (inter_codigo);
+
+-- Coluna subtipo (idempotente — caso a tabela já exista de uma versão anterior)
+alter table public.adm_pagamentos add column if not exists subtipo text;
 
 -- Só o backend (service_role) acessa. RLS ligado sem policies bloqueia acesso anônimo.
 alter table public.adm_pagamentos enable row level security;
