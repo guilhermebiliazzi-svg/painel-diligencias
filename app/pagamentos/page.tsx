@@ -180,8 +180,8 @@ function PagoRow({ pagamento }: { pagamento: PagamentoItem }) {
   );
 }
 
-function LinhaBoleto({ item, competencia }: { item: Item; competencia: string }) {
-  const [pagos, setPagos] = useState<PagamentoItem[]>(item.pagamentos || []);
+function NovoBoleto({ item, competencia, autoRead }: { item: Item; competencia: string; autoRead: boolean }) {
+  const [pago, setPago] = useState<PagamentoItem | null>(null);
   const [linha, setLinha] = useState("");
   const [valor, setValor] = useState("");
   const [venc, setVenc] = useState("");
@@ -189,15 +189,12 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
   const [dataPag, setDataPag] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
   const [lida, setLida] = useState(false);
   const [avisoVenc, setAvisoVenc] = useState<string | null>(null);
 
-  const temVivo = pagos.some((p) => ["submetido", "aguardando_aprovacao", "efetivado"].includes(p.status));
-
-  // Lê a linha do boleto anexado só quando ainda não há boleto lançado.
+  // Lê a linha do boleto anexado (só o primeiro formulário).
   useEffect(() => {
-    if (temVivo || !item.boleto) return;
+    if (!autoRead || !item.boleto) return;
     let vivo = true;
     (async () => {
       try {
@@ -224,7 +221,6 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
 
   async function enviar() {
     setErro(null);
-    setMsg(null);
     const linhaDig = linha.replace(/\D/g, "");
     if (linhaDig.length < 44 || linhaDig.length > 48) { setErro("Linha digitável inválida (44 a 48 dígitos)."); return; }
     if (!(Number(valor) > 0)) { setErro("Informe o valor a pagar."); return; }
@@ -241,17 +237,39 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
       const d = await r.json();
       if (!r.ok) setErro(d?.error || "Falha ao enviar.");
       else if (d.jaExiste) setErro(d.mensagem || "Este boleto já foi enviado.");
-      else {
-        setPagos((ps) => [...ps, { id: d.pagamento_id, status: d.status || "aguardando_aprovacao", inter_status: d.statusPagamento || null, inter_codigo: d.codigoTransacao || null, valor: Number(valor), linha_digitavel: linhaDig }]);
-        setMsg("Enviado ao Inter.");
-        setLinha(""); setValor(""); setVenc(""); setCpf(""); setDataPag(""); setLida(false); setAvisoVenc(null);
-      }
+      else setPago({ id: d.pagamento_id, status: d.status || "aguardando_aprovacao", inter_status: d.statusPagamento || null, inter_codigo: d.codigoTransacao || null, valor: Number(valor), linha_digitavel: linhaDig });
     } catch {
       setErro("Erro de rede.");
     } finally {
       setEnviando(false);
     }
   }
+
+  if (pago) return <PagoRow pagamento={pago} />;
+
+  return (
+    <div className="vj-form">
+      {erro && <div className="vj-erro-in">{erro}</div>}
+      {avisoVenc && <div className="vj-aviso-in">⚠ {avisoVenc}</div>}
+      <label className="vj-f">
+        <span>Linha digitável / código de barras{lida ? <span className="vj-lida"> · lida do boleto, confira</span> : null}</span>
+        <input value={linha} onChange={(e) => { setLinha(e.target.value); setLida(false); }} placeholder="Só os números do boleto" inputMode="numeric" />
+      </label>
+      <div className="vj-frow">
+        <label className="vj-f"><span>Valor a pagar</span><input type="number" step="0.01" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0,00" /></label>
+        <label className="vj-f"><span>Vencimento</span><input type="date" value={venc} onChange={(e) => setVenc(e.target.value)} /></label>
+        <label className="vj-f"><span>CPF/CNPJ beneficiário (opcional)</span><input value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="só números" inputMode="numeric" /></label>
+        <label className="vj-f"><span>Data de pagamento (vazio = hoje; futura = agenda)</span><input type="date" value={dataPag} onChange={(e) => setDataPag(e.target.value)} /></label>
+      </div>
+      <button className="vj-btn vj-gerar" onClick={enviar} disabled={enviando}>
+        {enviando ? "Enviando…" : dataPag ? "Agendar pagamento no Inter" : "Enviar pagamento ao Inter"}
+      </button>
+    </div>
+  );
+}
+
+function LinhaBoleto({ item, competencia }: { item: Item; competencia: string }) {
+  const [novos, setNovos] = useState<number[]>([0]);
 
   return (
     <section className="vj-card vj-boleto">
@@ -272,30 +290,17 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
         </a>
       )}
 
-      {pagos.map((p) => (
+      {item.pagamentos.map((p) => (
         <PagoRow key={p.id} pagamento={p} />
       ))}
 
-      {erro && <div className="vj-erro-in">{erro}</div>}
-      {msg && <div className="vj-ok-in">{msg}</div>}
-      {!temVivo && avisoVenc && <div className="vj-aviso-in">⚠ {avisoVenc}</div>}
+      {novos.map((n, idx) => (
+        <NovoBoleto key={n} item={item} competencia={competencia} autoRead={idx === 0 && item.pagamentos.length === 0} />
+      ))}
 
-      <div className="vj-form">
-        {pagos.length > 0 && <div className="vj-add-h">Adicionar outro boleto</div>}
-        <label className="vj-f">
-          <span>Linha digitável / código de barras{lida ? <span className="vj-lida"> · lida do boleto, confira</span> : null}</span>
-          <input value={linha} onChange={(e) => { setLinha(e.target.value); setLida(false); }} placeholder="Só os números do boleto" inputMode="numeric" />
-        </label>
-        <div className="vj-frow">
-          <label className="vj-f"><span>Valor a pagar</span><input type="number" step="0.01" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0,00" /></label>
-          <label className="vj-f"><span>Vencimento</span><input type="date" value={venc} onChange={(e) => setVenc(e.target.value)} /></label>
-          <label className="vj-f"><span>CPF/CNPJ beneficiário (opcional)</span><input value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="só números" inputMode="numeric" /></label>
-          <label className="vj-f"><span>Data de pagamento (vazio = hoje; futura = agenda)</span><input type="date" value={dataPag} onChange={(e) => setDataPag(e.target.value)} /></label>
-        </div>
-        <button className="vj-btn vj-gerar" onClick={enviar} disabled={enviando}>
-          {enviando ? "Enviando…" : dataPag ? "Agendar pagamento no Inter" : "Enviar pagamento ao Inter"}
-        </button>
-      </div>
+      <button className="vj-add-btn" onClick={() => setNovos((ns) => [...ns, (ns.length ? Math.max(...ns) : 0) + 1])}>
+        ＋ Adicionar outro boleto (apto, vaga…)
+      </button>
     </section>
   );
 }
@@ -346,6 +351,7 @@ const CSS = `
 .vj-pago{border:1px solid var(--linha);border-radius:11px;padding:12px 14px;margin-bottom:10px;background:#F8FAFD;display:flex;flex-direction:column;gap:6px}
 .vj-add-h{font-size:13px;font-weight:700;color:var(--azul);margin-bottom:2px}
 .vj-ref-obs{font-size:11px;color:var(--mut)}
+.vj-add-btn{margin-top:6px;background:none;border:1px dashed var(--azul);color:var(--azul);font:inherit;font-weight:600;padding:9px 14px;border-radius:9px;cursor:pointer;width:100%}
 .vj-cod{margin:0;font-size:13px;color:var(--mut)}
 .vj-link{align-self:flex-start;background:none;border:none;color:var(--azul);font:inherit;font-weight:600;font-size:13px;cursor:pointer;padding:0;text-decoration:underline}
 .vj-status-acoes{display:flex;gap:16px;flex-wrap:wrap}
