@@ -12,6 +12,7 @@ export type Perfil = {
   pode_cobrancas: boolean;
   pode_repasse: boolean;
   pode_notas: boolean;
+  pode_pagamentos: boolean;
 };
 
 export type SessaoPerfil = {
@@ -29,7 +30,7 @@ export const getSessaoPerfil = cache(async (): Promise<SessaoPerfil> => {
   const { data } = await sb
     .from('perfis')
     .select(
-      'email,nome,is_admin,ativo,pode_diligencias,pode_cobrancas,pode_repasse,pode_notas'
+      'email,nome,is_admin,ativo,pode_diligencias,pode_cobrancas,pode_repasse,pode_notas,pode_pagamentos'
     )
     .eq('email', user.email.toLowerCase())
     .maybeSingle();

@@ -10,10 +10,10 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 
 type CookieParaGravar = { name: string; value: string; options: CookieOptions };
-type PermKey = 'pode_diligencias' | 'pode_cobrancas' | 'pode_repasse' | 'pode_notas';
+type PermKey = 'pode_diligencias' | 'pode_cobrancas' | 'pode_repasse' | 'pode_notas' | 'pode_pagamentos';
 type PerfilRow = {
   is_admin: boolean; ativo: boolean;
-  pode_diligencias: boolean; pode_cobrancas: boolean; pode_repasse: boolean; pode_notas: boolean;
+  pode_diligencias: boolean; pode_cobrancas: boolean; pode_repasse: boolean; pode_notas: boolean; pode_pagamentos: boolean;
 };
 type Regra = { re: RegExp; perm: 'any' | 'admin' | PermKey; legacy: boolean };
 
@@ -24,7 +24,7 @@ const REGRAS: Regra[] = [
   { re: /^\/repasses(\/|$)/, perm: 'pode_repasse', legacy: true },
   { re: /^\/seguros(\/|$)/, perm: 'admin', legacy: true },
   { re: /^\/notas(\/|$)/, perm: 'pode_notas', legacy: true },
-  { re: /^\/pagamentos(\/|$)/, perm: 'pode_cobrancas', legacy: false },
+  { re: /^\/pagamentos(\/|$)/, perm: 'pode_pagamentos', legacy: false },
   { re: /^\/api\/adm(\/|$)/, perm: 'any', legacy: true },
   { re: /^\/usuarios(\/|$)/, perm: 'admin', legacy: false },
   { re: /^\/$/, perm: 'any', legacy: false },
@@ -94,7 +94,7 @@ export default async function proxy(req: NextRequest) {
   // Perfil + permissão
   const { data } = await sb
     .from('perfis')
-    .select('is_admin,ativo,pode_diligencias,pode_cobrancas,pode_repasse,pode_notas')
+    .select('is_admin,ativo,pode_diligencias,pode_cobrancas,pode_repasse,pode_notas,pode_pagamentos')
     .eq('email', (user.email || '').toLowerCase())
     .maybeSingle();
   const perfil = (data as PerfilRow | null) ?? null;

@@ -14,6 +14,7 @@ function lerPermissoes(fd: FormData) {
     pode_cobrancas: fd.get('pode_cobrancas') === 'on',
     pode_repasse: fd.get('pode_repasse') === 'on',
     pode_notas: fd.get('pode_notas') === 'on',
+    pode_pagamentos: fd.get('pode_pagamentos') === 'on',
   };
 }
 
