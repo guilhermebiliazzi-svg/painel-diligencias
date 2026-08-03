@@ -46,7 +46,40 @@ export default function DocumentosLocador({
   const [carregando, setCarregando] = useState(false);
   const [ocupado, setOcupado] = useState<Tipo | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [avisos, setAvisos] = useState<Record<string, string>>({});
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  // Lê o vencimento do boleto anexado e avisa se for de outro mês (o boleto
+  // pertence à competência do mês do seu vencimento).
+  const checarVenc = useCallback(
+    async (tipo: Tipo) => {
+      const sub = tipo === "boleto_iptu" ? "iptu" : tipo === "boleto_condominio" ? "condominio" : null;
+      if (!sub) return;
+      try {
+        const r = await fetch(
+          `/api/adm/ler-linha-digitavel?contrato=${contratoId}&competencia=${competencia}&subtipo=${sub}`,
+          { cache: "no-store" }
+        );
+        const d = await r.json();
+        setAvisos((a) => {
+          const n = { ...a };
+          delete n[tipo];
+          if (d.vencimento) {
+            const [cy, cm] = competencia.split("-").map(Number);
+            const [vy, vm] = String(d.vencimento).slice(0, 7).split("-").map(Number);
+            if (vy * 12 + vm !== cy * 12 + cm) {
+              const [yy, mm, dd] = String(d.vencimento).split("-");
+              n[tipo] = `Vence em ${dd}/${mm}/${yy} — fora da competência ${competencia}. Confira.`;
+            }
+          }
+          return n;
+        });
+      } catch {
+        /* silencioso */
+      }
+    },
+    [contratoId, competencia]
+  );
 
   const recarregar = useCallback(async () => {
     if (!contratoId || !competencia) return;
@@ -70,6 +103,14 @@ export default function DocumentosLocador({
   useEffect(() => {
     recarregar();
   }, [recarregar]);
+
+  // Ao carregar/trocar boletos, revê o aviso de vencimento.
+  useEffect(() => {
+    (["boleto_iptu", "boleto_condominio"] as Tipo[]).forEach((t) => {
+      if (docs[t]) checarVenc(t);
+      else setAvisos((a) => (a[t] ? (() => { const n = { ...a }; delete n[t]; return n; })() : a));
+    });
+  }, [docs, checarVenc]);
 
   async function enviar(tipo: Tipo, file: File) {
     setOcupado(tipo);
@@ -168,6 +209,7 @@ export default function DocumentosLocador({
                   {busy ? "Enviando…" : "＋ Enviar PDF"}
                 </button>
               )}
+              {avisos[tipo] && <div className="vjdoc-aviso">⚠ {avisos[tipo]}</div>}
               <input
                 ref={(el) => {
                   inputs.current[tipo] = el;
@@ -196,6 +238,7 @@ export default function DocumentosLocador({
 .vjdoc-slot{border:1px solid #E4E9F2;border-radius:11px;padding:12px 14px;background:#F8FAFD}
 .vjdoc-slot.tem{background:#EAF7F0;border-color:#BCE3D0}
 .vjdoc-slabel{font-size:12px;font-weight:700;color:#16233B;margin-bottom:8px}
+.vjdoc-aviso{margin-top:8px;background:#FFF7E6;border:1px solid #FADFA0;color:#8a6d00;padding:6px 9px;border-radius:8px;font-size:12px;font-weight:600}
 .vjdoc-file{display:flex;flex-direction:column;gap:6px}
 .vjdoc-open{color:#003DA5;font-weight:600;font-size:13px;text-decoration:none;word-break:break-word}
 .vjdoc-open:hover{text-decoration:underline}
