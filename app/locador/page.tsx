@@ -4,6 +4,7 @@ import { supabaseServer } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import LocadorLogin from './login-form';
 import { sairLocador } from './actions';
+import AdminPicker, { type LocOpc } from './admin-picker';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Meus repasses — Ville Jardins' };
@@ -30,7 +31,8 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-export default async function LocadorPage() {
+export default async function LocadorPage({ searchParams }: { searchParams: Promise<{ locador?: string }> }) {
+  const sp = await searchParams;
   const sb = await supabaseServer();
   const { data: { user } } = await sb.auth.getUser();
   if (!user?.email) return <Shell><LocadorLogin /></Shell>;
@@ -38,27 +40,46 @@ export default async function LocadorPage() {
   const email = user.email.toLowerCase();
   const adm = supabaseAdmin();
 
-  // tolerante a e-mail duplicado: pega o primeiro em vez de quebrar
-  const { data: locList } = await adm
-    .from('adm_locadores').select('id,nome').ilike('email', email).order('id').limit(1);
-  const locador = locList?.[0] ?? null;
+  // Admin? (verificado no servidor pelo perfil) → acesso universal com seletor.
+  const { data: perfil } = await adm
+    .from('perfis').select('is_admin,ativo').eq('email', email).maybeSingle();
+  const isAdmin = !!(perfil?.is_admin && perfil?.ativo);
 
-  if (!locador) {
-    return (
-      <Shell>
-        <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Ville Jardins</p>
-          <h1 className="mt-2 text-xl font-semibold text-slate-900">Cadastro não encontrado</h1>
-          <p className="mt-2 text-sm leading-relaxed text-slate-600">
-            Não encontramos um locador com o e-mail <b>{email}</b>. Fale com a Ville Jardins para atualizar seu cadastro.
-          </p>
-          <form action={sairLocador} className="mt-6">
-            <button className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Sair</button>
-          </form>
-        </div>
-      </Shell>
-    );
+  let locador: { id: number; nome: string | null } | null = null;
+
+  if (isAdmin) {
+    if (sp?.locador && /^\d+$/.test(sp.locador)) {
+      const { data } = await adm.from('adm_locadores').select('id,nome').eq('id', Number(sp.locador)).limit(1);
+      locador = data?.[0] ?? null;
+    }
+    if (!locador) {
+      const { data: todos } = await adm
+        .from('adm_locadores').select('id,nome,email').order('nome');
+      return <AdminPicker locadores={(todos ?? []) as LocOpc[]} />;
+    }
+  } else {
+    // locador comum: casa pelo e-mail (tolerante a duplicado)
+    const { data: locList } = await adm
+      .from('adm_locadores').select('id,nome').ilike('email', email).order('id').limit(1);
+    locador = locList?.[0] ?? null;
+    if (!locador) {
+      return (
+        <Shell>
+          <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Ville Jardins</p>
+            <h1 className="mt-2 text-xl font-semibold text-slate-900">Cadastro não encontrado</h1>
+            <p className="mt-2 text-sm leading-relaxed text-slate-600">
+              Não encontramos um locador com o e-mail <b>{email}</b>. Fale com a Ville Jardins para atualizar seu cadastro.
+            </p>
+            <form action={sairLocador} className="mt-6">
+              <button className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Sair</button>
+            </form>
+          </div>
+        </Shell>
+      );
+    }
   }
+  const modoAdmin = isAdmin;
 
   const { data: repRows } = await adm
     .from('adm_repasses')
@@ -152,15 +173,25 @@ export default async function LocadorPage() {
   return (
     <div style={{ backgroundColor: '#f8fafc' }} className="min-h-screen">
       <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
+        {modoAdmin && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm text-blue-800">
+            <span>👁️ Modo admin — visualizando <b>{locador.nome || `locador #${locador.id}`}</b></span>
+            <a href="/locador" className="font-medium underline">Trocar locador</a>
+          </div>
+        )}
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Ville Jardins — Portal do locador</p>
-            <h1 className="mt-1 text-2xl font-semibold text-slate-900 sm:text-3xl">Olá, {primeiroNome}</h1>
-            <p className="mt-1 text-sm text-slate-600">Seus recibos, boletos e comprovantes de IPTU e condomínio.</p>
+            <h1 className="mt-1 text-2xl font-semibold text-slate-900 sm:text-3xl">{modoAdmin ? (locador.nome || `Locador #${locador.id}`) : `Olá, ${primeiroNome}`}</h1>
+            <p className="mt-1 text-sm text-slate-600">{modoAdmin ? "Recibos, boletos e comprovantes deste locador." : "Seus recibos, boletos e comprovantes de IPTU e condomínio."}</p>
           </div>
-          <form action={sairLocador}>
-            <button className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 hover:text-slate-900">Sair</button>
-          </form>
+          {modoAdmin ? (
+            <a href="/" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 hover:text-slate-900">Voltar ao painel</a>
+          ) : (
+            <form action={sairLocador}>
+              <button className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 hover:text-slate-900">Sair</button>
+            </form>
+          )}
         </header>
 
         {grupos.size === 0 ? (
