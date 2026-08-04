@@ -327,7 +327,10 @@ export default function NotasFiscais() {
 
       <header className="vj-top">
         <a href="/cobrancas" className="vj-mark vj-marklink">RE/MAX <span>Ville</span></a>
-        <div className="vj-crumb">Administração · Notas fiscais</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div className="vj-crumb">Administração · Notas fiscais</div>
+          <a href="/" className="vj-back">← Painel</a>
+        </div>
       </header>
 
       <main className="vj-main">
@@ -643,6 +646,7 @@ const CSS = `
 .vj-mark{font-weight:800;letter-spacing:.5px;font-size:18px}.vj-mark span{color:#BFD3FF;font-weight:600}
 .vj-marklink{color:#fff;text-decoration:none}
 .vj-crumb{font-size:13px;color:#C9D8F5}
+.vj-back{font-size:13px;color:#fff;text-decoration:none;border:1px solid rgba(255,255,255,.35);border-radius:8px;padding:4px 10px;white-space:nowrap;transition:background .15s}.vj-back:hover{background:rgba(255,255,255,.15)}
 .vj-main{max-width:1040px;margin:0 auto;padding:32px 20px 80px}
 .vj-head{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap;margin-bottom:22px}
 .vj-h1{font-family:Fraunces,Georgia,serif;font-size:30px;font-weight:600;margin:0 0 6px}

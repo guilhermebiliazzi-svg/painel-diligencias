@@ -138,7 +138,10 @@ export default function Repasse() {
     <div className="vj-wrap">
       <header className="vj-top">
         <a href="/cobrancas" className="vj-mark vj-marklink">RE/MAX <span>Ville</span></a>
-        <div className="vj-crumb">Administração · Repasse ao locador</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div className="vj-crumb">Administração · Repasse ao locador</div>
+          <a href="/" className="vj-back">← Painel</a>
+        </div>
       </header>
 
       <main className="vj-main">
@@ -257,6 +260,7 @@ const CSS = `
 .vj-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 28px;background:var(--azul);color:#fff}
 .vj-mark{font-family:Archivo,sans-serif;font-weight:800;color:#fff;text-decoration:none}.vj-mark span{font-weight:400}
 .vj-crumb{font-size:14px;opacity:.9}
+.vj-back{font-size:13px;color:#fff;text-decoration:none;border:1px solid rgba(255,255,255,.35);border-radius:8px;padding:4px 10px;white-space:nowrap;transition:background .15s}.vj-back:hover{background:rgba(255,255,255,.15)}
 .vj-main{max-width:820px;margin:0 auto;padding:24px 20px 60px}
 .vj-head{margin-bottom:16px}
 .vj-h1{font-family:Archivo,sans-serif;font-size:28px;margin:0}
