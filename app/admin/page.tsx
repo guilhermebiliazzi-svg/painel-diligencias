@@ -56,12 +56,14 @@ export default async function AdminHome({
   const diligencias = await fetchDiligencias(busca);
 
   // Totais agregados
+  // Os contadores vêm do Postgres como texto; força número (senão += concatena).
+  const n = (v: unknown) => Number(v) || 0;
   const tot = diligencias.reduce(
     (acc, d) => {
-      acc.total += d.total_certidoes;
-      acc.concluidas += d.concluidas;
-      acc.alertas += d.com_divergencia;
-      acc.uploads += d.uploads_pendentes;
+      acc.total += n(d.total_certidoes);
+      acc.concluidas += n(d.concluidas);
+      acc.alertas += n(d.com_divergencia);
+      acc.uploads += n(d.uploads_pendentes);
       return acc;
     },
     { total: 0, concluidas: 0, alertas: 0, uploads: 0 }
