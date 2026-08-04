@@ -114,7 +114,10 @@ export default async function AdminHome({
   return (
     <div style={{ backgroundColor: '#f8fafc' }} className="min-h-screen">
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-        <header className="mb-8 flex items-start justify-between gap-4">
+        <Link href="/" className="text-sm text-slate-500 hover:text-slate-800">
+          ← Voltar ao painel
+        </Link>
+        <header className="mt-3 mb-8 flex items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
               RE/MAX Ville — Painel admin
