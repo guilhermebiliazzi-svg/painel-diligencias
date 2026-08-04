@@ -359,6 +359,39 @@ export async function auditarDiligencia(diligencia_id: string) {
 }
 
 /**
+ * Arquivar / desarquivar diligência.
+ * Usado quando a venda é concluída — tira o card da lista principal sem
+ * apagar nada. Tabela leve public.diligencias_arquivo (não mexe na view).
+ * São form actions (FormData) porque os botões são <form> na lista.
+ */
+export async function arquivarDiligencia(fd: FormData): Promise<void> {
+  const diligencia_id = String(fd.get('diligencia_id') || '').trim();
+  if (!diligencia_id) throw new Error('diligencia_id ausente');
+
+  await pool.query(
+    `INSERT INTO public.diligencias_arquivo (diligencia_id)
+     VALUES ($1) ON CONFLICT (diligencia_id) DO NOTHING`,
+    [diligencia_id]
+  );
+
+  await logAcao({ acao: 'arquivar_diligencia', detalhe: { diligencia_id } });
+  revalidatePath('/admin');
+}
+
+export async function desarquivarDiligencia(fd: FormData): Promise<void> {
+  const diligencia_id = String(fd.get('diligencia_id') || '').trim();
+  if (!diligencia_id) throw new Error('diligencia_id ausente');
+
+  await pool.query(
+    `DELETE FROM public.diligencias_arquivo WHERE diligencia_id = $1`,
+    [diligencia_id]
+  );
+
+  await logAcao({ acao: 'desarquivar_diligencia', detalhe: { diligencia_id } });
+  revalidatePath('/admin');
+}
+
+/**
  * Alterna visibilidade de UM card no painel cliente.
  * Atualiza certidoes_status.oculta_cliente.
  */

@@ -3,7 +3,7 @@
 
 import { pool } from '@/lib/db';
 import Link from 'next/link';
-import { logoutAction } from './actions';
+import { logoutAction, arquivarDiligencia, desarquivarDiligencia } from './actions';
 
 type DiligenciaListRow = {
   diligencia_id: string;
@@ -19,19 +19,43 @@ type DiligenciaListRow = {
   percentual_concluido: number;
 };
 
-async function fetchDiligencias(busca?: string): Promise<DiligenciaListRow[]> {
-  if (busca && busca.trim().length > 0) {
-    const term = `%${busca.trim()}%`;
+// Conta quantas diligências estão arquivadas (pra badge da aba).
+async function contarArquivadas(): Promise<number> {
+  try {
     const r = await pool.query(
-      `SELECT * FROM painel.v_painel_admin
-       WHERE endereco ILIKE $1 OR cliente_nome ILIKE $1
-       ORDER BY criado_em DESC`,
+      `SELECT count(*)::int AS n
+       FROM public.diligencias_arquivo a
+       JOIN painel.v_painel_admin v ON v.diligencia_id::text = a.diligencia_id`
+    );
+    return r.rows[0]?.n ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function fetchDiligencias(
+  busca: string,
+  arquivadas: boolean
+): Promise<DiligenciaListRow[]> {
+  // a.diligencia_id IS NULL  → ativa;  IS NOT NULL → arquivada.
+  const cond = arquivadas ? 'a.diligencia_id IS NOT NULL' : 'a.diligencia_id IS NULL';
+  const base = `
+    SELECT v.*
+    FROM painel.v_painel_admin v
+    LEFT JOIN public.diligencias_arquivo a ON a.diligencia_id = v.diligencia_id::text`;
+
+  if (busca.length > 0) {
+    const term = `%${busca}%`;
+    const r = await pool.query(
+      `${base}
+       WHERE ${cond} AND (v.endereco ILIKE $1 OR v.cliente_nome ILIKE $1)
+       ORDER BY v.criado_em DESC`,
       [term]
     );
     return r.rows;
   }
   const r = await pool.query(
-    `SELECT * FROM painel.v_painel_admin ORDER BY criado_em DESC LIMIT 200`
+    `${base} WHERE ${cond} ORDER BY v.criado_em DESC LIMIT 200`
   );
   return r.rows;
 }
@@ -49,11 +73,15 @@ function formatDate(iso: string): string {
 export default async function AdminHome({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; arq?: string }>;
 }) {
   const sp = await searchParams;
   const busca = sp.q?.trim() ?? '';
-  const diligencias = await fetchDiligencias(busca);
+  const arquivadas = sp.arq === '1';
+  const [diligencias, nArquivadas] = await Promise.all([
+    fetchDiligencias(busca, arquivadas),
+    contarArquivadas(),
+  ]);
 
   // Totais agregados
   // Os contadores vêm do Postgres como texto; força número (senão += concatena).
@@ -112,9 +140,23 @@ export default async function AdminHome({
           />
         </section>
 
+        {/* Abas: Ativas / Arquivadas */}
+        <section className="mb-4 flex items-center gap-1 border-b border-slate-200">
+          <Aba href={busca ? `/admin?q=${encodeURIComponent(busca)}` : '/admin'} ativo={!arquivadas}>
+            Ativas
+          </Aba>
+          <Aba
+            href={busca ? `/admin?arq=1&q=${encodeURIComponent(busca)}` : '/admin?arq=1'}
+            ativo={arquivadas}
+          >
+            Arquivadas{nArquivadas > 0 ? ` (${nArquivadas})` : ''}
+          </Aba>
+        </section>
+
         {/* Busca */}
         <section className="mb-6">
           <form method="get" className="flex gap-2">
+            {arquivadas && <input type="hidden" name="arq" value="1" />}
             <input
               name="q"
               defaultValue={busca}
@@ -129,7 +171,7 @@ export default async function AdminHome({
             </button>
             {busca && (
               <Link
-                href="/admin"
+                href={arquivadas ? '/admin?arq=1' : '/admin'}
                 className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 Limpar
@@ -142,64 +184,114 @@ export default async function AdminHome({
         <section className="space-y-2">
           {diligencias.length === 0 && (
             <p className="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
-              Nenhuma diligência encontrada.
+              {arquivadas
+                ? 'Nenhuma diligência arquivada.'
+                : 'Nenhuma diligência encontrada.'}
             </p>
           )}
           {diligencias.map((d) => (
-            <Link
+            <div
               key={d.diligencia_id}
-              href={`/admin/d/${d.diligencia_id}`}
-              className="block rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:shadow"
+              className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-slate-300 hover:shadow"
             >
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-slate-900">
-                    {d.endereco}
-                  </p>
-                  <p className="mt-0.5 truncate text-xs text-slate-500">
-                    {d.cliente_nome ?? 'Sem cliente'} · {formatDate(d.criado_em)}
-                  </p>
-                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                    <span className="text-slate-600">
-                      <strong className="text-slate-900">{d.concluidas}</strong>/{d.total_certidoes} concluídas
-                    </span>
-                    {d.com_divergencia > 0 && (
-                      <span className="font-medium text-rose-700">
-                        {d.com_divergencia} divergência{d.com_divergencia > 1 ? 's' : ''}
+              <Link href={`/admin/d/${d.diligencia_id}`} className="block p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-slate-900">
+                      {d.endereco}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-slate-500">
+                      {d.cliente_nome ?? 'Sem cliente'} · {formatDate(d.criado_em)}
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                      <span className="text-slate-600">
+                        <strong className="text-slate-900">{d.concluidas}</strong>/{d.total_certidoes} concluídas
                       </span>
-                    )}
-                    {d.uploads_pendentes > 0 && (
-                      <span className="font-medium text-amber-700">
-                        {d.uploads_pendentes} upload{d.uploads_pendentes > 1 ? 's' : ''} pendente{d.uploads_pendentes > 1 ? 's' : ''}
-                      </span>
-                    )}
-                    {d.em_andamento > 0 && (
-                      <span className="text-sky-700">
-                        {d.em_andamento} em andamento
-                      </span>
-                    )}
+                      {d.com_divergencia > 0 && (
+                        <span className="font-medium text-rose-700">
+                          {d.com_divergencia} divergência{d.com_divergencia > 1 ? 's' : ''}
+                        </span>
+                      )}
+                      {d.uploads_pendentes > 0 && (
+                        <span className="font-medium text-amber-700">
+                          {d.uploads_pendentes} upload{d.uploads_pendentes > 1 ? 's' : ''} pendente{d.uploads_pendentes > 1 ? 's' : ''}
+                        </span>
+                      )}
+                      {d.em_andamento > 0 && (
+                        <span className="text-sky-700">
+                          {d.em_andamento} em andamento
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex flex-col items-end gap-2">
-                  <div className="text-right">
-                    <span className="text-lg font-semibold text-slate-900">
-                      {d.percentual_concluido}%
-                    </span>
-                  </div>
-                  <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100">
-                    <div
-                      className="h-full rounded-full bg-emerald-500"
-                      style={{ width: `${d.percentual_concluido}%` }}
-                    />
+                  <div className="flex flex-col items-end gap-2">
+                    <div className="text-right">
+                      <span className="text-lg font-semibold text-slate-900">
+                        {d.percentual_concluido}%
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className="h-full rounded-full bg-emerald-500"
+                        style={{ width: `${d.percentual_concluido}%` }}
+                      />
+                    </div>
                   </div>
                 </div>
+              </Link>
+
+              <div className="flex justify-end border-t border-slate-100 bg-slate-50/60 px-4 py-2">
+                {arquivadas ? (
+                  <form action={desarquivarDiligencia}>
+                    <input type="hidden" name="diligencia_id" value={d.diligencia_id} />
+                    <button
+                      type="submit"
+                      className="rounded-md px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:bg-white hover:text-slate-900"
+                    >
+                      ↩ Desarquivar
+                    </button>
+                  </form>
+                ) : (
+                  <form action={arquivarDiligencia}>
+                    <input type="hidden" name="diligencia_id" value={d.diligencia_id} />
+                    <button
+                      type="submit"
+                      className="rounded-md px-2.5 py-1 text-xs font-medium text-slate-500 transition hover:bg-white hover:text-slate-800"
+                    >
+                      Arquivar (venda concluída)
+                    </button>
+                  </form>
+                )}
               </div>
-            </Link>
+            </div>
           ))}
         </section>
       </main>
     </div>
+  );
+}
+
+function Aba({
+  href,
+  ativo,
+  children,
+}: {
+  href: string;
+  ativo: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${
+        ativo
+          ? 'border-blue-600 text-blue-700'
+          : 'border-transparent text-slate-500 hover:text-slate-800'
+      }`}
+    >
+      {children}
+    </Link>
   );
 }
 
