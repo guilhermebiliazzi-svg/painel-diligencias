@@ -44,20 +44,42 @@ async function fetchDiligencias(
     FROM painel.v_painel_admin v
     LEFT JOIN public.diligencias_arquivo a ON a.diligencia_id = v.diligencia_id::text`;
 
-  if (busca.length > 0) {
-    const term = `%${busca}%`;
+  try {
+    if (busca.length > 0) {
+      const term = `%${busca}%`;
+      const r = await pool.query(
+        `${base}
+         WHERE ${cond} AND (v.endereco ILIKE $1 OR v.cliente_nome ILIKE $1)
+         ORDER BY v.criado_em DESC`,
+        [term]
+      );
+      return r.rows;
+    }
     const r = await pool.query(
-      `${base}
-       WHERE ${cond} AND (v.endereco ILIKE $1 OR v.cliente_nome ILIKE $1)
-       ORDER BY v.criado_em DESC`,
-      [term]
+      `${base} WHERE ${cond} ORDER BY v.criado_em DESC LIMIT 200`
+    );
+    return r.rows;
+  } catch (e) {
+    // Fallback enquanto a migration (public.diligencias_arquivo) não rodou:
+    // sem a tabela, o JOIN quebra. Aba "Arquivadas" fica vazia; "Ativas"
+    // mostra tudo pela query original (sem o filtro de arquivamento).
+    console.error('[fetchDiligencias] fallback sem tabela de arquivo:', e);
+    if (arquivadas) return [];
+    if (busca.length > 0) {
+      const term = `%${busca}%`;
+      const r = await pool.query(
+        `SELECT * FROM painel.v_painel_admin
+         WHERE endereco ILIKE $1 OR cliente_nome ILIKE $1
+         ORDER BY criado_em DESC`,
+        [term]
+      );
+      return r.rows;
+    }
+    const r = await pool.query(
+      `SELECT * FROM painel.v_painel_admin ORDER BY criado_em DESC LIMIT 200`
     );
     return r.rows;
   }
-  const r = await pool.query(
-    `${base} WHERE ${cond} ORDER BY v.criado_em DESC LIMIT 200`
-  );
-  return r.rows;
 }
 
 function formatDate(iso: string): string {
