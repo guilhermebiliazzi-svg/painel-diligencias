@@ -4,6 +4,7 @@
 'use server';
 
 import { pool } from '@/lib/db';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -368,13 +369,19 @@ export async function arquivarDiligencia(fd: FormData): Promise<void> {
   const diligencia_id = String(fd.get('diligencia_id') || '').trim();
   if (!diligencia_id) throw new Error('diligencia_id ausente');
 
-  await pool.query(
-    `INSERT INTO public.diligencias_arquivo (diligencia_id)
-     VALUES ($1) ON CONFLICT (diligencia_id) DO NOTHING`,
-    [diligencia_id]
-  );
+  // Grava via service_role (supabaseAdmin): tem acesso à tabela nova no public,
+  // diferente do papel direto do Postgres (DB_USER) usado pelo pool.
+  const sb = supabaseAdmin();
+  const { error } = await sb
+    .from('diligencias_arquivo')
+    .upsert({ diligencia_id }, { onConflict: 'diligencia_id' });
+  if (error) throw new Error('falha ao arquivar: ' + error.message);
 
-  await logAcao({ acao: 'arquivar_diligencia', detalhe: { diligencia_id } });
+  try {
+    await logAcao({ acao: 'arquivar_diligencia', detalhe: { diligencia_id } });
+  } catch (e) {
+    console.error('[arquivarDiligencia] log falhou (ignorado):', e);
+  }
   revalidatePath('/admin');
 }
 
@@ -382,12 +389,18 @@ export async function desarquivarDiligencia(fd: FormData): Promise<void> {
   const diligencia_id = String(fd.get('diligencia_id') || '').trim();
   if (!diligencia_id) throw new Error('diligencia_id ausente');
 
-  await pool.query(
-    `DELETE FROM public.diligencias_arquivo WHERE diligencia_id = $1`,
-    [diligencia_id]
-  );
+  const sb = supabaseAdmin();
+  const { error } = await sb
+    .from('diligencias_arquivo')
+    .delete()
+    .eq('diligencia_id', diligencia_id);
+  if (error) throw new Error('falha ao desarquivar: ' + error.message);
 
-  await logAcao({ acao: 'desarquivar_diligencia', detalhe: { diligencia_id } });
+  try {
+    await logAcao({ acao: 'desarquivar_diligencia', detalhe: { diligencia_id } });
+  } catch (e) {
+    console.error('[desarquivarDiligencia] log falhou (ignorado):', e);
+  }
   revalidatePath('/admin');
 }
 

@@ -2,6 +2,7 @@
 // Lista todas as diligencias com contadores e busca.
 
 import { pool } from '@/lib/db';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 import Link from 'next/link';
 import { logoutAction, arquivarDiligencia, desarquivarDiligencia } from './actions';
 
@@ -19,67 +20,59 @@ type DiligenciaListRow = {
   percentual_concluido: number;
 };
 
-// Conta quantas diligências estão arquivadas (pra badge da aba).
-async function contarArquivadas(): Promise<number> {
+// Conjunto de diligencia_id arquivadas. Lê via service_role (supabaseAdmin),
+// que tem acesso a tabelas novas do schema public — assim não depende dos
+// grants do papel direto do Postgres (DB_USER), que não os tem na tabela nova.
+async function getArquivadasSet(): Promise<Set<string>> {
   try {
-    const r = await pool.query(
-      `SELECT count(*)::int AS n
-       FROM public.diligencias_arquivo a
-       JOIN painel.v_painel_admin v ON v.diligencia_id::text = a.diligencia_id`
-    );
-    return r.rows[0]?.n ?? 0;
-  } catch {
-    return 0;
+    const sb = supabaseAdmin();
+    const { data, error } = await sb.from('diligencias_arquivo').select('diligencia_id');
+    if (error) throw error;
+    return new Set((data ?? []).map((r) => String((r as { diligencia_id: string }).diligencia_id)));
+  } catch (e) {
+    console.error('[getArquivadasSet] falha ao ler arquivamento:', e);
+    return new Set();
   }
 }
 
 async function fetchDiligencias(
   busca: string,
-  arquivadas: boolean
+  arquivadas: boolean,
+  arqSet: Set<string>
 ): Promise<DiligenciaListRow[]> {
-  // a.diligencia_id IS NULL  → ativa;  IS NOT NULL → arquivada.
-  const cond = arquivadas ? 'a.diligencia_id IS NOT NULL' : 'a.diligencia_id IS NULL';
-  const base = `
-    SELECT v.*
-    FROM painel.v_painel_admin v
-    LEFT JOIN public.diligencias_arquivo a ON a.diligencia_id = v.diligencia_id::text`;
-
-  try {
+  // Aba "Arquivadas": busca só os ids arquivados diretamente (podem ser antigos).
+  if (arquivadas) {
+    const ids = [...arqSet];
+    if (ids.length === 0) return [];
+    const params: unknown[] = [ids];
+    let q = `SELECT * FROM painel.v_painel_admin WHERE diligencia_id::text = ANY($1)`;
     if (busca.length > 0) {
-      const term = `%${busca}%`;
-      const r = await pool.query(
-        `${base}
-         WHERE ${cond} AND (v.endereco ILIKE $1 OR v.cliente_nome ILIKE $1)
-         ORDER BY v.criado_em DESC`,
-        [term]
-      );
-      return r.rows;
+      params.push(`%${busca}%`);
+      q += ` AND (endereco ILIKE $2 OR cliente_nome ILIKE $2)`;
     }
-    const r = await pool.query(
-      `${base} WHERE ${cond} ORDER BY v.criado_em DESC LIMIT 200`
-    );
+    q += ` ORDER BY criado_em DESC`;
+    const r = await pool.query(q, params);
     return r.rows;
-  } catch (e) {
-    // Fallback enquanto a migration (public.diligencias_arquivo) não rodou:
-    // sem a tabela, o JOIN quebra. Aba "Arquivadas" fica vazia; "Ativas"
-    // mostra tudo pela query original (sem o filtro de arquivamento).
-    console.error('[fetchDiligencias] fallback sem tabela de arquivo:', e);
-    if (arquivadas) return [];
-    if (busca.length > 0) {
-      const term = `%${busca}%`;
-      const r = await pool.query(
-        `SELECT * FROM painel.v_painel_admin
-         WHERE endereco ILIKE $1 OR cliente_nome ILIKE $1
-         ORDER BY criado_em DESC`,
-        [term]
-      );
-      return r.rows;
-    }
+  }
+
+  // Aba "Ativas": query original (200 mais recentes) e filtra as arquivadas em JS.
+  let rows: DiligenciaListRow[];
+  if (busca.length > 0) {
+    const term = `%${busca}%`;
+    const r = await pool.query(
+      `SELECT * FROM painel.v_painel_admin
+       WHERE endereco ILIKE $1 OR cliente_nome ILIKE $1
+       ORDER BY criado_em DESC`,
+      [term]
+    );
+    rows = r.rows;
+  } else {
     const r = await pool.query(
       `SELECT * FROM painel.v_painel_admin ORDER BY criado_em DESC LIMIT 200`
     );
-    return r.rows;
+    rows = r.rows;
   }
+  return rows.filter((d) => !arqSet.has(String(d.diligencia_id)));
 }
 
 function formatDate(iso: string): string {
@@ -100,10 +93,9 @@ export default async function AdminHome({
   const sp = await searchParams;
   const busca = sp.q?.trim() ?? '';
   const arquivadas = sp.arq === '1';
-  const [diligencias, nArquivadas] = await Promise.all([
-    fetchDiligencias(busca, arquivadas),
-    contarArquivadas(),
-  ]);
+  const arqSet = await getArquivadasSet();
+  const diligencias = await fetchDiligencias(busca, arquivadas, arqSet);
+  const nArquivadas = arqSet.size;
 
   // Totais agregados
   // Os contadores vêm do Postgres como texto; força número (senão += concatena).
