@@ -91,13 +91,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `Dados bancários incompletos: ${faltando.join(", ")}.` }, { status: 400 });
   }
 
+  // Inter exige agência com até 4 dígitos, SEM o verificador. Se a conta foi
+  // cadastrada com o DV junto (ex.: "30430" = ag 3043 + DV 0), corta o DV.
+  // A conta corrente mantém o dígito verificador; só tira formatação.
+  const agenciaInter = soDigitos(conta.agencia).slice(0, 4);
+  const contaInter = soDigitos(conta.conta);
+
   const destinatario = {
     tipo: "DADOS_BANCARIOS",
     nome: conta.titular || undefined,
-    contaCorrente: String(conta.conta),
+    contaCorrente: contaInter,
     tipoConta: conta.tipo_conta || "CONTA_CORRENTE",
     cpfCnpj: soDigitos(conta.cpf_cnpj),
-    agencia: String(conta.agencia),
+    agencia: agenciaInter,
     instituicaoFinanceira: { ispb: String(conta.banco_ispb) },
   };
 
