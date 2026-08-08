@@ -22,9 +22,11 @@ export type OverviewRow = {
   comprovanteRepasse: string | null;
   comprovantesBoleto: CompBoleto[];
   docs: DocLink[];
+  enviadoEm: string | null;
 };
 
 const brl = (n: number) => (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const fmtData = (iso: string) => { const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString("pt-BR"); };
 const NOMES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 const rotuloMes = (c: string) => { const [y, m] = c.split("-"); return `${NOMES[Number(m) - 1] || m}/${y}`; };
 const DOC_LABEL: Record<string, string> = {
@@ -46,6 +48,8 @@ export default function AdminOverview({
   const [enviando, setEnviando] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [enviadosLocal, setEnviadosLocal] = useState<Map<string, string>>(new Map()); // `contrato|comp` -> iso
+  const enviadoDe = (r: OverviewRow) => enviadosLocal.get(`${r.contrato_id}|${r.competencia}`) || r.enviadoEm;
 
   const visiveis = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -90,6 +94,7 @@ export default function AdminOverview({
 
     setEnviando(true);
     let ok = 0; const falhas: string[] = [];
+    const novosEnviados = new Map(enviadosLocal);
     for (const [locador_id, g] of comEmail) {
       try {
         const r = await fetch("/api/adm/locador-email", {
@@ -97,10 +102,15 @@ export default function AdminOverview({
           body: JSON.stringify({ locador_id, itens: g.itens }),
         });
         const d = await r.json();
-        if (r.ok) ok++; else falhas.push(`${g.nome}: ${d?.error || "falha"}`);
+        if (r.ok) {
+          ok++;
+          const quando = d?.enviado_em || new Date().toISOString();
+          g.itens.forEach((it) => novosEnviados.set(`${it.contrato_id}|${it.competencia}`, quando));
+        } else falhas.push(`${g.nome}: ${d?.error || "falha"}`);
       } catch { falhas.push(`${g.nome}: erro de rede`); }
     }
     setEnviando(false);
+    setEnviadosLocal(novosEnviados);
     if (ok) setMsg(`E-mail enviado para ${ok} locador(es).${falhas.length ? ` Falharam: ${falhas.length}.` : ""}`);
     if (falhas.length) setErro(falhas.join(" | "));
     if (ok) setSel(new Set());
@@ -173,6 +183,11 @@ export default function AdminOverview({
                         {r.docs.map((d) => d.url ? <a key={d.tipo} href={d.url} target="_blank" rel="noopener noreferrer" className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100">{DOC_LABEL[d.tipo] || d.tipo}</a> : null)}
                         {!r.reciboUrl && !r.comprovanteRepasse && r.comprovantesBoleto.length === 0 && r.docs.length === 0 && <span className="text-xs text-slate-400">—</span>}
                       </div>
+                      {enviadoDe(r) && (
+                        <p className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                          ✓ E-mail enviado em {fmtData(enviadoDe(r) as string)}
+                        </p>
+                      )}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-right">
                       <a href={`/locador?locador=${r.locador_id}`} className="text-xs font-medium text-blue-600 hover:underline">Abrir →</a>

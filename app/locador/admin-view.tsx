@@ -18,11 +18,13 @@ export type LinhaRepasse = {
   comprovanteRepasse: string | null;
   comprovantesBoleto: CompBoleto[];
   docs: DocLink[];
+  enviadoEm: string | null;
 };
 export type GrupoImovel = { contrato_id: number; titulo: string; rows: LinhaRepasse[] };
 
 const brl = (n: number) =>
   (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const fmtData = (iso: string) => { const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString("pt-BR"); };
 
 const DOC_LABEL: Record<string, string> = {
   boleto_iptu: "Boleto IPTU",
@@ -62,6 +64,8 @@ export default function LocadorAdminView({
   const [assuntoEdit, setAssuntoEdit] = useState("");
   const [mensagemEdit, setMensagemEdit] = useState("");
   const [anexosMarcados, setAnexosMarcados] = useState<Set<string>>(new Set());
+  const [enviadosLocal, setEnviadosLocal] = useState<Map<string, string>>(new Map()); // `contrato|comp` -> iso
+  const enviadoDe = (r: LinhaRepasse) => enviadosLocal.get(`${r.contrato_id}|${r.competencia}`) || r.enviadoEm;
 
   // aplica filtro de mês
   const gruposFiltrados = useMemo(() => {
@@ -177,6 +181,8 @@ export default function LocadorAdminView({
       if (!r.ok) setErro(d?.error || "Falha ao enviar.");
       else {
         setMsg(`Enviado para ${d.to} — ${d.anexos} anexo(s), ${d.competencias} competência(s).`);
+        const quando = d?.enviado_em || new Date().toISOString();
+        setEnviadosLocal((prev) => { const n = new Map(prev); preview.itens.forEach((it) => n.set(`${it.contrato_id}|${it.competencia}`, quando)); return n; });
         setSel(new Set());
         setPreview(null);
       }
@@ -299,6 +305,11 @@ export default function LocadorAdminView({
                               <span className="text-xs text-slate-400">—</span>
                             )}
                           </div>
+                          {enviadoDe(r) && (
+                            <p className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                              ✓ E-mail enviado em {fmtData(enviadoDe(r) as string)}
+                            </p>
+                          )}
                         </td>
                       </tr>
                     ))}

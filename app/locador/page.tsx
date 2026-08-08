@@ -103,6 +103,14 @@ async function montarOverview(
     if (url) { const k = `${x.contrato_id}|${String(x.competencia).slice(0, 7)}`; const arr = boletoComp.get(k) ?? []; arr.push({ subtipo: x.subtipo, url }); boletoComp.set(k, arr); }
   }));
 
+  // log de envios (enviado em) — best-effort (tabela pode não existir ainda)
+  const enviosPor = new Map<string, string>();
+  try {
+    const { data: ev } = await adm
+      .from('adm_locador_envios').select('contrato_id,competencia,enviado_em').in('contrato_id', contratoIds);
+    for (const e of (ev ?? []) as any[]) enviosPor.set(`${e.contrato_id}|${String(e.competencia).slice(0, 7)}`, e.enviado_em);
+  } catch { /* sem tabela ainda */ }
+
   const rows: OverviewRow[] = await Promise.all(reps.map(async (r) => {
     const comp = String(r.competencia).slice(0, 7);
     let reciboUrl: string | null = r.pdf_url;
@@ -125,6 +133,7 @@ async function montarOverview(
       comprovanteRepasse: compRepasse.get(r.id) ?? null,
       comprovantesBoleto: boletoComp.get(`${r.contrato_id}|${comp}`) ?? [],
       docs: docsDe(r.contrato_id, comp),
+      enviadoEm: enviosPor.get(`${r.contrato_id}|${comp}`) ?? null,
     };
   }));
   const competencias = [...new Set(reps.map((r) => String(r.competencia).slice(0, 7)))].sort().reverse();
@@ -300,6 +309,16 @@ export default async function LocadorPage({ searchParams }: { searchParams: Prom
 
   const primeiroNome = (locador.nome || email).split(' ')[0];
 
+  // log de envios (enviado em) deste locador — best-effort
+  const enviosPorLoc = new Map<string, string>();
+  if (ids.length) {
+    try {
+      const { data: ev } = await adm
+        .from('adm_locador_envios').select('contrato_id,competencia,enviado_em').in('contrato_id', ids);
+      for (const e of (ev ?? []) as any[]) enviosPorLoc.set(`${e.contrato_id}|${String(e.competencia).slice(0, 7)}`, e.enviado_em);
+    } catch { /* sem tabela ainda */ }
+  }
+
   // Dados serializáveis para a visão admin (tabela + filtro + e-mail).
   const gruposAdmin: GrupoImovel[] = [...grupos.entries()].map(([contrato_id, g]) => ({
     contrato_id,
@@ -315,6 +334,7 @@ export default async function LocadorPage({ searchParams }: { searchParams: Prom
       comprovanteRepasse: compPorRepasse.get(r.id) ?? null,
       comprovantesBoleto: boletoCompDoRepasse(r).map((c) => ({ subtipo: c.subtipo, url: c.url })),
       docs: docsDoRepasse(r).map((d) => ({ tipo: d.tipo, url: d.url })),
+      enviadoEm: enviosPorLoc.get(`${contrato_id}|${String(r.competencia).slice(0, 7)}`) ?? null,
     })),
   }));
   const competenciasAdmin = [...new Set(repasses.map((r) => String(r.competencia).slice(0, 7)))]

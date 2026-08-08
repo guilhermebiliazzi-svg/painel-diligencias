@@ -233,5 +233,20 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `Falha ao enviar: ${e?.message || e}` }, { status: 502 });
   }
 
-  return NextResponse.json({ ok: true, to: locador.email, anexos: anexosFinais.length, competencias: repasses.length });
+  // registra o envio (para sinalizar "enviado em" na tabela) — best-effort
+  const enviadoEm = new Date().toISOString();
+  try {
+    const linhas = (repasses as any[]).map((r) => ({
+      contrato_id: r.contrato_id,
+      competencia: String(r.competencia).slice(0, 10),
+      locador_id: locadorId,
+      enviado_em: enviadoEm,
+      to_email: locador.email,
+    }));
+    await adm.from("adm_locador_envios").upsert(linhas, { onConflict: "contrato_id,competencia" });
+  } catch (e) {
+    console.error("[locador-email] falha ao registrar envio (ignorado):", e);
+  }
+
+  return NextResponse.json({ ok: true, to: locador.email, anexos: anexosFinais.length, competencias: repasses.length, enviado_em: enviadoEm });
 }
