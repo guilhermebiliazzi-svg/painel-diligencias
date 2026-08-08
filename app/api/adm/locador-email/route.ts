@@ -153,6 +153,8 @@ export async function POST(req: Request) {
       comprovante_iptu: "Comprovante IPTU", comprovante_condominio: "Comprovante condominio",
     };
     for (const d of (docs || []) as any[]) {
+      // não enviar os boletos por e-mail — só os comprovantes de pagamento
+      if (d.tipo === "boleto_iptu" || d.tipo === "boleto_condominio") continue;
       if ((d.tipo === "comprovante_iptu" || d.tipo === "comprovante_condominio") && d.origem === "pagamento") continue;
       const buf = await baixar(adm, d.bucket || "documentos", d.path);
       if (buf) anexos.push({ filename: `${LAB[d.tipo] || d.tipo} ${compTxt} - ${endereco}.pdf`.replace(/\//g, "-"), content: buf });
