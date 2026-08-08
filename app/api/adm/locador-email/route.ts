@@ -184,7 +184,7 @@ export async function POST(req: Request) {
   const assunto = typeof body?.assunto === "string" && body.assunto.trim() ? body.assunto.trim() : assuntoPadrao;
 
   const mensagemPadrao =
-    `Olá, ${primeiroNome},\n\nSeguem em anexo os documentos referentes ao(s) seu(s) imóvel(is). Os comprovantes de pagamento e o recibo estão anexados neste e-mail em PDF.`;
+    `Olá, ${primeiroNome},\nSeguem em anexo os documentos referentes ao(s) seu(s) imóvel(is). O(s) comprovante(s) de pagamento e o(s) recibo(s) estão anexados neste e-mail em PDF.`;
   const mensagem = typeof body?.mensagem === "string" ? body.mensagem : mensagemPadrao;
 
   // filtro de anexos (por nome de arquivo) quando a prévia manda a lista incluída
