@@ -50,6 +50,38 @@ export function extrairVencimento(texto: string): string | null {
   return null;
 }
 
+// Calcula o vencimento REAL do título a partir do "fator de vencimento"
+// embutido no código de barras / linha digitável (boleto bancário).
+// É a data autoritativa que o Inter valida — mais confiável que a data lida
+// do PDF ou digitada. Retorna YYYY-MM-DD, ou null para arrecadação/convênio
+// (48 díg., começa com 8) e casos sem fator.
+//
+// Regra Febraban: fator 1000 = 2000-07-03. O fator (4 díg.) estourou em
+// 9999 = 2025-02-21 e reiniciou em 1000 = 2025-02-22. Como não dá pra saber
+// só pelo fator em qual ciclo ele está, calculamos as duas datas possíveis
+// e escolhemos a mais próxima de hoje.
+export function vencimentoDaLinhaDigitavel(linhaOuBarras: string): string | null {
+  const d = String(linhaOuBarras || "").replace(/\D/g, "");
+  if (!d || d.startsWith("8")) return null; // arrecadação não tem fator padrão
+  let fatorStr: string | null = null;
+  if (d.length === 47) fatorStr = d.slice(33, 37);       // linha digitável bancária
+  else if (d.length === 44) fatorStr = d.slice(5, 9);    // código de barras
+  else return null;
+  const fator = parseInt(fatorStr, 10);
+  if (!Number.isFinite(fator) || fator <= 0) return null;
+
+  const addDias = (baseISO: string, n: number) =>
+    new Date(new Date(baseISO + "T00:00:00Z").getTime() + n * 86400000);
+  const candAntigo = addDias("2000-07-03", fator - 1000); // ciclo antigo
+  const candNovo = addDias("2025-02-22", fator - 1000);   // ciclo pós-rollover
+  const hoje = Date.now();
+  const escolhido =
+    Math.abs(candNovo.getTime() - hoje) <= Math.abs(candAntigo.getTime() - hoje)
+      ? candNovo
+      : candAntigo;
+  return escolhido.toISOString().slice(0, 10);
+}
+
 // Lê o PDF (buffer) e devolve a linha digitável + vencimento, se encontrar.
 export async function lerLinhaDigitavelDoPdf(
   buffer: ArrayBuffer | Uint8Array

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { interFetch } from "@/lib/inter";
 import { salvarComprovanteBoleto } from "@/lib/salvar-comprovante";
+import { vencimentoDaLinhaDigitavel } from "@/lib/linha-digitavel";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -81,11 +82,18 @@ export async function POST(req: Request) {
   if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
   const pagamentoId = ins.id;
 
+  // O Inter valida a dataVencimento contra a data real do título (embutida no
+  // código de barras). A data lida do PDF/digitada às vezes diverge e o Inter
+  // recusa ("Campo inválido: Data de vencimento"). Quando dá pra calcular o
+  // vencimento pelo fator da linha (boleto bancário), usamos ele; senão, o
+  // valor informado.
+  const vencInter = vencimentoDaLinhaDigitavel(linha) || vencimento;
+
   // submete ao Inter
   const payload: any = {
     codBarraLinhaDigitavel: linha,
     valorPagar: valor.toFixed(2),
-    dataVencimento: vencimento,
+    dataVencimento: vencInter,
   };
   if (dataPagamento) payload.dataPagamento = dataPagamento;
   if (cpfCnpj) payload.cpfCnpjBeneficiario = cpfCnpj;
