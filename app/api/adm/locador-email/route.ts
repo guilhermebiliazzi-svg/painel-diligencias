@@ -192,6 +192,21 @@ export async function POST(req: Request) {
       ? `Ville Jardins — Recibo e comprovantes ${mesAno((repasses as any[])[0].competencia)}`
       : `Ville Jardins — Recibos e comprovantes (${repasses.length} competências)`;
 
+  // Pré-visualização: devolve o e-mail montado sem enviar.
+  if (body?.preview) {
+    return NextResponse.json({
+      ok: true,
+      preview: true,
+      to: locador.email,
+      subject: assunto,
+      html,
+      attachments: anexos.map((a) => ({
+        filename: a.filename,
+        kb: Math.max(1, Math.round(a.content.length / 1024)),
+      })),
+    });
+  }
+
   try {
     await enviarEmail({ to: locador.email, subject: assunto, html, attachments: anexos });
   } catch (e: any) {

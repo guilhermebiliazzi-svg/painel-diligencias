@@ -53,6 +53,11 @@ export default function LocadorAdminView({
   const [enviando, setEnviando] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [carregandoPreview, setCarregandoPreview] = useState(false);
+  const [preview, setPreview] = useState<
+    | { to: string; subject: string; html: string; attachments: { filename: string; kb: number }[]; itens: { contrato_id: number; competencia: string }[] }
+    | null
+  >(null);
 
   // aplica filtro de mês
   const gruposFiltrados = useMemo(() => {
@@ -85,30 +90,56 @@ export default function LocadorAdminView({
     });
   }
 
-  async function enviar() {
-    setErro(null);
-    setMsg(null);
-    const itens = [...sel].map((k) => {
+  function itensSelecionados() {
+    return [...sel].map((k) => {
       const [contrato_id, competencia] = k.split("|");
       return { contrato_id: Number(contrato_id), competencia };
     });
+  }
+
+  // 1) gera a pré-visualização (não envia)
+  async function abrirPreview() {
+    setErro(null);
+    setMsg(null);
+    const itens = itensSelecionados();
     if (!itens.length) {
       setErro("Selecione ao menos uma competência.");
       return;
     }
-    if (!confirm(`Enviar ${itens.length} competência(s) por e-mail para ${locadorNome}?\nOs recibos e comprovantes vão anexados em PDF.`)) return;
-    setEnviando(true);
+    setCarregandoPreview(true);
     try {
       const r = await fetch("/api/adm/locador-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ locador_id: locadorId, itens }),
+        body: JSON.stringify({ locador_id: locadorId, itens, preview: true }),
+      });
+      const d = await r.json();
+      if (!r.ok) setErro(d?.error || "Falha ao gerar a pré-visualização.");
+      else setPreview({ to: d.to, subject: d.subject, html: d.html, attachments: d.attachments || [], itens });
+    } catch {
+      setErro("Erro de rede ao gerar a pré-visualização.");
+    } finally {
+      setCarregandoPreview(false);
+    }
+  }
+
+  // 2) confirma e envia de verdade
+  async function confirmarEnvio() {
+    if (!preview) return;
+    setEnviando(true);
+    setErro(null);
+    try {
+      const r = await fetch("/api/adm/locador-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locador_id: locadorId, itens: preview.itens }),
       });
       const d = await r.json();
       if (!r.ok) setErro(d?.error || "Falha ao enviar.");
       else {
         setMsg(`Enviado para ${d.to} — ${d.anexos} anexo(s), ${d.competencias} competência(s).`);
         setSel(new Set());
+        setPreview(null);
       }
     } catch {
       setErro("Erro de rede ao enviar.");
@@ -144,12 +175,12 @@ export default function LocadorAdminView({
         <div className="flex items-center gap-3">
           {nSel > 0 && <span className="text-sm text-slate-500">{nSel} selecionada(s)</span>}
           <button
-            onClick={enviar}
-            disabled={enviando || nSel === 0 || !temEmail}
+            onClick={abrirPreview}
+            disabled={carregandoPreview || nSel === 0 || !temEmail}
             title={!temEmail ? "Locador sem e-mail cadastrado" : undefined}
             className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {enviando ? "Enviando…" : "✉ Enviar por e-mail ao locador"}
+            {carregandoPreview ? "Gerando prévia…" : "✉ Enviar por e-mail ao locador"}
           </button>
         </div>
       </div>
@@ -237,6 +268,68 @@ export default function LocadorAdminView({
               </div>
             </section>
           ))}
+        </div>
+      )}
+
+      {preview && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-8"
+          onClick={() => !enviando && setPreview(null)}
+        >
+          <div
+            className="w-full max-w-2xl rounded-2xl bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+              <h3 className="text-base font-semibold text-slate-900">Pré-visualização do e-mail</h3>
+              <button onClick={() => !enviando && setPreview(null)} className="text-slate-400 hover:text-slate-700" aria-label="Fechar">✕</button>
+            </div>
+
+            <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
+              <dl className="mb-4 space-y-1 text-sm">
+                <div className="flex gap-2"><dt className="w-20 shrink-0 font-medium text-slate-500">Para</dt><dd className="text-slate-900">{preview.to}</dd></div>
+                <div className="flex gap-2"><dt className="w-20 shrink-0 font-medium text-slate-500">Assunto</dt><dd className="text-slate-900">{preview.subject}</dd></div>
+              </dl>
+
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Corpo</p>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div dangerouslySetInnerHTML={{ __html: preview.html }} />
+              </div>
+
+              <p className="mb-1 mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Anexos ({preview.attachments.length})
+              </p>
+              {preview.attachments.length === 0 ? (
+                <p className="text-sm text-slate-500">Nenhum anexo disponível.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {preview.attachments.map((a, i) => (
+                    <li key={i} className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm">
+                      <span className="truncate text-slate-700">📎 {a.filename}</span>
+                      <span className="ml-2 shrink-0 text-xs text-slate-400">{a.kb} KB</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-5 py-3">
+              <button
+                onClick={() => setPreview(null)}
+                disabled={enviando}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmarEnvio}
+                disabled={enviando}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {enviando ? "Enviando…" : "Confirmar e enviar"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
