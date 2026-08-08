@@ -6,6 +6,7 @@ import LocadorLogin from './login-form';
 import { sairLocador } from './actions';
 import LocadorAdminView, { type GrupoImovel } from './admin-view';
 import AdminOverview, { type OverviewRow } from './admin-overview';
+import { salvarComprovantePix } from '@/lib/salvar-comprovante';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Meus repasses — Ville Jardins' };
@@ -84,13 +85,19 @@ async function montarOverview(
     return ORDEM.map((t) => arr.find((d) => d.tipo === t)).filter(Boolean) as { tipo: string; url: string | null }[];
   };
 
-  // comprovante do repasse (Pix) por repasse
+  // comprovante do repasse (Pix) por repasse. Se estiver efetivado mas sem
+  // comprovante (ex.: pago antes do webhook), gera na hora a partir dos dados
+  // já salvos — sem chamar o Inter. Assim o portal se auto-corrige.
   const compRepasse = new Map<number, string>();
   const { data: pg } = await adm
-    .from('adm_pagamentos').select('repasse_id,comprovante_bucket,comprovante_path')
-    .eq('tipo', 'pix_repasse').in('repasse_id', repIds).not('comprovante_path', 'is', null);
+    .from('adm_pagamentos').select('id,repasse_id,status,comprovante_bucket,comprovante_path')
+    .eq('tipo', 'pix_repasse').in('repasse_id', repIds);
   await Promise.all(((pg ?? []) as any[]).map(async (p) => {
-    const url = await assinar(p.comprovante_bucket, p.comprovante_path); if (url) compRepasse.set(p.repasse_id, url);
+    if (p.comprovante_path) {
+      const url = await assinar(p.comprovante_bucket, p.comprovante_path); if (url) compRepasse.set(p.repasse_id, url);
+    } else if (p.status === 'efetivado') {
+      try { const c = await salvarComprovantePix(p.id); if (c?.url) compRepasse.set(p.repasse_id, c.url); } catch { /* best-effort */ }
+    }
   }));
 
   // comprovantes de boleto por contrato|competência
@@ -263,20 +270,24 @@ export default async function LocadorPage({ searchParams }: { searchParams: Prom
     return ORDEM_DOC.map((t) => arr.find((d) => d.tipo === t)).filter(Boolean) as { tipo: string; nome: string | null; url: string | null }[];
   };
 
-  // Comprovante de repasse (Pix) por repasse.
+  // Comprovante de repasse (Pix) por repasse. Efetivado sem comprovante → gera
+  // na hora (a partir dos dados salvos, sem chamar o Inter) e auto-corrige.
   const compPorRepasse = new Map<number, string>();
   const repIds = repasses.map((r) => r.id).filter(Boolean);
   if (repIds.length) {
     const { data: pgRows } = await adm
       .from('adm_pagamentos')
-      .select('repasse_id,comprovante_bucket,comprovante_path')
+      .select('id,repasse_id,status,comprovante_bucket,comprovante_path')
       .eq('tipo', 'pix_repasse')
-      .in('repasse_id', repIds)
-      .not('comprovante_path', 'is', null);
-    for (const p of (pgRows ?? []) as { repasse_id: number; comprovante_bucket: string | null; comprovante_path: string }[]) {
-      const { data: sg } = await adm.storage.from(p.comprovante_bucket || 'documentos').createSignedUrl(p.comprovante_path, 3600);
-      if (sg?.signedUrl) compPorRepasse.set(p.repasse_id, sg.signedUrl);
-    }
+      .in('repasse_id', repIds);
+    await Promise.all(((pgRows ?? []) as any[]).map(async (p) => {
+      if (p.comprovante_path) {
+        const { data: sg } = await adm.storage.from(p.comprovante_bucket || 'documentos').createSignedUrl(p.comprovante_path, 3600);
+        if (sg?.signedUrl) compPorRepasse.set(p.repasse_id, sg.signedUrl);
+      } else if (p.status === 'efetivado') {
+        try { const c = await salvarComprovantePix(p.id); if (c?.url) compPorRepasse.set(p.repasse_id, c.url); } catch { /* best-effort */ }
+      }
+    }));
   }
 
   // Comprovantes de boletos (IPTU/condomínio) pagos — pode haver vários por competência.
