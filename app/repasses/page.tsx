@@ -39,6 +39,10 @@ export default function Repasse() {
   const [salvando, setSalvando] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [reciboUrl, setReciboUrl] = useState<string | null>(null);
+  const [salvo, setSalvo] = useState<
+    | { exists: boolean; repasse_id?: number; total_liquido?: number | null; data_pagamento?: string | null; download_url?: string | null; pago?: boolean; atualizado_em?: string | null }
+    | null
+  >(null);
 
   // valores editáveis (cópia local da prévia)
   const [recebimentos, setRecebimentos] = useState<Linha[]>([]);
@@ -58,6 +62,9 @@ export default function Repasse() {
     setCarregando(true);
     setErro(null);
     setPrevia(null);
+    setSalvo(null);
+    setReciboUrl(null);
+    setMsg(null);
     try {
       const res = await fetch(`/api/adm/repasse-previa?contrato=${contratoId}&competencia=${competencia}`);
       const d = (await res.json()) as Previa;
@@ -69,6 +76,11 @@ export default function Repasse() {
         setDeducoes(d.deducoes.map((x) => ({ ...x })));
         setTaxaAdm(d.taxa_adm.valor);
         setAvulsas([]);
+        // já existe recibo salvo desta competência? (para abrir sem regerar)
+        try {
+          const rs = await fetch(`/api/adm/repasse-salvo?contrato=${contratoId}&competencia=${competencia}`).then((r) => r.json());
+          if (rs?.exists) { setSalvo(rs); if (rs.download_url) setReciboUrl(rs.download_url); }
+        } catch { /* opcional */ }
       }
     } catch {
       setErro("Erro de rede.");
@@ -89,6 +101,13 @@ export default function Repasse() {
 
   async function salvar() {
     if (!previa || !contratoId || salvando) return;
+    // Não sobrescrever um recibo já salvo sem confirmar (evita perder ajustes manuais).
+    if (salvo?.exists) {
+      const aviso = salvo.pago
+        ? "Este repasse JÁ FOI PAGO. Regerar o recibo vai SOBRESCREVER o que está salvo (inclusive lançamentos manuais) com a proposta do sistema, podendo divergir do que foi pago.\n\nSe você só quer ver o recibo, use \"Abrir recibo (PDF)\" acima. Deseja mesmo regerar?"
+        : "Já existe um recibo salvo para esta competência. Regerar vai SOBRESCREVER os valores salvos (inclusive lançamentos manuais) com a proposta do sistema.\n\nDeseja mesmo regerar?";
+      if (!confirm(aviso)) return;
+    }
     setSalvando(true);
     setMsg(null);
     setErro(null);
@@ -116,6 +135,7 @@ export default function Repasse() {
       else {
         setMsg(`Recibo gerado. Líquido: ${brl(totais.liquido)}`);
         setReciboUrl(d?.download_url || d?.pdf_url || null);
+        setSalvo({ exists: true, repasse_id: d?.repasse_id, total_liquido: totais.liquido, download_url: d?.download_url || d?.pdf_url || null, pago: salvo?.pago, atualizado_em: new Date().toISOString() });
       }
     } catch {
       setErro("Erro de rede.");
@@ -224,6 +244,25 @@ export default function Repasse() {
               <b>{brl(totais.liquido)}</b>
             </section>
 
+            {salvo?.exists && (
+              <div className="vj-card" style={{ borderLeft: "4px solid #16a34a" }}>
+                <div>
+                  <strong>Recibo já gerado</strong> para esta competência
+                  {salvo.total_liquido != null ? <> — líquido {brl(Number(salvo.total_liquido))}</> : null}
+                  {salvo.atualizado_em ? <> (atualizado em {new Date(salvo.atualizado_em).toLocaleDateString("pt-BR")})</> : null}.
+                  {salvo.download_url && (
+                    <> — <a className="vj-link-recibo" href={salvo.download_url} target="_blank" rel="noopener noreferrer">Abrir recibo (PDF)</a></>
+                  )}
+                </div>
+                {salvo.pago && (
+                  <div style={{ color: "#b45309", marginTop: 6 }}>⚠ Repasse já pago — use o recibo acima; só regere se realmente precisar.</div>
+                )}
+                <div style={{ color: "#64748b", marginTop: 6, fontSize: 13 }}>
+                  Os valores abaixo são a proposta recalculada do sistema. Se você fez ajustes manuais, eles estão no recibo salvo acima — regerar sobrescreve.
+                </div>
+              </div>
+            )}
+
             {msg && (
               <div className="vj-card vj-ok">
                 {msg}
@@ -235,7 +274,7 @@ export default function Repasse() {
 
             <div className="vj-acoes">
               <button className="vj-btn vj-gerar" onClick={salvar} disabled={salvando}>
-                {salvando ? "Gerando…" : "Salvar e gerar recibo"}
+                {salvando ? "Gerando…" : salvo?.exists ? "Regerar recibo (sobrescreve)" : "Salvar e gerar recibo"}
               </button>
             </div>
 
