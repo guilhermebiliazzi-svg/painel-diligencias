@@ -4,8 +4,8 @@ import { supabaseServer } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import LocadorLogin from './login-form';
 import { sairLocador } from './actions';
-import AdminPicker, { type LocOpc } from './admin-picker';
 import LocadorAdminView, { type GrupoImovel } from './admin-view';
+import AdminOverview, { type OverviewRow } from './admin-overview';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Meus repasses — Ville Jardins' };
@@ -32,6 +32,105 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Monta as linhas do painel consolidado (todos os locadores) para o admin.
+async function montarOverview(
+  adm: ReturnType<typeof supabaseAdmin>,
+  inicioPortal: string
+): Promise<{ rows: OverviewRow[]; competencias: string[] }> {
+  const { data: repRows } = await adm
+    .from('adm_repasses')
+    .select('id,locador_id,contrato_id,competencia,total_liquido,deducao_iptu,deducao_condominio,pdf_url')
+    .gte('competencia', inicioPortal)
+    .order('competencia', { ascending: false });
+  const reps = (repRows ?? []) as any[];
+  if (!reps.length) return { rows: [], competencias: [] };
+
+  const locadorIds = [...new Set(reps.map((r) => r.locador_id).filter(Boolean))];
+  const contratoIds = [...new Set(reps.map((r) => r.contrato_id).filter(Boolean))];
+  const repIds = reps.map((r) => r.id);
+
+  const { data: locs } = await adm.from('adm_locadores').select('id,nome,email').in('id', locadorIds);
+  const locPor: Record<number, { nome: string | null; email: string | null }> = {};
+  for (const l of (locs ?? []) as any[]) locPor[l.id] = { nome: l.nome, email: l.email };
+
+  const endPorContrato: Record<number, string> = {};
+  const { data: cs } = await adm
+    .from('adm_contratos').select('id,imovel:adm_imoveis(rua,numero,complemento,bairro)').in('id', contratoIds);
+  for (const c of (cs ?? []) as any[]) {
+    const im = c.imovel || {};
+    const compl = im.complemento ? ` — ${String(im.complemento).trim()}` : '';
+    endPorContrato[c.id] = ([im.rua, im.numero].filter(Boolean).join(', ') + compl + (im.bairro ? `, ${im.bairro}` : '')) || `Contrato #${c.id}`;
+  }
+
+  const assinar = async (bucket: string | null, path: string | null) => {
+    if (!path) return null;
+    const { data: sg } = await adm.storage.from(bucket || 'documentos').createSignedUrl(path, 3600);
+    return sg?.signedUrl ?? null;
+  };
+
+  // documentos (boletos + comprovantes enviados na mão), pulando comprovantes origem=pagamento
+  const docsPorChave = new Map<string, { tipo: string; url: string | null }[]>();
+  const { data: docRows } = await adm
+    .from('adm_documentos').select('contrato_id,competencia,tipo,bucket,path,origem').in('contrato_id', contratoIds);
+  await Promise.all(((docRows ?? []) as any[]).map(async (d) => {
+    if ((d.tipo === 'comprovante_iptu' || d.tipo === 'comprovante_condominio') && d.origem === 'pagamento') return;
+    const chave = `${d.contrato_id}|${String(d.competencia).slice(0, 7)}`;
+    const url = await assinar(d.bucket, d.path);
+    const arr = docsPorChave.get(chave) ?? []; arr.push({ tipo: d.tipo, url }); docsPorChave.set(chave, arr);
+  }));
+  const ORDEM = ['boleto_iptu', 'boleto_condominio', 'comprovante_iptu', 'comprovante_condominio'];
+  const docsDe = (contrato_id: number, comp: string) => {
+    const arr = docsPorChave.get(`${contrato_id}|${comp}`) ?? [];
+    return ORDEM.map((t) => arr.find((d) => d.tipo === t)).filter(Boolean) as { tipo: string; url: string | null }[];
+  };
+
+  // comprovante do repasse (Pix) por repasse
+  const compRepasse = new Map<number, string>();
+  const { data: pg } = await adm
+    .from('adm_pagamentos').select('repasse_id,comprovante_bucket,comprovante_path')
+    .eq('tipo', 'pix_repasse').in('repasse_id', repIds).not('comprovante_path', 'is', null);
+  await Promise.all(((pg ?? []) as any[]).map(async (p) => {
+    const url = await assinar(p.comprovante_bucket, p.comprovante_path); if (url) compRepasse.set(p.repasse_id, url);
+  }));
+
+  // comprovantes de boleto por contrato|competência
+  const boletoComp = new Map<string, { subtipo: string; url: string }[]>();
+  const { data: bpg } = await adm
+    .from('adm_pagamentos').select('contrato_id,competencia,subtipo,comprovante_bucket,comprovante_path')
+    .eq('tipo', 'boleto').in('contrato_id', contratoIds).not('comprovante_path', 'is', null);
+  await Promise.all(((bpg ?? []) as any[]).map(async (x) => {
+    const url = await assinar(x.comprovante_bucket, x.comprovante_path);
+    if (url) { const k = `${x.contrato_id}|${String(x.competencia).slice(0, 7)}`; const arr = boletoComp.get(k) ?? []; arr.push({ subtipo: x.subtipo, url }); boletoComp.set(k, arr); }
+  }));
+
+  const rows: OverviewRow[] = await Promise.all(reps.map(async (r) => {
+    const comp = String(r.competencia).slice(0, 7);
+    let reciboUrl: string | null = r.pdf_url;
+    if (r.pdf_url) {
+      const m = r.pdf_url.match(/\/storage\/v1\/object\/(?:public\/|sign\/)?([^/?]+)\/([^?]+)/);
+      if (m) reciboUrl = (await assinar(m[1], decodeURIComponent(m[2]))) ?? r.pdf_url;
+    }
+    return {
+      locador_id: r.locador_id,
+      locador_nome: locPor[r.locador_id]?.nome || `Locador #${r.locador_id}`,
+      locador_email: locPor[r.locador_id]?.email ?? null,
+      contrato_id: r.contrato_id,
+      competencia: comp,
+      mes: mesAno(r.competencia),
+      endereco: endPorContrato[r.contrato_id] || `Contrato #${r.contrato_id}`,
+      liquido: Number(r.total_liquido) || 0,
+      deducao_iptu: Number(r.deducao_iptu) || 0,
+      deducao_condominio: Number(r.deducao_condominio) || 0,
+      reciboUrl,
+      comprovanteRepasse: compRepasse.get(r.id) ?? null,
+      comprovantesBoleto: boletoComp.get(`${r.contrato_id}|${comp}`) ?? [],
+      docs: docsDe(r.contrato_id, comp),
+    };
+  }));
+  const competencias = [...new Set(reps.map((r) => String(r.competencia).slice(0, 7)))].sort().reverse();
+  return { rows, competencias };
+}
+
 export default async function LocadorPage({ searchParams }: { searchParams: Promise<{ locador?: string }> }) {
   const sp = await searchParams;
   const sb = await supabaseServer();
@@ -54,9 +153,11 @@ export default async function LocadorPage({ searchParams }: { searchParams: Prom
       locador = data?.[0] ?? null;
     }
     if (!locador) {
-      const { data: todos } = await adm
-        .from('adm_locadores').select('id,nome,email').order('nome');
-      return <AdminPicker locadores={(todos ?? []) as LocOpc[]} />;
+      const { rows, competencias } = await montarOverview(
+        adm,
+        `${process.env.PORTAL_LOCADOR_INICIO || '2026-08'}-01`
+      );
+      return <AdminOverview rows={rows} competencias={competencias} />;
     }
   } else {
     // locador comum: casa pelo e-mail (tolerante a duplicado)
