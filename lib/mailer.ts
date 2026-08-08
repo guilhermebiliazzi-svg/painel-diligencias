@@ -30,11 +30,15 @@ export async function enviarEmail(opts: {
   }
   const host = process.env.SMTP_HOST || "smtp.gmail.com";
   const port = Number(process.env.SMTP_PORT || 465);
+  // Google mostra a senha de app com espaços ("abcd efgh ijkl mnop"); a senha
+  // real não tem espaços. Remove espaços do pass e apara o user por segurança.
+  const user = (process.env.SMTP_USER || "").trim();
+  const pass = (process.env.SMTP_PASS || "").replace(/\s+/g, "");
   const transporter = nodemailer.createTransport({
     host,
     port,
     secure: port === 465, // 465 = SSL; 587 = STARTTLS
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    auth: { user, pass },
   });
 
   await transporter.sendMail({
