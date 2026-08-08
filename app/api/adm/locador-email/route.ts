@@ -141,16 +141,19 @@ export async function POST(req: Request) {
       if (buf) anexos.push({ filename: `Comprovante ${b.subtipo === "iptu" ? "IPTU" : "condominio"} ${compTxt} - ${endereco}.pdf`.replace(/\//g, "-"), content: buf });
     }
 
-    // documentos anexados (boletos + comprovantes enviados na mão)
+    // documentos anexados (boletos + comprovantes enviados na mão).
+    // Pula comprovantes com origem=pagamento: esses já vieram de adm_pagamentos
+    // acima — evita anexar o mesmo comprovante duas vezes.
     const { data: docs } = await adm
       .from("adm_documentos")
-      .select("tipo,bucket,path")
+      .select("tipo,bucket,path,origem")
       .eq("contrato_id", r.contrato_id).eq("competencia", r.competencia);
     const LAB: Record<string, string> = {
       boleto_iptu: "Boleto IPTU", boleto_condominio: "Boleto condominio",
       comprovante_iptu: "Comprovante IPTU", comprovante_condominio: "Comprovante condominio",
     };
     for (const d of (docs || []) as any[]) {
+      if ((d.tipo === "comprovante_iptu" || d.tipo === "comprovante_condominio") && d.origem === "pagamento") continue;
       const buf = await baixar(adm, d.bucket || "documentos", d.path);
       if (buf) anexos.push({ filename: `${LAB[d.tipo] || d.tipo} ${compTxt} - ${endereco}.pdf`.replace(/\//g, "-"), content: buf });
     }
@@ -168,11 +171,27 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Não há PDFs disponíveis para anexar na seleção." }, { status: 404 });
   }
 
+  // Edição opcional (vinda da prévia): assunto, mensagem do corpo e quais anexos incluir.
+  const escapar = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const primeiroNome = (locador.nome || "").split(" ")[0] || "locador";
+
+  const assuntoPadrao =
+    repasses.length === 1
+      ? `Ville Jardins — Recibo e comprovantes ${mesAno((repasses as any[])[0].competencia)}`
+      : `Ville Jardins — Recibos e comprovantes (${repasses.length} competências)`;
+  const assunto = typeof body?.assunto === "string" && body.assunto.trim() ? body.assunto.trim() : assuntoPadrao;
+
+  const mensagemPadrao =
+    `Olá, ${primeiroNome},\n\nSeguem em anexo os documentos referentes ao(s) seu(s) imóvel(is). Os comprovantes de pagamento e o recibo estão anexados neste e-mail em PDF.`;
+  const mensagem = typeof body?.mensagem === "string" ? body.mensagem : mensagemPadrao;
+
+  // filtro de anexos (por nome de arquivo) quando a prévia manda a lista incluída
+  const incluir = Array.isArray(body?.incluirAnexos) ? new Set(body.incluirAnexos.map(String)) : null;
+  const anexosFinais = incluir ? anexos.filter((a) => incluir.has(a.filename)) : anexos;
+
   const html = `
   <div style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;font-size:14px;line-height:1.5">
-    <p>Olá, ${primeiroNome},</p>
-    <p>Seguem em anexo os documentos referentes ao(s) seu(s) imóvel(is):</p>
+    <p style="white-space:pre-wrap">${escapar(mensagem)}</p>
     <table style="border-collapse:collapse;margin:12px 0;min-width:360px">
       <thead>
         <tr style="background:#f1f5f9">
@@ -183,14 +202,8 @@ export async function POST(req: Request) {
       </thead>
       <tbody>${linhasResumo.join("")}</tbody>
     </table>
-    <p>Os comprovantes de pagamento e o recibo estão anexados neste e-mail em PDF.</p>
     <p style="margin-top:16px">Atenciosamente,<br/>Ville Jardins Negócios Imobiliários</p>
   </div>`;
-
-  const assunto =
-    repasses.length === 1
-      ? `Ville Jardins — Recibo e comprovantes ${mesAno((repasses as any[])[0].competencia)}`
-      : `Ville Jardins — Recibos e comprovantes (${repasses.length} competências)`;
 
   // Pré-visualização: devolve o e-mail montado sem enviar.
   if (body?.preview) {
@@ -199,19 +212,24 @@ export async function POST(req: Request) {
       preview: true,
       to: locador.email,
       subject: assunto,
+      mensagem,
       html,
-      attachments: anexos.map((a) => ({
+      attachments: anexosFinais.map((a) => ({
         filename: a.filename,
         kb: Math.max(1, Math.round(a.content.length / 1024)),
       })),
     });
   }
 
+  if (!anexosFinais.length) {
+    return NextResponse.json({ error: "Nenhum anexo selecionado para envio." }, { status: 400 });
+  }
+
   try {
-    await enviarEmail({ to: locador.email, subject: assunto, html, attachments: anexos });
+    await enviarEmail({ to: locador.email, subject: assunto, html, attachments: anexosFinais });
   } catch (e: any) {
     return NextResponse.json({ error: `Falha ao enviar: ${e?.message || e}` }, { status: 502 });
   }
 
-  return NextResponse.json({ ok: true, to: locador.email, anexos: anexos.length, competencias: repasses.length });
+  return NextResponse.json({ ok: true, to: locador.email, anexos: anexosFinais.length, competencias: repasses.length });
 }

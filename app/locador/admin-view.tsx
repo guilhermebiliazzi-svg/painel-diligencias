@@ -55,9 +55,13 @@ export default function LocadorAdminView({
   const [erro, setErro] = useState<string | null>(null);
   const [carregandoPreview, setCarregandoPreview] = useState(false);
   const [preview, setPreview] = useState<
-    | { to: string; subject: string; html: string; attachments: { filename: string; kb: number }[]; itens: { contrato_id: number; competencia: string }[] }
+    | { to: string; html: string; attachments: { filename: string; kb: number }[]; itens: { contrato_id: number; competencia: string }[] }
     | null
   >(null);
+  // campos editáveis da prévia
+  const [assuntoEdit, setAssuntoEdit] = useState("");
+  const [mensagemEdit, setMensagemEdit] = useState("");
+  const [anexosMarcados, setAnexosMarcados] = useState<Set<string>>(new Set());
 
   // aplica filtro de mês
   const gruposFiltrados = useMemo(() => {
@@ -97,7 +101,7 @@ export default function LocadorAdminView({
     });
   }
 
-  // 1) gera a pré-visualização (não envia)
+  // 1) gera a pré-visualização (não envia). initEdicao = primeira abertura.
   async function abrirPreview() {
     setErro(null);
     setMsg(null);
@@ -114,8 +118,11 @@ export default function LocadorAdminView({
         body: JSON.stringify({ locador_id: locadorId, itens, preview: true }),
       });
       const d = await r.json();
-      if (!r.ok) setErro(d?.error || "Falha ao gerar a pré-visualização.");
-      else setPreview({ to: d.to, subject: d.subject, html: d.html, attachments: d.attachments || [], itens });
+      if (!r.ok) { setErro(d?.error || "Falha ao gerar a pré-visualização."); return; }
+      setPreview({ to: d.to, html: d.html, attachments: d.attachments || [], itens });
+      setAssuntoEdit(d.subject || "");
+      setMensagemEdit(d.mensagem || "");
+      setAnexosMarcados(new Set((d.attachments || []).map((a: { filename: string }) => a.filename)));
     } catch {
       setErro("Erro de rede ao gerar a pré-visualização.");
     } finally {
@@ -123,16 +130,48 @@ export default function LocadorAdminView({
     }
   }
 
-  // 2) confirma e envia de verdade
+  // re-renderiza o corpo com o assunto/mensagem editados (mantém a lista de anexos)
+  async function atualizarPrevia() {
+    if (!preview) return;
+    setCarregandoPreview(true);
+    setErro(null);
+    try {
+      const r = await fetch("/api/adm/locador-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locador_id: locadorId, itens: preview.itens, preview: true, assunto: assuntoEdit, mensagem: mensagemEdit }),
+      });
+      const d = await r.json();
+      if (!r.ok) setErro(d?.error || "Falha ao atualizar a prévia.");
+      else setPreview({ to: d.to, html: d.html, attachments: d.attachments || [], itens: preview.itens });
+    } catch {
+      setErro("Erro de rede ao atualizar a prévia.");
+    } finally {
+      setCarregandoPreview(false);
+    }
+  }
+
+  function toggleAnexo(nome: string) {
+    setAnexosMarcados((p) => { const n = new Set(p); n.has(nome) ? n.delete(nome) : n.add(nome); return n; });
+  }
+
+  // 2) confirma e envia de verdade (com as edições)
   async function confirmarEnvio() {
     if (!preview) return;
+    if (anexosMarcados.size === 0) { setErro("Marque ao menos um anexo."); return; }
     setEnviando(true);
     setErro(null);
     try {
       const r = await fetch("/api/adm/locador-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ locador_id: locadorId, itens: preview.itens }),
+        body: JSON.stringify({
+          locador_id: locadorId,
+          itens: preview.itens,
+          assunto: assuntoEdit,
+          mensagem: mensagemEdit,
+          incluirAnexos: [...anexosMarcados],
+        }),
       });
       const d = await r.json();
       if (!r.ok) setErro(d?.error || "Falha ao enviar.");
@@ -286,27 +325,59 @@ export default function LocadorAdminView({
             </div>
 
             <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
-              <dl className="mb-4 space-y-1 text-sm">
-                <div className="flex gap-2"><dt className="w-20 shrink-0 font-medium text-slate-500">Para</dt><dd className="text-slate-900">{preview.to}</dd></div>
-                <div className="flex gap-2"><dt className="w-20 shrink-0 font-medium text-slate-500">Assunto</dt><dd className="text-slate-900">{preview.subject}</dd></div>
-              </dl>
+              <div className="mb-3 flex gap-2 text-sm">
+                <span className="w-20 shrink-0 font-medium text-slate-500">Para</span>
+                <span className="text-slate-900">{preview.to}</span>
+              </div>
 
-              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Corpo</p>
+              <label className="mb-3 block">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Assunto</span>
+                <input
+                  value={assuntoEdit}
+                  onChange={(e) => setAssuntoEdit(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                />
+              </label>
+
+              <label className="mb-2 block">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Mensagem</span>
+                <textarea
+                  value={mensagemEdit}
+                  onChange={(e) => setMensagemEdit(e.target.value)}
+                  rows={4}
+                  className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                />
+              </label>
+              <button
+                onClick={atualizarPrevia}
+                disabled={carregandoPreview}
+                className="mb-4 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {carregandoPreview ? "Atualizando…" : "↻ Atualizar prévia"}
+              </button>
+
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Prévia do corpo</p>
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <div dangerouslySetInnerHTML={{ __html: preview.html }} />
               </div>
 
               <p className="mb-1 mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Anexos ({preview.attachments.length})
+                Anexos ({anexosMarcados.size}/{preview.attachments.length}) — desmarque para não enviar
               </p>
               {preview.attachments.length === 0 ? (
                 <p className="text-sm text-slate-500">Nenhum anexo disponível.</p>
               ) : (
                 <ul className="space-y-1">
                   {preview.attachments.map((a, i) => (
-                    <li key={i} className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm">
+                    <li key={i} className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={anexosMarcados.has(a.filename)}
+                        onChange={() => toggleAnexo(a.filename)}
+                        className="size-4 shrink-0 rounded border-slate-300"
+                      />
                       <span className="truncate text-slate-700">📎 {a.filename}</span>
-                      <span className="ml-2 shrink-0 text-xs text-slate-400">{a.kb} KB</span>
+                      <span className="ml-auto shrink-0 text-xs text-slate-400">{a.kb} KB</span>
                     </li>
                   ))}
                 </ul>
