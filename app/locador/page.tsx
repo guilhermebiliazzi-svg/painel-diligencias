@@ -5,6 +5,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import LocadorLogin from './login-form';
 import { sairLocador } from './actions';
 import AdminPicker, { type LocOpc } from './admin-picker';
+import LocadorAdminView, { type GrupoImovel } from './admin-view';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Meus repasses — Ville Jardins' };
@@ -45,11 +46,11 @@ export default async function LocadorPage({ searchParams }: { searchParams: Prom
     .from('perfis').select('is_admin,ativo').eq('email', email).maybeSingle();
   const isAdmin = !!(perfil?.is_admin && perfil?.ativo);
 
-  let locador: { id: number; nome: string | null } | null = null;
+  let locador: { id: number; nome: string | null; email?: string | null } | null = null;
 
   if (isAdmin) {
     if (sp?.locador && /^\d+$/.test(sp.locador)) {
-      const { data } = await adm.from('adm_locadores').select('id,nome').eq('id', Number(sp.locador)).limit(1);
+      const { data } = await adm.from('adm_locadores').select('id,nome,email').eq('id', Number(sp.locador)).limit(1);
       locador = data?.[0] ?? null;
     }
     if (!locador) {
@@ -198,6 +199,27 @@ export default async function LocadorPage({ searchParams }: { searchParams: Prom
 
   const primeiroNome = (locador.nome || email).split(' ')[0];
 
+  // Dados serializáveis para a visão admin (tabela + filtro + e-mail).
+  const gruposAdmin: GrupoImovel[] = [...grupos.entries()].map(([contrato_id, g]) => ({
+    contrato_id,
+    titulo: g.titulo,
+    rows: g.itens.map((r) => ({
+      contrato_id,
+      competencia: String(r.competencia).slice(0, 7),
+      mes: mesAno(r.competencia),
+      liquido: Number(r.total_liquido) || 0,
+      deducao_iptu: Number(r.deducao_iptu) || 0,
+      deducao_condominio: Number(r.deducao_condominio) || 0,
+      reciboUrl: r.link ?? null,
+      comprovanteRepasse: compPorRepasse.get(r.id) ?? null,
+      comprovantesBoleto: boletoCompDoRepasse(r).map((c) => ({ subtipo: c.subtipo, url: c.url })),
+      docs: docsDoRepasse(r).map((d) => ({ tipo: d.tipo, url: d.url })),
+    })),
+  }));
+  const competenciasAdmin = [...new Set(repasses.map((r) => String(r.competencia).slice(0, 7)))]
+    .sort()
+    .reverse();
+
   return (
     <div style={{ backgroundColor: '#f8fafc' }} className="min-h-screen">
       <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
@@ -222,7 +244,15 @@ export default async function LocadorPage({ searchParams }: { searchParams: Prom
           )}
         </header>
 
-        {grupos.size === 0 ? (
+        {modoAdmin ? (
+          <LocadorAdminView
+            locadorId={locador.id}
+            locadorNome={locador.nome || `Locador #${locador.id}`}
+            temEmail={!!locador.email}
+            grupos={gruposAdmin}
+            competencias={competenciasAdmin}
+          />
+        ) : grupos.size === 0 ? (
           <p className="mt-8 rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
             Ainda não há repasses disponíveis.
           </p>

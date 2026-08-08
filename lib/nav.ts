@@ -1,7 +1,7 @@
 // Config das telas do hub. Como tudo está no mesmo app, os links apontam
 // para as rotas internas. Uma env opcional (PAINEL_URL_*) pode sobrescrever.
 
-export type IconeNav = 'diligencias' | 'cobrancas' | 'repasse' | 'notas' | 'usuarios' | 'mais';
+export type IconeNav = 'diligencias' | 'cobrancas' | 'repasse' | 'notas' | 'usuarios' | 'locador' | 'mais';
 export type Cor = 'blue' | 'emerald' | 'violet' | 'amber' | 'slate';
 export type PermKey = 'pode_diligencias' | 'pode_cobrancas' | 'pode_repasse' | 'pode_notas' | 'pode_pagamentos';
 
