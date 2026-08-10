@@ -61,6 +61,52 @@ type AdminRow = {
   is_extra: boolean;
 };
 
+// Tipos de CND do TJSP obtidas via e-SAJ (as que chegam por e-mail com link de
+// download). NÃO inclui tjsp_civel_1g (eproc, 1º grau — outro fluxo).
+const TIPOS_ESAJ = new Set([
+  'tjsp_civeis',
+  'tjsp_falencia',
+  'tjsp_inventarios',
+  'tjsp_criminais',
+  'tjsp_exec_crim',
+]);
+
+function mascararDoc(raw: string): string | null {
+  const s = String(raw || '').replace(/\D/g, '');
+  if (s.length === 11) return `${s.slice(0, 3)}.${s.slice(3, 6)}.${s.slice(6, 9)}-${s.slice(9, 11)}`;
+  if (s.length === 14) return `${s.slice(0, 2)}.${s.slice(2, 5)}.${s.slice(5, 8)}/${s.slice(8, 12)}-${s.slice(12, 14)}`;
+  return null;
+}
+
+function dataPedidoBr(v: string | null): string | null {
+  const t = String(v || '').trim();
+  let m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  m = t.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m) return `${m[1]}/${m[2]}/${m[3]}`;
+  return null;
+}
+
+// Monta o link de download do e-SAJ (o MESMO que chega no e-mail do TJSP),
+// derivado do nº do pedido + data do pedido + documento. Independe do e-mail
+// chegar — serve para o operador abrir a CND que ainda está faltante (sem PDF
+// baixado). Formato idêntico ao WF-15 (sem encodeURIComponent).
+function linkEsaj(r: AdminRow): string | null {
+  if (!TIPOS_ESAJ.has(r.tipo)) return null;
+  const pedido = String(r.cs_numero_pedido || '').trim();
+  const dataBr = dataPedidoBr(r.cs_pedido_data);
+  const digits = String(r.documento_normalizado || '').replace(/\D/g, '');
+  const doc = mascararDoc(digits);
+  if (!pedido || !dataBr || !doc) return null;
+  const tp = digits.length === 14 ? 'J' : 'F';
+  const campoDoc = digits.length === 14 ? 'nuCnpj' : 'nuCpf';
+  return (
+    'https://esaj.tjsp.jus.br/sco/realizarDownload.do?' +
+    `entity.nuPedido=${pedido}&entity.dtPedido=${dataBr}` +
+    `&entity.tpPessoa=${tp}&entity.${campoDoc}=${doc}`
+  );
+}
+
 async function fetchDiligencia(id: string): Promise<AdminRow[] | null> {
   if (!UUID_RE.test(id)) return null;
   const result = await pool.query(
@@ -573,7 +619,7 @@ function CardAdmin({
             ? `Emitida em ${formatDate(r.data_emissao)}`
             : '\u00A0'}
         </span>
-        {r.link_documento && (
+        {r.link_documento ? (
           <a
             href={r.link_documento}
             target="_blank"
@@ -582,7 +628,17 @@ function CardAdmin({
           >
             Abrir PDF →
           </a>
-        )}
+        ) : linkEsaj(r) ? (
+          <a
+            href={linkEsaj(r)!}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 font-medium text-amber-600 hover:text-amber-700 hover:underline"
+            title="Baixar a certidão direto no e-SAJ (mesmo link que chega por e-mail)"
+          >
+            Abrir no e-SAJ →
+          </a>
+        ) : null}
       </div>
 
       <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-slate-200/70 pt-2">
