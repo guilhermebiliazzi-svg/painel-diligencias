@@ -28,9 +28,25 @@ const n = (v: any) => (v == null ? 0 : Number(v) || 0);
 /** Status do Asaas que significam dinheiro efetivamente recebido. */
 const RECEBIDO = ["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"];
 
-export async function GET() {
+function mesValido(v: string | null): string {
+  return v && /^\d{4}-\d{2}$/.test(v) ? v : new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+  }).format(new Date());
+}
+
+/** primeiro dia do mês seguinte, para o intervalo [inicio, fim) */
+function proximoMes(mes: string): string {
+  const [a, m] = mes.split("-").map(Number);
+  return m === 12 ? `${a + 1}-01-01` : `${a}-${String(m + 1).padStart(2, "0")}-01`;
+}
+
+export async function GET(req: Request) {
   const c = creds();
   if (!c) return NextResponse.json({ error: "Supabase não configurado." }, { status: 500 });
+
+  const mes = mesValido(new URL(req.url).searchParams.get("mes"));
 
   try {
     const [rCob, rNotas] = await Promise.all([
@@ -39,10 +55,14 @@ export async function GET() {
           `&status=in.(${RECEBIDO.join(",")})&order=criado_em.desc&limit=200`,
         { headers: c.headers, cache: "no-store" }
       ),
-      fetch(`${c.url}/rest/v1/adm_notas_comissao?order=created_at.desc&limit=400`, {
-        headers: c.headers,
-        cache: "no-store",
-      }),
+      // as notas do mês pedido alimentam a aba "Emitidas"; as cobranças ainda
+      // sem nota ficam na aba de trabalho. Sem isso a tela vira um depósito
+      // que só cresce.
+      fetch(
+        `${c.url}/rest/v1/adm_notas_comissao?order=created_at.desc&limit=500` +
+          `&created_at=gte.${mes}-01&created_at=lt.${proximoMes(mes)}`,
+        { headers: c.headers, cache: "no-store" }
+      ),
     ]);
 
     if (!rCob.ok) {
@@ -58,11 +78,19 @@ export async function GET() {
       );
     }
 
-    const notas = (await rNotas.json()) as any[];
+    const notasDoMes = (await rNotas.json()) as any[];
+
+    // Uma cobrança de março com nota emitida não pode reaparecer como
+    // pendente só porque estamos olhando agosto: a marcação de "já tem nota"
+    // é global, o filtro por mês vale só para a listagem das emitidas.
+    const rVivas = await fetch(
+      `${c.url}/rest/v1/adm_notas_comissao?status=neq.cancelada&asaas_payment_id=not.is.null` +
+        `&select=asaas_payment_id,status,numero_nota,pdf_url,valor_servico,tomador_nome,tomador_doc,emissao_erro,origem,created_at,id`,
+      { headers: c.headers, cache: "no-store" }
+    );
+    const vivas = rVivas.ok ? ((await rVivas.json()) as any[]) : [];
     const notaPor: Record<string, any> = {};
-    for (const nt of notas) {
-      if (nt.asaas_payment_id && nt.status !== "cancelada") notaPor[nt.asaas_payment_id] = nt;
-    }
+    for (const nt of vivas) notaPor[nt.asaas_payment_id] = nt;
 
     const brutas = (await rCob.json()) as any[];
 
@@ -127,9 +155,14 @@ export async function GET() {
       };
     });
 
-    const avulsas = notas.filter((nt) => nt.origem === "avulsa");
-
-    return NextResponse.json({ cobrancas, avulsas, sugestao_erro: sugestaoErro });
+    return NextResponse.json({
+      // a aba de trabalho mostra só o que falta emitir
+      cobrancas: cobrancas.filter((cb) => !cb.nota),
+      emitidas: notasDoMes,
+      mes,
+      pendentes_total: cobrancas.filter((cb) => !cb.nota).length,
+      sugestao_erro: sugestaoErro,
+    });
   } catch (e: any) {
     return NextResponse.json({ error: "Erro de rede", detail: String(e) }, { status: 502 });
   }

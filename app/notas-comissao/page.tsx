@@ -116,7 +116,7 @@ const paraNumero = (v: string) =>
 
 // Marcador de versão: com upload manual pelo GitHub é fácil olhar para uma
 // tela antiga e achar que a correção não funcionou. Fica visível no cabeçalho.
-const VERSAO = "v7";
+const VERSAO = "v8";
 
 const hojeISO = () => new Date().toISOString().slice(0, 10);
 
@@ -159,19 +159,26 @@ function resumoOperacao(o: Operacao) {
 
 export default function NotasComissaoPage() {
   const [cobrancas, setCobrancas] = useState<Cobranca[]>([]);
-  const [avulsas, setAvulsas] = useState<Nota[]>([]);
+  const [emitidas, setEmitidas] = useState<Nota[]>([]);
+  const [mes, setMes] = useState(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Sao_Paulo",
+      year: "numeric",
+      month: "2-digit",
+    }).format(new Date())
+  );
   const [operacoes, setOperacoes] = useState<Operacao[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
-  const [aba, setAba] = useState<"asaas" | "avulsa" | "operacoes">("asaas");
+  const [aba, setAba] = useState<"asaas" | "emitidas" | "avulsa" | "operacoes">("asaas");
 
-  async function carregar() {
+  async function carregar(mesAlvo = mes) {
     setCarregando(true);
     setErro(null);
     try {
       const [rN, rO] = await Promise.all([
-        fetch("/api/adm/notas-comissao", { cache: "no-store" }),
+        fetch(`/api/adm/notas-comissao?mes=${mesAlvo}`, { cache: "no-store" }),
         fetch("/api/adm/operacoes", { cache: "no-store" }),
       ]);
       const dN = await rN.json().catch(() => ({}));
@@ -179,7 +186,7 @@ export default function NotasComissaoPage() {
       if (!rN.ok) setErro(dN?.error || "Falha ao carregar os recebimentos.");
       else {
         setCobrancas(dN.cobrancas || []);
-        setAvulsas(dN.avulsas || []);
+        setEmitidas(dN.emitidas || []);
         // se a ficha da diligência não veio, a tela precisa dizer por quê em
         // vez de simplesmente aparecer vazia
         setAviso(dN.sugestao_erro || null);
@@ -196,7 +203,8 @@ export default function NotasComissaoPage() {
     carregar();
   }, []);
 
-  const pendentes = cobrancas.filter((c) => !c.nota);
+  // a rota já devolve só as cobranças sem nota
+  const pendentes = cobrancas;
 
   return (
     <div className="vj-wrap">
@@ -217,7 +225,10 @@ export default function NotasComissaoPage() {
 
         <nav className="vj-abas">
           <button className={aba === "asaas" ? "on" : ""} onClick={() => setAba("asaas")}>
-            Recebimentos ({pendentes.length} sem nota)
+            A emitir ({pendentes.length})
+          </button>
+          <button className={aba === "emitidas" ? "on" : ""} onClick={() => setAba("emitidas")}>
+            Emitidas
           </button>
           <button className={aba === "avulsa" ? "on" : ""} onClick={() => setAba("avulsa")}>
             Nota avulsa
@@ -238,38 +249,53 @@ export default function NotasComissaoPage() {
         {!carregando && aba === "asaas" && (
           <>
             {cobrancas.length === 0 && (
-              <div className="vj-card vj-vazio">Nenhum recebimento do Asaas até agora.</div>
+              <div className="vj-card vj-vazio">
+                Nada a emitir: todos os recebimentos do Asaas já têm nota.
+              </div>
             )}
             {cobrancas.map((cb) => (
               <CardCobranca
                 key={cb.asaas_payment_id}
                 cobranca={cb}
-                onEmitiu={carregar}
+                onEmitiu={() => carregar()}
                 onNovaOperacao={(op) => setOperacoes((v) => [op, ...v])}
               />
             ))}
           </>
         )}
 
-        {!carregando && aba === "avulsa" && (
-          <>
-            <CardAvulsa
-              onEmitiu={carregar}
-              onNovaOperacao={(op) => setOperacoes((v) => [op, ...v])}
-            />
-            {avulsas.length > 0 && (
-              <section className="vj-card">
-                <h2 className="vj-h2">Avulsas já emitidas</h2>
-                {avulsas.map((nt) => (
-                  <LinhaNota key={nt.id} nota={nt} />
-                ))}
-              </section>
+        {!carregando && aba === "emitidas" && (
+          <section className="vj-card">
+            <div className="vj-sel">
+              <label className="vj-f" style={{ maxWidth: 200 }}>
+                <span>Competência</span>
+                <input
+                  type="month"
+                  value={mes}
+                  onChange={(e) => {
+                    setMes(e.target.value);
+                    carregar(e.target.value);
+                  }}
+                />
+              </label>
+            </div>
+            {emitidas.length === 0 ? (
+              <div className="vj-vazio">Nenhuma nota de comissão neste mês.</div>
+            ) : (
+              emitidas.map((nt) => <LinhaNota key={nt.id} nota={nt} />)
             )}
-          </>
+          </section>
+        )}
+
+        {!carregando && aba === "avulsa" && (
+          <CardAvulsa
+            onEmitiu={() => carregar()}
+            onNovaOperacao={(op) => setOperacoes((v) => [op, ...v])}
+          />
         )}
 
         {!carregando && aba === "operacoes" && (
-          <FormOperacao operacoes={operacoes} onCriou={carregar} />
+          <FormOperacao operacoes={operacoes} onCriou={() => carregar()} />
         )}
       </main>
 
