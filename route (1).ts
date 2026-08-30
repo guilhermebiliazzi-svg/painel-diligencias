@@ -3,16 +3,15 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-import { somaSplits } from "@/lib/asaas-split";
-
 /**
- * Notas fiscais de comissão.
+ * Planilha da DIMOB — o que o contador precisa das comissões do ano.
  *
- * GET  /api/adm/notas-comissao
- *   Lista as cobranças do Asaas já recebidas, com a nota se já houver, e as
- *   notas avulsas. O valor sugerido é a parte da Ville: total menos a soma
- *   dos splits — porque quem tem subconta recebe direto e emite a própria
- *   nota pela parte dele.
+ * Uma linha por nota emitida que esteja amarrada a uma operação imobiliária.
+ * Nota sem operação não entra: a DIMOB declara a VENDA (alienante, adquirente,
+ * valor e data do contrato), e sem a operação esses dados não existem.
+ *
+ * GET /api/adm/dimob?ano=2026        -> CSV para abrir no Excel
+ * GET /api/adm/dimob?ano=2026&json=1 -> mesmos dados em JSON, para conferir
  */
 
 function creds() {
@@ -22,66 +21,98 @@ function creds() {
   return { url, key, headers: { apikey: key, Authorization: `Bearer ${key}` } };
 }
 
-const n = (v: any) => (v == null ? 0 : Number(v) || 0);
+const dig = (v: any) => String(v ?? "").replace(/\D/g, "");
 
-/** Status do Asaas que significam dinheiro efetivamente recebido. */
-const RECEBIDO = ["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"];
+function fmtDoc(v: any) {
+  const d = dig(v);
+  if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+  if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+  return String(v ?? "");
+}
 
-export async function GET() {
+/** vírgula decimal: é assim que o Excel em pt-BR entende número */
+const num = (v: any) => (Number(v) || 0).toFixed(2).replace(".", ",");
+
+const data = (v: any) => (v ? String(v).slice(0, 10).split("-").reverse().join("/") : "");
+
+function pessoas(lista: any): string {
+  if (!Array.isArray(lista)) return "";
+  return lista.map((p) => `${p?.nome ?? ""} (${fmtDoc(p?.doc)})`).join(" | ");
+}
+
+function endereco(r: any): string {
+  const via = [r.imovel_tipo_logradouro, r.imovel_logradouro].filter(Boolean).join(" ").trim();
+  return [
+    [via, r.imovel_numero].filter(Boolean).join(", "),
+    r.imovel_complemento,
+    r.imovel_bairro,
+  ]
+    .filter(Boolean)
+    .join(" — ");
+}
+
+const COLUNAS: [string, (r: any) => string][] = [
+  ["Ano", (r) => String(r.ano ?? "")],
+  ["Nº da NFS-e", (r) => String(r.numero_nota ?? "")],
+  ["Emissão", (r) => data(r.data_emissao)],
+  ["Valor da comissão", (r) => num(r.valor_comissao)],
+  ["Tomador", (r) => String(r.tomador_nome ?? "")],
+  ["CPF/CNPJ do tomador", (r) => fmtDoc(r.tomador_doc)],
+  ["Lado do tomador", (r) => String(r.tomador_lado ?? "")],
+  ["Data do contrato", (r) => data(r.data_contrato)],
+  ["Valor da alienação", (r) => num(r.valor_alienacao)],
+  ["Alienantes (vendedores)", (r) => pessoas(r.alienantes)],
+  ["Adquirentes (compradores)", (r) => pessoas(r.adquirentes)],
+  ["Endereço do imóvel", (r) => endereco(r)],
+  ["CEP", (r) => dig(r.imovel_cep).replace(/(\d{5})(\d{3})/, "$1-$2")],
+  ["Município (IBGE)", (r) => String(r.imovel_cidade_ibge ?? "")],
+  ["UF", (r) => String(r.imovel_uf ?? "")],
+  ["Inscrição municipal do imóvel", (r) => String(r.imovel_inscricao ?? "")],
+  ["Matrícula", (r) => String(r.imovel_matricula ?? "")],
+];
+
+/** aspas duplicadas e campo entre aspas: o CSV não pode quebrar num nome com ; */
+const celula = (v: string) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+
+export async function GET(req: Request) {
   const c = creds();
   if (!c) return NextResponse.json({ error: "Supabase não configurado." }, { status: 500 });
 
+  const { searchParams } = new URL(req.url);
+  const anoTxt = searchParams.get("ano") || "";
+  const ano = /^\d{4}$/.test(anoTxt) ? Number(anoTxt) : new Date().getFullYear();
+
   try {
-    const [rCob, rNotas] = await Promise.all([
-      fetch(
-        `${c.url}/rest/v1/asaas_cobrancas?select=id,asaas_payment_id,status,valor,vencimento,link,split,criado_em` +
-          `&status=in.(${RECEBIDO.join(",")})&order=criado_em.desc&limit=200`,
-        { headers: c.headers, cache: "no-store" }
-      ),
-      fetch(`${c.url}/rest/v1/adm_notas_comissao?order=created_at.desc&limit=400`, {
-        headers: c.headers,
-        cache: "no-store",
-      }),
-    ]);
-
-    if (!rCob.ok) {
+    const r = await fetch(
+      `${c.url}/rest/v1/adm_v_dimob_comissoes?ano=eq.${ano}&order=data_emissao.asc&limit=5000`,
+      { headers: c.headers, cache: "no-store" }
+    );
+    if (!r.ok) {
       return NextResponse.json(
-        { error: "Falha ao carregar as cobranças", detail: await rCob.text() },
+        { error: "Falha ao ler a base da DIMOB", detail: await r.text() },
         { status: 502 }
       );
     }
-    if (!rNotas.ok) {
-      return NextResponse.json(
-        { error: "Falha ao carregar as notas", detail: await rNotas.text() },
-        { status: 502 }
-      );
+    const linhas = (await r.json()) as any[];
+
+    if (searchParams.get("json") === "1") {
+      return NextResponse.json({ ano, total: linhas.length, linhas });
     }
 
-    const notas = (await rNotas.json()) as any[];
-    const notaPor: Record<string, any> = {};
-    for (const nt of notas) {
-      if (nt.asaas_payment_id && nt.status !== "cancelada") notaPor[nt.asaas_payment_id] = nt;
-    }
+    const corpo = [
+      COLUNAS.map(([t]) => celula(t)).join(";"),
+      ...linhas.map((l) => COLUNAS.map(([, f]) => celula(f(l))).join(";")),
+    ].join("\r\n");
 
-    const cobrancas = ((await rCob.json()) as any[]).map((cb) => {
-      const total = n(cb.valor);
-      const splits = somaSplits(cb.split);
-      return {
-        asaas_payment_id: cb.asaas_payment_id,
-        status: cb.status,
-        vencimento: cb.vencimento,
-        link: cb.link,
-        valor_cobranca: total,
-        valor_splits: splits,
-        // a parte da Ville; nunca negativa, mesmo com dado inconsistente
-        valor_sugerido: Math.max(0, Math.round((total - splits) * 100) / 100,),
-        nota: notaPor[cb.asaas_payment_id] ?? null,
-      };
+    // BOM: sem ele o Excel abre os acentos errados
+    return new NextResponse("﻿" + corpo, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="dimob-comissoes-${ano}.csv"`,
+        "Cache-Control": "no-store",
+      },
     });
-
-    const avulsas = notas.filter((nt) => nt.origem === "avulsa");
-
-    return NextResponse.json({ cobrancas, avulsas });
   } catch (e: any) {
     return NextResponse.json({ error: "Erro de rede", detail: String(e) }, { status: 502 });
   }

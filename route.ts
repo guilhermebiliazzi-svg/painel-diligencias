@@ -3,15 +3,17 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+import { somaSplits } from "@/lib/asaas-split";
+import { montarSugestao, type Sugestao } from "@/lib/sugestao-comissao";
+
 /**
- * Operações imobiliárias — a venda que a comissão intermediou.
+ * Notas fiscais de comissão.
  *
- * É o que a DIMOB declara e o que alimenta a discriminação da nota. Fica
- * separada da nota porque uma venda gera várias notas: a da Ville, a de cada
- * corretor com subconta, e uma por tomador quando a comissão é dividida.
- *
- * GET  /api/adm/operacoes            lista as recentes, com as partes
- * POST /api/adm/operacoes            cria uma, com alienantes e adquirentes
+ * GET  /api/adm/notas-comissao
+ *   Lista as cobranças do Asaas já recebidas, com a nota se já houver, e as
+ *   notas avulsas. O valor sugerido é a parte da Ville: total menos a soma
+ *   dos splits — porque quem tem subconta recebe direto e emite a própria
+ *   nota pela parte dele.
  */
 
 function creds() {
@@ -21,50 +23,167 @@ function creds() {
   return { url, key, headers: { apikey: key, Authorization: `Bearer ${key}` } };
 }
 
-const txt = (v: any) => String(v ?? "").trim();
-const dig = (v: any) => String(v ?? "").replace(/\D/g, "");
+const n = (v: any) => (v == null ? 0 : Number(v) || 0);
+
+/** Status do Asaas que significam dinheiro efetivamente recebido. */
+const RECEBIDO = ["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"];
+
+function mesValido(v: string | null): string {
+  return v && /^\d{4}-\d{2}$/.test(v) ? v : new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+  }).format(new Date());
+}
+
+/** primeiro dia do mês seguinte, para o intervalo [inicio, fim) */
+function proximoMes(mes: string): string {
+  const [a, m] = mes.split("-").map(Number);
+  return m === 12 ? `${a + 1}-01-01` : `${a}-${String(m + 1).padStart(2, "0")}-01`;
+}
 
 export async function GET(req: Request) {
   const c = creds();
   if (!c) return NextResponse.json({ error: "Supabase não configurado." }, { status: 500 });
 
-  const { searchParams } = new URL(req.url);
-  const busca = txt(searchParams.get("q"));
+  // A DIMOB é anual, o fechamento com o contador é mensal. A tela precisa dos
+  // dois recortes, então a rota aceita ?mes=AAAA-MM ou ?ano=AAAA.
+  const params = new URL(req.url).searchParams;
+  const anoTxt = params.get("ano") || "";
+  const porAno = /^\d{4}$/.test(anoTxt);
+  const mes = mesValido(params.get("mes"));
+  const inicio = porAno ? `${anoTxt}-01-01` : `${mes}-01`;
+  const fim = porAno ? `${Number(anoTxt) + 1}-01-01` : proximoMes(mes);
 
   try {
-    const filtro = busca
-      ? `&or=(imovel_logradouro.ilike.*${encodeURIComponent(busca)}*,imovel_bairro.ilike.*${encodeURIComponent(busca)}*)`
-      : "";
-    const rOp = await fetch(
-      `${c.url}/rest/v1/adm_operacoes_imobiliarias?order=data_contrato.desc&limit=60${filtro}`,
-      { headers: c.headers, cache: "no-store" }
-    );
-    if (!rOp.ok) {
-      return NextResponse.json({ error: "Falha ao listar", detail: await rOp.text() }, { status: 502 });
+    const [rCob, rNotas] = await Promise.all([
+      fetch(
+        `${c.url}/rest/v1/asaas_cobrancas?select=id,asaas_payment_id,status,valor,vencimento,link,split,criado_em,diligencia_id` +
+          `&status=in.(${RECEBIDO.join(",")})&order=criado_em.desc&limit=200`,
+        { headers: c.headers, cache: "no-store" }
+      ),
+      // as notas do mês pedido alimentam a aba "Emitidas"; as cobranças ainda
+      // sem nota ficam na aba de trabalho. Sem isso a tela vira um depósito
+      // que só cresce.
+      fetch(
+        `${c.url}/rest/v1/adm_notas_comissao?order=created_at.desc&limit=500` +
+          `&created_at=gte.${inicio}&created_at=lt.${fim}`,
+        { headers: c.headers, cache: "no-store" }
+      ),
+    ]);
+
+    if (!rCob.ok) {
+      return NextResponse.json(
+        { error: "Falha ao carregar as cobranças", detail: await rCob.text() },
+        { status: 502 }
+      );
     }
-    const ops = (await rOp.json()) as any[];
-    if (!ops.length) return NextResponse.json({ operacoes: [] });
+    if (!rNotas.ok) {
+      return NextResponse.json(
+        { error: "Falha ao carregar as notas", detail: await rNotas.text() },
+        { status: 502 }
+      );
+    }
 
-    const ids = ops.map((o) => o.id).join(",");
-    const rP = await fetch(
-      `${c.url}/rest/v1/adm_operacao_partes?operacao_id=in.(${ids})&order=ordem.asc`,
+    const notasDoMes = (await rNotas.json()) as any[];
+
+    // Uma cobrança de março com nota emitida não pode reaparecer como
+    // pendente só porque estamos olhando agosto: a marcação de "já tem nota"
+    // é global, o filtro por mês vale só para a listagem das emitidas.
+    const rVivas = await fetch(
+      `${c.url}/rest/v1/adm_notas_comissao?status=neq.cancelada&asaas_payment_id=not.is.null` +
+        `&select=asaas_payment_id,status,numero_nota,pdf_url,valor_servico,tomador_nome,tomador_doc,emissao_erro,origem,created_at,id`,
       { headers: c.headers, cache: "no-store" }
     );
-    const partes = rP.ok ? ((await rP.json()) as any[]) : [];
+    const vivas = rVivas.ok ? ((await rVivas.json()) as any[]) : [];
+    const notaPor: Record<string, any> = {};
+    for (const nt of vivas) notaPor[nt.asaas_payment_id] = nt;
 
-    const operacoes = ops.map((o) => ({
-      ...o,
-      alienantes: partes.filter((p) => p.operacao_id === o.id && p.papel === "alienante"),
-      adquirentes: partes.filter((p) => p.operacao_id === o.id && p.papel === "adquirente"),
-    }));
+    const brutas = (await rCob.json()) as any[];
 
-    return NextResponse.json({ operacoes });
+    // A ficha do negócio já tem pagador, partes e preço. Buscamos uma vez só,
+    // para todas as diligências da lista, e devolvemos junto de cada cobrança:
+    // digitar de novo o que o sistema já sabe é como o erro entra.
+    const dilIds = Array.from(
+      new Set(brutas.map((cb) => cb.diligencia_id).filter(Boolean))
+    ) as string[];
+    const sugestaoPor: Record<string, Sugestao> = {};
+    let sugestaoErro: string | null = null;
+    if (dilIds.length) {
+      const lista = dilIds.join(",");
+      try {
+        // PostgREST com a service role: mesma porta que o resto desta rota usa.
+        const [rDil, rOps] = await Promise.all([
+          fetch(
+            `${c.url}/rest/v1/diligencias?id=in.(${lista})&select=id,endereco,preco,dados_completos`,
+            { headers: c.headers, cache: "no-store" }
+          ),
+          fetch(
+            `${c.url}/rest/v1/adm_operacoes_imobiliarias?diligencia_id=in.(${lista})` +
+              `&select=id,diligencia_id,imovel_logradouro,imovel_numero,imovel_bairro,valor_alienacao,data_contrato`,
+            { headers: c.headers, cache: "no-store" }
+          ),
+        ]);
+        if (!rDil.ok) throw new Error(`diligencias: ${await rDil.text()}`);
+        const dils = (await rDil.json()) as any[];
+        const ops = rOps.ok ? ((await rOps.json()) as any[]) : [];
+        const opPor: Record<string, { id: number; label: string }> = {};
+        for (const o of ops) {
+          const onde = [o.imovel_logradouro, o.imovel_numero].filter(Boolean).join(", ");
+          const label = [onde, o.imovel_bairro].filter(Boolean).join(" — ");
+          opPor[String(o.diligencia_id)] = { id: Number(o.id), label: label || `Operação #${o.id}` };
+        }
+        for (const d of dils) {
+          sugestaoPor[String(d.id)] = montarSugestao(d, opPor[String(d.id)] ?? null);
+        }
+        if (!dils.length) sugestaoErro = "nenhuma diligência encontrada para estas cobranças";
+      } catch (e: any) {
+        // Antes isso morria em silêncio e a tela só aparecia vazia, sem dizer
+        // por quê. O motivo vai junto na resposta.
+        sugestaoErro = String((e && e.message) || e).slice(0, 300);
+      }
+    }
+
+    const cobrancas = brutas.map((cb) => {
+      const total = n(cb.valor);
+      const splits = somaSplits(cb.split);
+      return {
+        asaas_payment_id: cb.asaas_payment_id,
+        status: cb.status,
+        vencimento: cb.vencimento,
+        link: cb.link,
+        valor_cobranca: total,
+        valor_splits: splits,
+        // a parte da Ville; nunca negativa, mesmo com dado inconsistente
+        valor_sugerido: Math.max(0, Math.round((total - splits) * 100) / 100),
+        diligencia_id: cb.diligencia_id ?? null,
+        sugestao: cb.diligencia_id ? sugestaoPor[cb.diligencia_id] ?? null : null,
+        nota: notaPor[cb.asaas_payment_id] ?? null,
+      };
+    });
+
+    return NextResponse.json({
+      // a aba de trabalho mostra só o que falta emitir
+      cobrancas: cobrancas.filter((cb) => !cb.nota),
+      emitidas: notasDoMes,
+      mes,
+      periodo: porAno ? { tipo: "ano", valor: anoTxt } : { tipo: "mes", valor: mes },
+      pendentes_total: cobrancas.filter((cb) => !cb.nota).length,
+      sugestao_erro: sugestaoErro,
+    });
   } catch (e: any) {
     return NextResponse.json({ error: "Erro de rede", detail: String(e) }, { status: 502 });
   }
 }
 
-export async function POST(req: Request) {
+/**
+ * PATCH /api/adm/notas-comissao   { nota_id, operacao_id }
+ *
+ * Amarra uma nota já emitida a uma operação. Serve para as avulsas, que nascem
+ * antes de a venda estar cadastrada: sem esse vínculo a nota fica fora da
+ * DIMOB para sempre, e reemitir só por isso seria absurdo.
+ */
+export async function PATCH(req: Request) {
   const c = creds();
   if (!c) return NextResponse.json({ error: "Supabase não configurado." }, { status: 500 });
 
@@ -75,95 +194,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Corpo inválido." }, { status: 400 });
   }
 
-  const logradouro = txt(body?.imovel_logradouro);
-  if (!logradouro) return NextResponse.json({ error: "Logradouro do imóvel é obrigatório." }, { status: 400 });
-
-  const valor = Number(body?.valor_alienacao) || 0;
-  if (!(valor > 0)) return NextResponse.json({ error: "Valor da venda é obrigatório." }, { status: 400 });
-
-  const dataContrato = txt(body?.data_contrato);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dataContrato)) {
-    return NextResponse.json({ error: "Data do contrato deve ser AAAA-MM-DD." }, { status: 400 });
-  }
-
-  // As partes precisam existir dos dois lados: a DIMOB declara alienante e
-  // adquirente, e a discriminação cita a ponta oposta à do tomador.
-  const norm = (arr: any, papel: string) =>
-    (Array.isArray(arr) ? arr : [])
-      .map((p: any, i: number) => ({
-        papel,
-        nome: txt(p?.nome).toUpperCase(),
-        doc: dig(p?.doc),
-        percentual: p?.percentual == null || p.percentual === "" ? null : Number(p.percentual),
-        ordem: i + 1,
-      }))
-      .filter((p) => p.nome && p.doc);
-
-  const alienantes = norm(body?.alienantes, "alienante");
-  const adquirentes = norm(body?.adquirentes, "adquirente");
-
-  if (!alienantes.length) return NextResponse.json({ error: "Informe ao menos um vendedor." }, { status: 400 });
-  if (!adquirentes.length) return NextResponse.json({ error: "Informe ao menos um comprador." }, { status: 400 });
-
-  const docInvalido = [...alienantes, ...adquirentes].find(
-    (p) => p.doc.length !== 11 && p.doc.length !== 14
-  );
-  if (docInvalido) {
-    return NextResponse.json(
-      { error: `CPF/CNPJ inválido em "${docInvalido.nome}".` },
-      { status: 400 }
-    );
+  const notaId = Number(body?.nota_id);
+  const operacaoId = Number(body?.operacao_id);
+  if (!notaId || !operacaoId) {
+    return NextResponse.json({ error: "nota_id e operacao_id são obrigatórios." }, { status: 400 });
   }
 
   try {
-    const rOp = await fetch(`${c.url}/rest/v1/adm_operacoes_imobiliarias`, {
-      method: "POST",
+    const r = await fetch(`${c.url}/rest/v1/adm_notas_comissao?id=eq.${notaId}`, {
+      method: "PATCH",
       headers: { ...c.headers, "Content-Type": "application/json", Prefer: "return=representation" },
-      body: JSON.stringify({
-        diligencia_id: txt(body?.diligencia_id) || null,
-        valor_alienacao: valor,
-        data_contrato: dataContrato,
-        imovel_tipo_logradouro: txt(body?.imovel_tipo_logradouro) || null,
-        imovel_logradouro: logradouro,
-        imovel_numero: txt(body?.imovel_numero) || null,
-        imovel_complemento: txt(body?.imovel_complemento) || null,
-        imovel_bairro: txt(body?.imovel_bairro) || null,
-        imovel_cep: dig(body?.imovel_cep) || null,
-        imovel_cidade_ibge: dig(body?.imovel_cidade_ibge) || null,
-        imovel_uf: txt(body?.imovel_uf).toUpperCase() || null,
-        imovel_inscricao: txt(body?.imovel_inscricao) || null,
-        imovel_matricula: txt(body?.imovel_matricula) || null,
-        observacao: txt(body?.observacao) || null,
-      }),
+      body: JSON.stringify({ operacao_id: operacaoId, updated_at: new Date().toISOString() }),
       cache: "no-store",
     });
-    if (!rOp.ok) {
-      return NextResponse.json({ error: "Falha ao gravar a operação", detail: await rOp.text() }, { status: 502 });
+    if (!r.ok) {
+      return NextResponse.json({ error: "Falha ao vincular", detail: await r.text() }, { status: 502 });
     }
-    const op = ((await rOp.json()) as any[])[0];
-
-    const rP = await fetch(`${c.url}/rest/v1/adm_operacao_partes`, {
-      method: "POST",
-      headers: { ...c.headers, "Content-Type": "application/json", Prefer: "return=representation" },
-      body: JSON.stringify(
-        [...alienantes, ...adquirentes].map((p) => ({ ...p, operacao_id: op.id }))
-      ),
-      cache: "no-store",
-    });
-    if (!rP.ok) {
-      // sem as partes a operação é inútil: some com ela para não deixar lixo
-      await fetch(`${c.url}/rest/v1/adm_operacoes_imobiliarias?id=eq.${op.id}`, {
-        method: "DELETE",
-        headers: c.headers,
-        cache: "no-store",
-      });
-      return NextResponse.json({ error: "Falha ao gravar as partes", detail: await rP.text() }, { status: 502 });
-    }
-
-    return NextResponse.json({
-      ok: true,
-      operacao: { ...op, alienantes, adquirentes },
-    });
+    return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: "Erro de rede", detail: String(e) }, { status: 502 });
   }
