@@ -62,12 +62,17 @@ export async function GET(req: Request) {
           `&status=in.(${RECEBIDO.join(",")})&order=criado_em.desc&limit=200`,
         { headers: c.headers, cache: "no-store" }
       ),
-      // as notas do mês pedido alimentam a aba "Emitidas"; as cobranças ainda
-      // sem nota ficam na aba de trabalho. Sem isso a tela vira um depósito
-      // que só cresce.
+      // As notas do período pedido alimentam a aba "Emitidas"; as cobranças
+      // ainda sem nota ficam na aba de trabalho.
+      //
+      // O corte é pela DATA DE EMISSÃO da nota, não por quando a linha foi
+      // gravada aqui: nota de janeiro importada hoje é de janeiro. Só quando
+      // não há data de emissão — nota que falhou e nunca saiu — caímos no
+      // created_at, senão ela não apareceria em período nenhum.
       fetch(
-        `${c.url}/rest/v1/adm_notas_comissao?order=created_at.desc&limit=500` +
-          `&created_at=gte.${inicio}&created_at=lt.${fim}`,
+        `${c.url}/rest/v1/adm_notas_comissao?order=data_emissao.desc.nullslast&limit=500` +
+          `&or=(and(data_emissao.gte.${inicio},data_emissao.lt.${fim}),` +
+          `and(data_emissao.is.null,created_at.gte.${inicio},created_at.lt.${fim}))`,
         { headers: c.headers, cache: "no-store" }
       ),
     ]);

@@ -120,7 +120,7 @@ const paraNumero = (v: string) =>
 
 // Marcador de versão: com upload manual pelo GitHub é fácil olhar para uma
 // tela antiga e achar que a correção não funcionou. Fica visível no cabeçalho.
-const VERSAO = "v14";
+const VERSAO = "v15";
 
 const hojeISO = () => new Date().toISOString().slice(0, 10);
 
@@ -323,7 +323,7 @@ export default function NotasComissaoPage() {
             </div>
 
             <div className="vj-resumo-emitidas">
-              {emitidas.length} nota{emitidas.length === 1 ? "" : "s"} ·{" "}
+              {emitidas.length} nota{emitidas.length === 1 ? "" : "s"} pela data de emissão ·{" "}
               {brl(emitidas.reduce((a, n) => a + (Number(n.valor_servico) || 0), 0))}
               {(() => {
                 const fora = emitidas.filter((n) => n.status === "emitida" && !n.operacao_id).length;
