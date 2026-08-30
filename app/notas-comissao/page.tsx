@@ -114,6 +114,10 @@ const DESTINO_ROTULO: Record<string, string> = {
 const paraNumero = (v: string) =>
   Number(String(v ?? "").replace(/\./g, "").replace(",", ".")) || 0;
 
+// Marcador de versão: com upload manual pelo GitHub é fácil olhar para uma
+// tela antiga e achar que a correção não funcionou. Fica visível no cabeçalho.
+const VERSAO = "v7";
+
 const hojeISO = () => new Date().toISOString().slice(0, 10);
 
 const tomadorVazio = (): Tomador => ({
@@ -198,7 +202,7 @@ export default function NotasComissaoPage() {
     <div className="vj-wrap">
       <header className="vj-top">
         <a href="/" className="vj-mark vj-marklink">RE/MAX <span>Ville</span></a>
-        <div className="vj-crumb">Administração · Notas de comissão</div>
+        <div className="vj-crumb">Administração · Notas de comissão · {VERSAO}</div>
       </header>
 
       <main className="vj-main">
@@ -354,8 +358,9 @@ function CamposTomador({
             value={escolhido ? dig(escolhido.doc) : "__manual"}
             onChange={(e) => {
               const c = candidatos.find((x) => dig(x.doc) === e.target.value);
-              if (!c) onChange({ ...t, nome: "", doc: "", lado: "" });
-              else onChange({ ...t, nome: c.nome, doc: c.doc, lado: c.lado });
+              // o e-mail é de quem estava selecionado antes: some com ele
+              if (!c) onChange({ ...t, nome: "", doc: "", lado: "", email: "" });
+              else onChange({ ...t, nome: c.nome, doc: c.doc, lado: c.lado, email: "" });
             }}
           >
             {candidatos.map((c) => (
@@ -381,8 +386,12 @@ function CamposTomador({
       </div>
       <div className="vj-frow">
         <label className="vj-f">
-          <span>E-mail (opcional)</span>
-          <input value={t.email} onChange={(e) => set("email", e.target.value)} />
+          <span>E-mail (opcional — a Prefeitura envia a nota para ele)</span>
+          <input
+            value={t.email}
+            onChange={(e) => set("email", e.target.value)}
+            placeholder="em branco = não envia"
+          />
         </label>
         {disponivel != null && (
           <label className="vj-f" style={{ maxWidth: 130 }}>

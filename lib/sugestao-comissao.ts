@@ -65,12 +65,15 @@ function pessoas(dc: Record<string, any>, base: "vendedores" | "compradores"): P
   return out;
 }
 
-function emailDe(dc: Record<string, any>, base: "vendedores" | "compradores"): string {
-  const pf = Array.isArray(dc[base + "PF"]) ? dc[base + "PF"] : [];
-  const pj = Array.isArray(dc[base + "PJ"]) ? dc[base + "PJ"] : [];
-  const cand = [pf[0]?.pf_email, pf[0]?.email, pj[0]?.pj_email, pj[0]?.email];
-  return txt(cand.find((e) => txt(e).includes("@"))).toLowerCase();
-}
+/*
+ * Não adivinhamos o e-mail do tomador.
+ *
+ * A ficha guarda um e-mail por bloco de pessoas, e na prática ele nem sempre é
+ * da pessoa certa — vimos o e-mail de outra venda aparecer no tomador. A
+ * Prefeitura ENVIA a nota para o endereço informado, então um palpite errado
+ * manda a NFS-e de uma venda para a caixa de outra pessoa. Fica em branco: quem
+ * emite digita, ou deixa vazio e a nota não é enviada por e-mail.
+ */
 
 export function montarSugestao(
   linha: { id: string; endereco?: string | null; preco?: unknown; dados_completos?: unknown },
@@ -114,7 +117,7 @@ export function montarSugestao(
       ? {
           nome: primeiro.nome,
           doc: primeiro.doc,
-          email: emailDe(dc, base),
+          email: "",
           lado: pagador,
         }
       : null,
