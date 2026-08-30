@@ -39,6 +39,7 @@ type Sugestao = {
   comissao_total: number | null;
   composicao: { credor: string; valor: number; destino: string }[];
   operacao_id: number | null;
+  operacao_label: string | null;
   candidatos: { nome: string; doc: string; lado: string; paga: boolean }[];
 };
 
@@ -239,7 +240,6 @@ export default function NotasComissaoPage() {
               <CardCobranca
                 key={cb.asaas_payment_id}
                 cobranca={cb}
-                operacoes={operacoes}
                 onEmitiu={carregar}
                 onNovaOperacao={(op) => setOperacoes((v) => [op, ...v])}
               />
@@ -250,7 +250,6 @@ export default function NotasComissaoPage() {
         {!carregando && aba === "avulsa" && (
           <>
             <CardAvulsa
-              operacoes={operacoes}
               onEmitiu={carregar}
               onNovaOperacao={(op) => setOperacoes((v) => [op, ...v])}
             />
@@ -460,12 +459,10 @@ function CamposTomador({
 
 function CardCobranca({
   cobranca,
-  operacoes,
   onEmitiu,
   onNovaOperacao,
 }: {
   cobranca: Cobranca;
-  operacoes: Operacao[];
   onEmitiu: () => void;
   onNovaOperacao: (op: Operacao) => void;
 }) {
@@ -523,7 +520,6 @@ function CardCobranca({
           origem="asaas"
           asaasPaymentId={cobranca.asaas_payment_id}
           disponivel={cobranca.valor_sugerido}
-          operacoes={operacoes}
           sugestao={cobranca.sugestao}
           onEmitiu={onEmitiu}
           onNovaOperacao={onNovaOperacao}
@@ -538,11 +534,9 @@ function CardCobranca({
 /* ------------------------------------------------------------------ */
 
 function CardAvulsa({
-  operacoes,
   onEmitiu,
   onNovaOperacao,
 }: {
-  operacoes: Operacao[];
   onEmitiu: () => void;
   onNovaOperacao: (op: Operacao) => void;
 }) {
@@ -556,7 +550,6 @@ function CardAvulsa({
       <FormEmissao
         origem="avulsa"
         disponivel={null}
-        operacoes={operacoes}
         sugestao={null}
         onEmitiu={onEmitiu}
         onNovaOperacao={onNovaOperacao}
@@ -569,11 +562,232 @@ function CardAvulsa({
 /* o formulário de emissão, comum às duas origens                       */
 /* ------------------------------------------------------------------ */
 
+function LinhasParte({
+  lista,
+  setLista,
+  rotulo,
+}: {
+  lista: Parte[];
+  setLista: (p: Parte[]) => void;
+  rotulo: string;
+}) {
+  return (
+    <div className="vj-partes">
+      <div className="vj-add-h">{rotulo}</div>
+      {lista.map((p, i) => (
+        <div className="vj-frow" key={i}>
+          <label className="vj-f">
+            <span>Nome</span>
+            <input
+              value={p.nome}
+              onChange={(e) => setLista(lista.map((x, j) => (j === i ? { ...x, nome: e.target.value } : x)))}
+            />
+          </label>
+          <label className="vj-f">
+            <span>CPF/CNPJ</span>
+            <input
+              value={p.doc}
+              inputMode="numeric"
+              onChange={(e) => setLista(lista.map((x, j) => (j === i ? { ...x, doc: e.target.value } : x)))}
+            />
+          </label>
+          {lista.length > 1 && (
+            <button
+              type="button"
+              className="vj-link vj-del-link"
+              onClick={() => setLista(lista.filter((_, j) => j !== i))}
+            >
+              remover
+            </button>
+          )}
+        </div>
+      ))}
+      <button type="button" className="vj-link" onClick={() => setLista([...lista, { nome: "", doc: "" }])}>
+        ＋ adicionar
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Confirmação da operação antes de gravar.
+ *
+ * A ficha da diligência quase sempre tem o vendedor e o imóvel, mas nem sempre
+ * o comprador — e sem ele a DIMOB e a discriminação ficam capengas. Em vez de
+ * recusar com "informe ao menos um comprador", mostramos o que veio e deixamos
+ * completar aqui mesmo.
+ */
+function ConfirmarOperacao({
+  sugestao,
+  onCriada,
+  onCancelar,
+}: {
+  sugestao: Sugestao;
+  onCriada: (op: Operacao) => void;
+  onCancelar: () => void;
+}) {
+  const [valor, setValor] = useState(
+    sugestao.operacao.valor_alienacao ? String(sugestao.operacao.valor_alienacao).replace(".", ",") : ""
+  );
+  const [endereco, setEndereco] = useState(sugestao.operacao.endereco_texto || "");
+  const [dataContrato, setDataContrato] = useState(hojeISO());
+  const [alienantes, setAlienantes] = useState<Parte[]>(
+    sugestao.operacao.alienantes.length ? sugestao.operacao.alienantes.map((p) => ({ ...p })) : [{ nome: "", doc: "" }]
+  );
+  const [adquirentes, setAdquirentes] = useState<Parte[]>(
+    sugestao.operacao.adquirentes.length ? sugestao.operacao.adquirentes.map((p) => ({ ...p })) : [{ nome: "", doc: "" }]
+  );
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+
+  const faltaComprador = !adquirentes.some((p) => p.nome.trim() && dig(p.doc));
+
+  async function salvar() {
+    setErro(null);
+    setSalvando(true);
+    try {
+      const r = await fetch("/api/adm/operacoes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          diligencia_id: sugestao.diligencia_id,
+          data_contrato: dataContrato,
+          valor_alienacao: paraNumero(valor),
+          imovel_logradouro: endereco,
+          imovel_cidade_ibge: "3550308",
+          imovel_uf: "SP",
+          alienantes: alienantes.filter((p) => p.nome.trim() && dig(p.doc)),
+          adquirentes: adquirentes.filter((p) => p.nome.trim() && dig(p.doc)),
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d?.operacao) setErro(d?.error || "Falha ao gravar a operação.");
+      else onCriada(d.operacao);
+    } catch {
+      setErro("Erro de rede.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  return (
+    <div className="vj-tomador">
+      <div className="vj-tomador-cab">
+        <span className="vj-tag">Operação da venda</span>
+        <button type="button" className="vj-link" onClick={onCancelar}>
+          cancelar
+        </button>
+      </div>
+
+      <div className="vj-frow">
+        <label className="vj-f">
+          <span>Valor da venda</span>
+          <input value={valor} onChange={(e) => setValor(e.target.value)} inputMode="decimal" placeholder="0,00" />
+        </label>
+        <label className="vj-f" style={{ maxWidth: 190 }}>
+          <span>Data do contrato</span>
+          <input type="date" value={dataContrato} onChange={(e) => setDataContrato(e.target.value)} />
+        </label>
+      </div>
+      <label className="vj-f">
+        <span>Endereço do imóvel</span>
+        <input value={endereco} onChange={(e) => setEndereco(e.target.value)} />
+      </label>
+
+      <LinhasParte lista={alienantes} setLista={setAlienantes} rotulo="Vendedores (alienantes)" />
+      <LinhasParte lista={adquirentes} setLista={setAdquirentes} rotulo="Compradores (adquirentes)" />
+
+      {faltaComprador && (
+        <div className="vj-aviso-in">
+          A ficha desta diligência não trouxe o comprador. Preencha nome e CPF/CNPJ: é ele que a
+          DIMOB declara e que a discriminação cita.
+        </div>
+      )}
+      {erro && <div className="vj-erro-in">{erro}</div>}
+
+      <button className="vj-btn vj-primary" onClick={salvar} disabled={salvando}>
+        {salvando ? "Gravando…" : "Salvar operação"}
+      </button>
+    </div>
+  );
+}
+
+function BuscaOperacao({
+  escolhida,
+  onEscolher,
+  onLimpar,
+}: {
+  escolhida: string | null;
+  onEscolher: (id: number, label: string) => void;
+  onLimpar: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const [itens, setItens] = useState<Operacao[]>([]);
+  const [buscando, setBuscando] = useState(false);
+
+  async function buscar() {
+    setBuscando(true);
+    try {
+      const r = await fetch(`/api/adm/operacoes?q=${encodeURIComponent(q)}`, { cache: "no-store" });
+      const d = await r.json().catch(() => ({}));
+      setItens(r.ok ? d.operacoes || [] : []);
+    } catch {
+      setItens([]);
+    } finally {
+      setBuscando(false);
+    }
+  }
+
+  if (escolhida) {
+    return (
+      <div className="vj-op-sel">
+        <span>
+          Operação: <b>{escolhida}</b>
+        </span>
+        <button type="button" className="vj-link" onClick={onLimpar}>
+          trocar
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="vj-f">
+      <span>Operação imobiliária (monta a discriminação)</span>
+      <div className="vj-frow">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              buscar();
+            }
+          }}
+          placeholder="buscar por rua ou bairro"
+        />
+        <button type="button" className="vj-btn vj-primary" onClick={buscar} disabled={buscando}>
+          {buscando ? "Buscando…" : "Buscar"}
+        </button>
+      </div>
+      {itens.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          className="vj-op-item"
+          onClick={() => onEscolher(o.id, resumoOperacao(o))}
+        >
+          {resumoOperacao(o)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function FormEmissao({
   origem,
   asaasPaymentId,
   disponivel,
-  operacoes,
   sugestao,
   onEmitiu,
   onNovaOperacao,
@@ -581,17 +795,19 @@ function FormEmissao({
   origem: "asaas" | "avulsa";
   asaasPaymentId?: string;
   disponivel: number | null;
-  operacoes: Operacao[];
   sugestao: Sugestao | null;
   onEmitiu: () => void;
   onNovaOperacao: (op: Operacao) => void;
 }) {
+  // A operação é a DESTA cobrança — não uma escolha entre todas as vendas já
+  // feitas. Listar tudo num combo vira uma lista impossível depois de algumas
+  // centenas de vendas, e ainda abre espaço para escolher a errada.
   const [operacaoId, setOperacaoId] = useState(
     sugestao?.operacao_id ? String(sugestao.operacao_id) : ""
   );
+  const [opLabel, setOpLabel] = useState<string | null>(sugestao?.operacao_label ?? null);
   const [discriminacao, setDiscriminacao] = useState("");
   const [codigo, setCodigo] = useState("06297");
-  // o tomador é o pagador da comissão, que a ficha do negócio já conhece
   const [tomadores, setTomadores] = useState<Tomador[]>([
     sugestao?.tomador
       ? {
@@ -604,80 +820,13 @@ function FormEmissao({
       : tomadorVazio(),
   ]);
   const [enviando, setEnviando] = useState(false);
-  const [criandoOp, setCriandoOp] = useState(false);
+  const [confirmandoOp, setConfirmandoOp] = useState(false);
   const [msgs, setMsgs] = useState<{ tipo: "ok" | "erro"; texto: string }[]>([]);
 
-  // Cria a operação com o que já está na diligência: endereço, preço e as duas
-  // pontas. O endereço vem como uma linha só; dá para ajustar depois na aba
-  // Operações se a nota exigir número e bairro separados.
-  async function criarOperacaoDaDiligencia() {
-    if (!sugestao) return;
-    setMsgs([]);
-    setCriandoOp(true);
-    try {
-      const r = await fetch("/api/adm/operacoes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          diligencia_id: sugestao.diligencia_id,
-          data_contrato: hojeISO(),
-          valor_alienacao: sugestao.operacao.valor_alienacao,
-          imovel_tipo_logradouro: "",
-          imovel_logradouro: sugestao.operacao.endereco_texto,
-          imovel_cidade_ibge: "3550308",
-          imovel_uf: "SP",
-          alienantes: sugestao.operacao.alienantes,
-          adquirentes: sugestao.operacao.adquirentes,
-        }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok || !d?.operacao) {
-        setMsgs([{ tipo: "erro", texto: d?.error || "Falha ao criar a operação." }]);
-      } else {
-        onNovaOperacao(d.operacao);
-        setOperacaoId(String(d.operacao.id));
-        setMsgs([
-          {
-            tipo: "ok",
-            texto: "Operação criada a partir da diligência. Confira o endereço na aba Operações.",
-          },
-        ]);
-      }
-    } catch {
-      setMsgs([{ tipo: "erro", texto: "Erro de rede ao criar a operação." }]);
-    } finally {
-      setCriandoOp(false);
-    }
-  }
-
-  const op = operacoes.find((o) => String(o.id) === operacaoId) || null;
-  // Quem pode receber a nota: as pessoas do negócio. Preferimos a ficha da
-  // diligência; se ela não veio, caímos nas partes da operação escolhida.
-  const candidatos =
-    sugestao?.candidatos?.length
-      ? sugestao.candidatos
-      : op
-        ? [
-            ...(op.adquirentes || []).map((p) => ({
-              nome: p.nome,
-              doc: p.doc,
-              lado: "comprador",
-              paga: false,
-            })),
-            ...(op.alienantes || []).map((p) => ({
-              nome: p.nome,
-              doc: p.doc,
-              lado: "vendedor",
-              paga: false,
-            })),
-          ]
-        : [];
-
-  const num = paraNumero;
-  const soma = tomadores.reduce((a, t) => a + num(t.valor), 0);
+  const candidatos = sugestao?.candidatos ?? [];
+  const soma = tomadores.reduce((a, t) => a + paraNumero(t.valor), 0);
   const sobra = disponivel == null ? null : Math.round((disponivel - soma) * 100) / 100;
 
-  // quando há um único tomador e um teto conhecido, o valor cheio é o palpite certo
   useEffect(() => {
     if (disponivel != null && tomadores.length === 1 && !tomadores[0].valor) {
       setTomadores((ts) => [{ ...ts[0], valor: String(disponivel).replace(".", ",") }]);
@@ -687,28 +836,24 @@ function FormEmissao({
 
   async function emitir() {
     setMsgs([]);
-    const validos = tomadores.filter((t) => t.nome.trim() && dig(t.doc) && num(t.valor) > 0);
+    const validos = tomadores.filter((t) => t.nome.trim() && dig(t.doc) && paraNumero(t.valor) > 0);
     if (!validos.length) {
       setMsgs([{ tipo: "erro", texto: "Preencha nome, documento e valor de ao menos um tomador." }]);
       return;
     }
     if (!operacaoId && !discriminacao.trim()) {
-      setMsgs([
-        { tipo: "erro", texto: "Escolha a operação imobiliária ou escreva a discriminação." },
-      ]);
+      setMsgs([{ tipo: "erro", texto: "Escolha a operação imobiliária ou escreva a discriminação." }]);
       return;
     }
     if (sobra != null && sobra < -0.01) {
-      setMsgs([
-        { tipo: "erro", texto: `A soma passa do disponível em ${brl(Math.abs(sobra))}.` },
-      ]);
+      setMsgs([{ tipo: "erro", texto: `A soma passa do disponível em ${brl(Math.abs(sobra))}.` }]);
       return;
     }
 
     setEnviando(true);
     const resultados: { tipo: "ok" | "erro"; texto: string }[] = [];
-    // uma nota por vez: o RPS é sequencial e o erro de uma não pode
-    // atropelar a próxima
+    // uma nota por vez: o RPS é sequencial e o erro de uma não pode atropelar
+    // a próxima
     for (const t of validos) {
       try {
         const r = await fetch("/api/adm/notas-comissao/emitir", {
@@ -720,7 +865,7 @@ function FormEmissao({
             operacao_id: operacaoId ? Number(operacaoId) : null,
             codigo_servico: codigo.trim() || undefined,
             discriminacao: discriminacao.trim() || undefined,
-            valor_servico: num(t.valor),
+            valor_servico: paraNumero(t.valor),
             tomador: {
               nome: t.nome.trim(),
               doc: dig(t.doc),
@@ -734,13 +879,10 @@ function FormEmissao({
         if (r.ok && d.ok) {
           resultados.push({
             tipo: "ok",
-            texto: `${t.nome}: NFS-e nº ${d.numeroNota} emitida (${brl(num(t.valor))}).`,
+            texto: `${t.nome}: NFS-e nº ${d.numeroNota} emitida (${brl(paraNumero(t.valor))}).`,
           });
         } else {
-          resultados.push({
-            tipo: "erro",
-            texto: `${t.nome}: ${d.erro || d.error || "falha na emissão"}`,
-          });
+          resultados.push({ tipo: "erro", texto: `${t.nome}: ${d.erro || d.error || "falha na emissão"}` });
         }
       } catch {
         resultados.push({ tipo: "erro", texto: `${t.nome}: erro de rede.` });
@@ -753,27 +895,53 @@ function FormEmissao({
 
   return (
     <div className="vj-form">
-      <label className="vj-f">
-        <span>Operação imobiliária (monta a discriminação)</span>
-        <select value={operacaoId} onChange={(e) => setOperacaoId(e.target.value)}>
-          <option value="">— sem operação (escrever a discriminação à mão) —</option>
-          {operacoes.map((o) => (
-            <option key={o.id} value={String(o.id)}>
-              {resumoOperacao(o)}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {!operacaoId && sugestao && sugestao.operacao.alienantes.length > 0 && (
-        <button
-          type="button"
-          className="vj-add-btn"
-          onClick={criarOperacaoDaDiligencia}
-          disabled={criandoOp}
-        >
-          {criandoOp ? "Criando…" : "＋ Criar a operação com os dados da diligência"}
-        </button>
+      {origem === "asaas" ? (
+        operacaoId ? (
+          <div className="vj-op-sel">
+            <span>
+              Operação: <b>{opLabel || `#${operacaoId}`}</b>
+            </span>
+            <button
+              type="button"
+              className="vj-link"
+              onClick={() => {
+                setOperacaoId("");
+                setOpLabel(null);
+              }}
+            >
+              usar outra
+            </button>
+          </div>
+        ) : sugestao ? (
+          confirmandoOp ? (
+            <ConfirmarOperacao
+              sugestao={sugestao}
+              onCancelar={() => setConfirmandoOp(false)}
+              onCriada={(op) => {
+                onNovaOperacao(op);
+                setOperacaoId(String(op.id));
+                setOpLabel(resumoOperacao(op));
+                setConfirmandoOp(false);
+              }}
+            />
+          ) : (
+            <button type="button" className="vj-add-btn" onClick={() => setConfirmandoOp(true)}>
+              ＋ Criar a operação com os dados da diligência
+            </button>
+          )
+        ) : null
+      ) : (
+        <BuscaOperacao
+          escolhida={opLabel}
+          onEscolher={(id, label) => {
+            setOperacaoId(String(id));
+            setOpLabel(label);
+          }}
+          onLimpar={() => {
+            setOperacaoId("");
+            setOpLabel(null);
+          }}
+        />
       )}
 
       {!operacaoId && (
@@ -809,13 +977,8 @@ function FormEmissao({
             const falta =
               disponivel == null
                 ? 0
-                : Math.round(
-                    (disponivel - ts.reduce((a, x) => a + paraNumero(x.valor), 0)) * 100
-                  ) / 100;
-            return [
-              ...ts,
-              { ...tomadorVazio(), valor: falta > 0 ? String(falta).replace(".", ",") : "" },
-            ];
+                : Math.round((disponivel - ts.reduce((a, x) => a + paraNumero(x.valor), 0)) * 100) / 100;
+            return [...ts, { ...tomadorVazio(), valor: falta > 0 ? String(falta).replace(".", ",") : "" }];
           })
         }
       >

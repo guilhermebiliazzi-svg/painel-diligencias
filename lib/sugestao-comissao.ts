@@ -29,6 +29,8 @@ export type Sugestao = {
   composicao: { credor: string; valor: number; destino: string }[];
   /** operação já cadastrada para esta diligência, se houver */
   operacao_id: number | null;
+  /** como ela se chama na tela, para não precisar listar todas */
+  operacao_label: string | null;
   /** todo mundo do negócio: a nota pode ir para qualquer um deles */
   candidatos: Candidato[];
 };
@@ -72,7 +74,7 @@ function emailDe(dc: Record<string, any>, base: "vendedores" | "compradores"): s
 
 export function montarSugestao(
   linha: { id: string; endereco?: string | null; preco?: unknown; dados_completos?: unknown },
-  operacaoId: number | null
+  operacao: { id: number; label: string } | null
 ): Sugestao {
   const dc = obj(linha.dados_completos);
   const negocio = obj(dc.negocio);
@@ -128,6 +130,7 @@ export function montarSugestao(
       valor: Number(s?.valor) || 0,
       destino: txt(s?.destino),
     })),
-    operacao_id: operacaoId,
+    operacao_id: operacao ? operacao.id : null,
+    operacao_label: operacao ? operacao.label : null,
   };
 }

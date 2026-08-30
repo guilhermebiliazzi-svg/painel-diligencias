@@ -84,15 +84,20 @@ export async function GET() {
             { headers: c.headers, cache: "no-store" }
           ),
           fetch(
-            `${c.url}/rest/v1/adm_operacoes_imobiliarias?diligencia_id=in.(${lista})&select=id,diligencia_id`,
+            `${c.url}/rest/v1/adm_operacoes_imobiliarias?diligencia_id=in.(${lista})` +
+              `&select=id,diligencia_id,imovel_logradouro,imovel_numero,imovel_bairro,valor_alienacao,data_contrato`,
             { headers: c.headers, cache: "no-store" }
           ),
         ]);
         if (!rDil.ok) throw new Error(`diligencias: ${await rDil.text()}`);
         const dils = (await rDil.json()) as any[];
         const ops = rOps.ok ? ((await rOps.json()) as any[]) : [];
-        const opPor: Record<string, number> = {};
-        for (const o of ops) opPor[String(o.diligencia_id)] = Number(o.id);
+        const opPor: Record<string, { id: number; label: string }> = {};
+        for (const o of ops) {
+          const onde = [o.imovel_logradouro, o.imovel_numero].filter(Boolean).join(", ");
+          const label = [onde, o.imovel_bairro].filter(Boolean).join(" — ");
+          opPor[String(o.diligencia_id)] = { id: Number(o.id), label: label || `Operação #${o.id}` };
+        }
         for (const d of dils) {
           sugestaoPor[String(d.id)] = montarSugestao(d, opPor[String(d.id)] ?? null);
         }
