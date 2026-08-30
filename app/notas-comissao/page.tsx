@@ -25,6 +25,22 @@ type Nota = {
   created_at: string;
 };
 
+type ParteSugerida = { nome: string; doc: string };
+
+type Sugestao = {
+  diligencia_id: string;
+  tomador: { nome: string; doc: string; email: string; lado: string } | null;
+  operacao: {
+    valor_alienacao: number | null;
+    endereco_texto: string;
+    alienantes: ParteSugerida[];
+    adquirentes: ParteSugerida[];
+  };
+  comissao_total: number | null;
+  composicao: { credor: string; valor: number; destino: string }[];
+  operacao_id: number | null;
+};
+
 type Cobranca = {
   asaas_payment_id: string;
   status: string;
@@ -33,6 +49,8 @@ type Cobranca = {
   valor_cobranca: number;
   valor_splits: number;
   valor_sugerido: number;
+  diligencia_id: string | null;
+  sugestao: Sugestao | null;
   nota: Nota | null;
 };
 
@@ -82,6 +100,15 @@ const fmtDoc = (v: any) => {
 
 const fmtData = (d: string | null) =>
   d ? String(d).slice(0, 10).split("-").reverse().join("/") : "—";
+
+const DESTINO_ROTULO: Record<string, string> = {
+  ville: "Ville (fica na cobrança)",
+  asaas: "split — subconta Asaas",
+  fora_direto: "recebe por fora",
+  fora_split_proprio: "recebe por fora",
+};
+
+const hojeISO = () => new Date().toISOString().slice(0, 10);
 
 const tomadorVazio = (): Tomador => ({
   nome: "",
@@ -200,6 +227,7 @@ export default function NotasComissaoPage() {
                 cobranca={cb}
                 operacoes={operacoes}
                 onEmitiu={carregar}
+                onNovaOperacao={(op) => setOperacoes((v) => [op, ...v])}
               />
             ))}
           </>
@@ -207,7 +235,11 @@ export default function NotasComissaoPage() {
 
         {!carregando && aba === "avulsa" && (
           <>
-            <CardAvulsa operacoes={operacoes} onEmitiu={carregar} />
+            <CardAvulsa
+              operacoes={operacoes}
+              onEmitiu={carregar}
+              onNovaOperacao={(op) => setOperacoes((v) => [op, ...v])}
+            />
             {avulsas.length > 0 && (
               <section className="vj-card">
                 <h2 className="vj-h2">Avulsas já emitidas</h2>
@@ -391,12 +423,15 @@ function CardCobranca({
   cobranca,
   operacoes,
   onEmitiu,
+  onNovaOperacao,
 }: {
   cobranca: Cobranca;
   operacoes: Operacao[];
   onEmitiu: () => void;
+  onNovaOperacao: (op: Operacao) => void;
 }) {
   const [aberto, setAberto] = useState(false);
+  const comp = cobranca.sugestao?.composicao || [];
   return (
     <section className="vj-card">
       <div className="vj-boleto-cab">
@@ -420,6 +455,28 @@ function CardCobranca({
         </div>
       </div>
 
+      {comp.length > 0 && (
+        <details className="vj-comp">
+          <summary>De onde sai a parte da Ville</summary>
+          <table>
+            <tbody>
+              {comp.map((c, i) => (
+                <tr key={i} className={c.destino === "ville" ? "ville" : ""}>
+                  <td>{c.credor || "—"}</td>
+                  <td>{DESTINO_ROTULO[c.destino] || c.destino || "—"}</td>
+                  <td className="num">{brl(c.valor)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="vj-comp-nota">
+            A Ville nunca entra no split do Asaas: ela recebe o que sobra da cobrança.
+            Quem está marcado &quot;recebe por fora&quot; não entra nesta cobrança nem
+            nesta nota.
+          </p>
+        </details>
+      )}
+
       {cobranca.nota && <LinhaNota nota={cobranca.nota} />}
 
       {aberto && (
@@ -428,7 +485,9 @@ function CardCobranca({
           asaasPaymentId={cobranca.asaas_payment_id}
           disponivel={cobranca.valor_sugerido}
           operacoes={operacoes}
+          sugestao={cobranca.sugestao}
           onEmitiu={onEmitiu}
+          onNovaOperacao={onNovaOperacao}
         />
       )}
     </section>
@@ -439,7 +498,15 @@ function CardCobranca({
 /* nota avulsa                                                          */
 /* ------------------------------------------------------------------ */
 
-function CardAvulsa({ operacoes, onEmitiu }: { operacoes: Operacao[]; onEmitiu: () => void }) {
+function CardAvulsa({
+  operacoes,
+  onEmitiu,
+  onNovaOperacao,
+}: {
+  operacoes: Operacao[];
+  onEmitiu: () => void;
+  onNovaOperacao: (op: Operacao) => void;
+}) {
   return (
     <section className="vj-card">
       <h2 className="vj-h2">Nova nota avulsa</h2>
@@ -447,7 +514,14 @@ function CardAvulsa({ operacoes, onEmitiu }: { operacoes: Operacao[]; onEmitiu: 
         Para recebimentos que não passaram por cobrança do Asaas. Sem teto de valor — a
         conferência é sua.
       </p>
-      <FormEmissao origem="avulsa" disponivel={null} operacoes={operacoes} onEmitiu={onEmitiu} />
+      <FormEmissao
+        origem="avulsa"
+        disponivel={null}
+        operacoes={operacoes}
+        sugestao={null}
+        onEmitiu={onEmitiu}
+        onNovaOperacao={onNovaOperacao}
+      />
     </section>
   );
 }
@@ -461,20 +535,81 @@ function FormEmissao({
   asaasPaymentId,
   disponivel,
   operacoes,
+  sugestao,
   onEmitiu,
+  onNovaOperacao,
 }: {
   origem: "asaas" | "avulsa";
   asaasPaymentId?: string;
   disponivel: number | null;
   operacoes: Operacao[];
+  sugestao: Sugestao | null;
   onEmitiu: () => void;
+  onNovaOperacao: (op: Operacao) => void;
 }) {
-  const [operacaoId, setOperacaoId] = useState("");
+  const [operacaoId, setOperacaoId] = useState(
+    sugestao?.operacao_id ? String(sugestao.operacao_id) : ""
+  );
   const [discriminacao, setDiscriminacao] = useState("");
   const [codigo, setCodigo] = useState("06297");
-  const [tomadores, setTomadores] = useState<Tomador[]>([tomadorVazio()]);
+  // o tomador é o pagador da comissão, que a ficha do negócio já conhece
+  const [tomadores, setTomadores] = useState<Tomador[]>([
+    sugestao?.tomador
+      ? {
+          ...tomadorVazio(),
+          nome: sugestao.tomador.nome,
+          doc: sugestao.tomador.doc,
+          email: sugestao.tomador.email || "",
+          lado: sugestao.tomador.lado || "",
+        }
+      : tomadorVazio(),
+  ]);
   const [enviando, setEnviando] = useState(false);
+  const [criandoOp, setCriandoOp] = useState(false);
   const [msgs, setMsgs] = useState<{ tipo: "ok" | "erro"; texto: string }[]>([]);
+
+  // Cria a operação com o que já está na diligência: endereço, preço e as duas
+  // pontas. O endereço vem como uma linha só; dá para ajustar depois na aba
+  // Operações se a nota exigir número e bairro separados.
+  async function criarOperacaoDaDiligencia() {
+    if (!sugestao) return;
+    setMsgs([]);
+    setCriandoOp(true);
+    try {
+      const r = await fetch("/api/adm/operacoes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          diligencia_id: sugestao.diligencia_id,
+          data_contrato: hojeISO(),
+          valor_alienacao: sugestao.operacao.valor_alienacao,
+          imovel_tipo_logradouro: "",
+          imovel_logradouro: sugestao.operacao.endereco_texto,
+          imovel_cidade_ibge: "3550308",
+          imovel_uf: "SP",
+          alienantes: sugestao.operacao.alienantes,
+          adquirentes: sugestao.operacao.adquirentes,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d?.operacao) {
+        setMsgs([{ tipo: "erro", texto: d?.error || "Falha ao criar a operação." }]);
+      } else {
+        onNovaOperacao(d.operacao);
+        setOperacaoId(String(d.operacao.id));
+        setMsgs([
+          {
+            tipo: "ok",
+            texto: "Operação criada a partir da diligência. Confira o endereço na aba Operações.",
+          },
+        ]);
+      }
+    } catch {
+      setMsgs([{ tipo: "erro", texto: "Erro de rede ao criar a operação." }]);
+    } finally {
+      setCriandoOp(false);
+    }
+  }
 
   const op = operacoes.find((o) => String(o.id) === operacaoId) || null;
   const partes = op
@@ -575,6 +710,17 @@ function FormEmissao({
           ))}
         </select>
       </label>
+
+      {!operacaoId && sugestao && sugestao.operacao.alienantes.length > 0 && (
+        <button
+          type="button"
+          className="vj-add-btn"
+          onClick={criarOperacaoDaDiligencia}
+          disabled={criandoOp}
+        >
+          {criandoOp ? "Criando…" : "＋ Criar a operação com os dados da diligência"}
+        </button>
+      )}
 
       {!operacaoId && (
         <label className="vj-f">
@@ -906,5 +1052,12 @@ const CSS = `
 .vj-nota{display:flex;justify-content:space-between;align-items:center;gap:12px;border:1px solid var(--linha);border-radius:11px;padding:12px 14px;margin-top:10px;background:#F8FAFD}
 .vj-nota.ok{border-color:#BCE3D0;background:#F3FAF6}
 .vj-nota-link{color:var(--azul);font-weight:600;font-size:13px;text-decoration:none;white-space:nowrap}
+.vj-comp{border:1px solid var(--linha);border-radius:11px;padding:10px 14px;background:#F8FAFD;margin-top:6px}
+.vj-comp summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--azul)}
+.vj-comp table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+.vj-comp td{padding:5px 6px;border-top:1px solid var(--linha)}
+.vj-comp td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.vj-comp tr.ville td{font-weight:700;color:var(--azul)}
+.vj-comp-nota{font-size:12px;color:var(--mut);margin:8px 0 0;line-height:1.5}
 @media (max-width:640px){.vj-frow{flex-direction:column;align-items:stretch}}
 `;

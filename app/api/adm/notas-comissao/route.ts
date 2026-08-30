@@ -4,6 +4,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { somaSplits } from "@/lib/asaas-split";
+import { pool } from "@/lib/db";
+import { montarSugestao, type Sugestao } from "@/lib/sugestao-comissao";
 
 /**
  * Notas fiscais de comissão.
@@ -34,7 +36,7 @@ export async function GET() {
   try {
     const [rCob, rNotas] = await Promise.all([
       fetch(
-        `${c.url}/rest/v1/asaas_cobrancas?select=id,asaas_payment_id,status,valor,vencimento,link,split,criado_em` +
+        `${c.url}/rest/v1/asaas_cobrancas?select=id,asaas_payment_id,status,valor,vencimento,link,split,criado_em,diligencia_id` +
           `&status=in.(${RECEBIDO.join(",")})&order=criado_em.desc&limit=200`,
         { headers: c.headers, cache: "no-store" }
       ),
@@ -63,7 +65,40 @@ export async function GET() {
       if (nt.asaas_payment_id && nt.status !== "cancelada") notaPor[nt.asaas_payment_id] = nt;
     }
 
-    const cobrancas = ((await rCob.json()) as any[]).map((cb) => {
+    const brutas = (await rCob.json()) as any[];
+
+    // A ficha do negócio já tem pagador, partes e preço. Buscamos uma vez só,
+    // para todas as diligências da lista, e devolvemos junto de cada cobrança:
+    // digitar de novo o que o sistema já sabe é como o erro entra.
+    const dilIds = Array.from(
+      new Set(brutas.map((cb) => cb.diligencia_id).filter(Boolean))
+    ) as string[];
+    const sugestaoPor: Record<string, Sugestao> = {};
+    if (dilIds.length) {
+      try {
+        const [rDil, rOps] = await Promise.all([
+          pool.query(
+            `SELECT id::text AS id, endereco, preco, dados_completos
+               FROM diligencias WHERE id = ANY($1::uuid[])`,
+            [dilIds]
+          ),
+          pool.query(
+            `SELECT id, diligencia_id::text AS diligencia_id
+               FROM adm_operacoes_imobiliarias WHERE diligencia_id = ANY($1::uuid[])`,
+            [dilIds]
+          ),
+        ]);
+        const opPor: Record<string, number> = {};
+        for (const o of rOps.rows) opPor[o.diligencia_id] = Number(o.id);
+        for (const d of rDil.rows) {
+          sugestaoPor[d.id] = montarSugestao(d, opPor[d.id] ?? null);
+        }
+      } catch {
+        // sem sugestão a tela ainda funciona no braço; não derrubar a listagem
+      }
+    }
+
+    const cobrancas = brutas.map((cb) => {
       const total = n(cb.valor);
       const splits = somaSplits(cb.split);
       return {
@@ -74,7 +109,9 @@ export async function GET() {
         valor_cobranca: total,
         valor_splits: splits,
         // a parte da Ville; nunca negativa, mesmo com dado inconsistente
-        valor_sugerido: Math.max(0, Math.round((total - splits) * 100) / 100,),
+        valor_sugerido: Math.max(0, Math.round((total - splits) * 100) / 100),
+        diligencia_id: cb.diligencia_id ?? null,
+        sugestao: cb.diligencia_id ? sugestaoPor[cb.diligencia_id] ?? null : null,
         nota: notaPor[cb.asaas_payment_id] ?? null,
       };
     });
