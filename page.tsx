@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { extrairDaDiscriminacao } from "@/lib/discriminacao-parse";
 
 // Notas fiscais de comissão (corretagem, código 06297).
 //
@@ -15,6 +16,8 @@ import { useEffect, useState } from "react";
 type Nota = {
   id: number;
   operacao_id?: number | null;
+  discriminacao?: string | null;
+  data_emissao?: string | null;
   status: string;
   tomador_nome: string;
   tomador_doc: string;
@@ -117,7 +120,7 @@ const paraNumero = (v: string) =>
 
 // Marcador de versão: com upload manual pelo GitHub é fácil olhar para uma
 // tela antiga e achar que a correção não funcionou. Fica visível no cabeçalho.
-const VERSAO = "v10";
+const VERSAO = "v14";
 
 const hojeISO = () => new Date().toISOString().slice(0, 10);
 
@@ -330,6 +333,10 @@ export default function NotasComissaoPage() {
               })()}
             </div>
 
+            <ImportarCsv onPronto={() => carregar()} />
+            <VincularLote notas={emitidas} onPronto={() => carregar()} />
+            <RegistrarEmitida onPronto={() => carregar()} />
+
             <a
               className="vj-btn vj-primary vj-export"
               href={`/api/adm/dimob?ano=${periodo === "ano" ? ano : mes.slice(0, 4)}`}
@@ -372,6 +379,7 @@ export default function NotasComissaoPage() {
 function LinhaNota({ nota, onMudou }: { nota: Nota; onMudou?: () => void }) {
   const emitida = nota.status === "emitida";
   const [vinculando, setVinculando] = useState(false);
+  const [criandoDaDiscri, setCriandoDaDiscri] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   async function vincular(operacaoId: number) {
@@ -421,11 +429,41 @@ function LinhaNota({ nota, onMudou }: { nota: Nota; onMudou?: () => void }) {
       {vinculando && (
         <div className="vj-form">
           {msg && <div className="vj-erro-in">{msg}</div>}
-          <BuscaOperacao
-            escolhida={null}
-            onLimpar={() => setVinculando(false)}
-            onEscolher={(id) => vincular(id)}
-          />
+
+          {nota.discriminacao && !criandoDaDiscri && (
+            <button type="button" className="vj-add-btn" onClick={() => setCriandoDaDiscri(true)}>
+              ＋ Criar a operação a partir do texto da nota
+            </button>
+          )}
+
+          {criandoDaDiscri && nota.discriminacao ? (
+            <ConfirmarOperacao
+              sugestao={null}
+              textoOriginal={nota.discriminacao}
+              inicial={(() => {
+                const e = extrairDaDiscriminacao(nota.discriminacao || "");
+                return {
+                  endereco_texto: e.endereco,
+                  valor_alienacao: e.valor_alienacao,
+                  // o tomador da nota é quem pagou a comissão: quase sempre o
+                  // vendedor. Confira — em algumas vendas quem paga é o comprador.
+                  alienantes: [{ nome: nota.tomador_nome, doc: nota.tomador_doc }],
+                  adquirentes: e.compradores,
+                };
+              })()}
+              onCancelar={() => setCriandoDaDiscri(false)}
+              onCriada={(op) => {
+                setCriandoDaDiscri(false);
+                vincular(op.id);
+              }}
+            />
+          ) : (
+            <BuscaOperacao
+              escolhida={null}
+              onLimpar={() => setVinculando(false)}
+              onEscolher={(id) => vincular(id)}
+            />
+          )}
         </div>
       )}
     </>
@@ -757,15 +795,26 @@ function LinhasParte({
  */
 function ConfirmarOperacao({
   sugestao,
+  inicial,
+  textoOriginal,
   onCriada,
   onCancelar,
 }: {
   /** null na nota avulsa: não há diligência, cadastra-se do zero */
   sugestao: Sugestao | null;
+  /** prefill vindo de outra fonte, como o texto da discriminação */
+  inicial?: {
+    endereco_texto: string;
+    valor_alienacao: number | null;
+    alienantes: Parte[];
+    adquirentes: Parte[];
+  };
+  /** mostrado ao lado dos campos, para conferir o que foi deduzido */
+  textoOriginal?: string;
   onCriada: (op: Operacao) => void;
   onCancelar: () => void;
 }) {
-  const base = sugestao?.operacao;
+  const base = inicial ?? sugestao?.operacao;
   const [valor, setValor] = useState(
     base?.valor_alienacao ? String(base.valor_alienacao).replace(".", ",") : ""
   );
@@ -819,6 +868,13 @@ function ConfirmarOperacao({
         </button>
       </div>
 
+      {textoOriginal && (
+        <details className="vj-comp">
+          <summary>Texto da nota (confira o que foi deduzido)</summary>
+          <pre className="vj-discri">{textoOriginal}</pre>
+        </details>
+      )}
+
       <div className="vj-frow">
         <label className="vj-f">
           <span>Valor da venda</span>
@@ -847,6 +903,488 @@ function ConfirmarOperacao({
 
       <button className="vj-btn vj-primary" onClick={salvar} disabled={salvando}>
         {salvando ? "Gravando…" : "Salvar operação"}
+      </button>
+    </div>
+  );
+}
+
+type ItemLote = {
+  nota_id: number;
+  numero_nota: string;
+  tomador_nome: string;
+  tomador_doc: string;
+  data_emissao: string;
+  discriminacao: string;
+  incluir: boolean;
+  endereco: string;
+  valor: string;
+  dataContrato: string;
+  compNome: string;
+  compDoc: string;
+  /** de que lado está o tomador da nota; o outro lado é o extraído */
+  tomadorLado: "vendedor" | "comprador";
+};
+
+/**
+ * Vinculação em lote das notas importadas.
+ *
+ * Cada nota importada precisa de uma operação para entrar na DIMOB, e os dados
+ * dela estão no texto livre da discriminação. Um formulário por nota seriam
+ * dezenas de telas iguais: aqui tudo vira uma grade revisável, com o texto
+ * original ao lado de cada linha e um botão só no fim.
+ */
+function VincularLote({ notas, onPronto }: { notas: Nota[]; onPronto: () => void }) {
+  const [aberto, setAberto] = useState(false);
+  const [itens, setItens] = useState<ItemLote[]>([]);
+  const [enviando, setEnviando] = useState(false);
+  const [resultado, setResultado] = useState<any>(null);
+
+  function preparar() {
+    const pendentes = notas.filter((n) => n.status === "emitida" && !n.operacao_id);
+    setItens(
+      pendentes.map((n) => {
+        const e = extrairDaDiscriminacao(n.discriminacao || "");
+        const c = e.compradores[0];
+        return {
+          nota_id: n.id,
+          numero_nota: n.numero_nota || "",
+          tomador_nome: n.tomador_nome,
+          tomador_doc: n.tomador_doc,
+          data_emissao: n.data_emissao || "",
+          discriminacao: n.discriminacao || "",
+          incluir: true,
+          endereco: e.endereco,
+          valor: e.valor_alienacao ? String(e.valor_alienacao).replace(".", ",") : "",
+          // sem data de contrato no texto, a emissão da nota é a melhor
+          // aproximação; dá para corrigir linha a linha
+          dataContrato: (n.data_emissao || "").slice(0, 10),
+          compNome: c?.nome || "",
+          compDoc: c?.doc || "",
+          tomadorLado: "vendedor",
+        };
+      })
+    );
+    setResultado(null);
+    setAberto(true);
+  }
+
+  const set = (i: number, campo: keyof ItemLote, v: any) =>
+    setItens((xs) => xs.map((x, j) => (j === i ? { ...x, [campo]: v } : x)));
+
+  const completo = (x: ItemLote) =>
+    !!x.endereco.trim() && paraNumero(x.valor) > 0 && !!x.compNome.trim() && dig(x.compDoc).length >= 11;
+
+  const selecionados = itens.filter((x) => x.incluir && completo(x));
+
+  async function enviar() {
+    setEnviando(true);
+    setResultado(null);
+    try {
+      const r = await fetch("/api/adm/notas-comissao/vincular-lote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itens: selecionados.map((x) => {
+            const tomador = { nome: x.tomador_nome, doc: x.tomador_doc };
+            const outro = { nome: x.compNome, doc: x.compDoc };
+            return {
+              nota_id: x.nota_id,
+              operacao: {
+                imovel_logradouro: x.endereco,
+                valor_alienacao: paraNumero(x.valor),
+                data_contrato: x.dataContrato,
+              },
+              alienantes: x.tomadorLado === "vendedor" ? [tomador] : [outro],
+              adquirentes: x.tomadorLado === "vendedor" ? [outro] : [tomador],
+            };
+          }),
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      setResultado(r.ok ? d : { erro: d?.error || "Falha no envio." });
+      if (r.ok && d.vinculadas) onPronto();
+    } catch {
+      setResultado({ erro: "Erro de rede." });
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  const pendentes = notas.filter((n) => n.status === "emitida" && !n.operacao_id).length;
+  if (!pendentes) return null;
+
+  if (!aberto) {
+    return (
+      <button type="button" className="vj-add-btn" onClick={preparar}>
+        ＋ Vincular as {pendentes} notas sem operação, em lote
+      </button>
+    );
+  }
+
+  return (
+    <div className="vj-lote">
+      <div className="vj-tomador-cab">
+        <span className="vj-tag">Vincular em lote</span>
+        <button type="button" className="vj-link" onClick={() => setAberto(false)}>
+          fechar
+        </button>
+      </div>
+
+      <p className="vj-comp-nota" style={{ margin: "0 0 10px" }}>
+        Os campos vieram do texto de cada nota e podem estar errados — confira antes de gravar.
+        As linhas incompletas ficam desmarcadas: complete ou deixe para depois. A data do contrato
+        veio da emissão da nota, que raramente é a data real da venda.
+      </p>
+
+      {itens.map((x, i) => {
+        const ok = completo(x);
+        return (
+          <div key={x.nota_id} className={`vj-lote-item ${ok ? "" : "incompleto"}`}>
+            <div className="vj-lote-cab">
+              <label className="vj-chk">
+                <input
+                  type="checkbox"
+                  checked={x.incluir && ok}
+                  disabled={!ok}
+                  onChange={(e) => set(i, "incluir", e.target.checked)}
+                />
+                <b>NFS-e {x.numero_nota}</b> · {x.tomador_nome}
+              </label>
+              <select
+                value={x.tomadorLado}
+                onChange={(e) => set(i, "tomadorLado", e.target.value)}
+              >
+                <option value="vendedor">tomador é o vendedor</option>
+                <option value="comprador">tomador é o comprador</option>
+              </select>
+            </div>
+
+            <div className="vj-frow">
+              <label className="vj-f">
+                <span>Endereço do imóvel</span>
+                <input value={x.endereco} onChange={(e) => set(i, "endereco", e.target.value)} />
+              </label>
+              <label className="vj-f" style={{ maxWidth: 150 }}>
+                <span>Valor da venda</span>
+                <input value={x.valor} onChange={(e) => set(i, "valor", e.target.value)} inputMode="decimal" />
+              </label>
+              <label className="vj-f" style={{ maxWidth: 170 }}>
+                <span>Data do contrato</span>
+                <input type="date" value={x.dataContrato} onChange={(e) => set(i, "dataContrato", e.target.value)} />
+              </label>
+            </div>
+
+            <div className="vj-frow">
+              <label className="vj-f">
+                <span>{x.tomadorLado === "vendedor" ? "Comprador" : "Vendedor"}</span>
+                <input value={x.compNome} onChange={(e) => set(i, "compNome", e.target.value)} />
+              </label>
+              <label className="vj-f" style={{ maxWidth: 200 }}>
+                <span>CPF/CNPJ</span>
+                <input value={x.compDoc} onChange={(e) => set(i, "compDoc", e.target.value)} inputMode="numeric" />
+              </label>
+            </div>
+
+            <details className="vj-comp">
+              <summary>Texto da nota</summary>
+              <pre className="vj-discri">{x.discriminacao || "(sem discriminação)"}</pre>
+            </details>
+          </div>
+        );
+      })}
+
+      {resultado?.erro && <div className="vj-erro-in">{resultado.erro}</div>}
+      {resultado?.ok && (
+        <div className={resultado.falhas?.length ? "vj-aviso-in" : "vj-ok-in"}>
+          {resultado.vinculadas} vinculada(s).
+          {resultado.falhas?.length
+            ? ` ${resultado.falhas.length} falhou/falharam: ` +
+              resultado.falhas.map((f: any) => `#${f.nota_id} (${f.erro})`).join("; ")
+            : ""}
+        </div>
+      )}
+
+      <button className="vj-btn vj-gerar" onClick={enviar} disabled={enviando || !selecionados.length}>
+        {enviando
+          ? "Vinculando…"
+          : `Criar e vincular ${selecionados.length} operação(ões)`}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Importação do CSV de NFS-e emitidas da Prefeitura.
+ *
+ * O arquivo vem em Latin-1: lido como UTF-8, todo acento vira lixo e os nomes
+ * dos tomadores entram errados no banco. Por isso decodificamos explicitamente
+ * aqui, antes de mandar para o servidor.
+ */
+function ImportarCsv({ onPronto }: { onPronto: () => void }) {
+  const [aberto, setAberto] = useState(false);
+  const [csv, setCsv] = useState("");
+  const [nomes, setNomes] = useState<string[]>([]);
+  const [previa, setPrevia] = useState<any>(null);
+  const [ocupado, setOcupado] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [feito, setFeito] = useState<string | null>(null);
+
+  async function lerArquivos(files: FileList | null) {
+    setErro(null);
+    setPrevia(null);
+    setFeito(null);
+    if (!files || !files.length) return;
+    const partes: string[] = [];
+    const ns: string[] = [];
+    for (const f of Array.from(files)) {
+      const buf = await f.arrayBuffer();
+      partes.push(new TextDecoder("iso-8859-1").decode(buf));
+      ns.push(f.name);
+    }
+    setCsv(partes.join("\n"));
+    setNomes(ns);
+  }
+
+  async function chamar(confirmar: boolean) {
+    setErro(null);
+    setOcupado(true);
+    try {
+      const r = await fetch("/api/adm/notas-comissao/importar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csv, confirmar }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) setErro(d?.error || "Falha na importação.");
+      else if (confirmar) {
+        setFeito(`${d.gravadas} nota(s) importada(s).`);
+        setPrevia(null);
+        setCsv("");
+        setNomes([]);
+        onPronto();
+      } else setPrevia(d);
+    } catch {
+      setErro("Erro de rede.");
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  if (!aberto) {
+    return (
+      <button type="button" className="vj-add-btn" onClick={() => setAberto(true)}>
+        ＋ Importar CSV de NFS-e da Prefeitura
+      </button>
+    );
+  }
+
+  const r = previa?.resumo;
+
+  return (
+    <div className="vj-tomador">
+      <div className="vj-tomador-cab">
+        <span className="vj-tag">Importar do portal da Prefeitura</span>
+        <button type="button" className="vj-link" onClick={() => setAberto(false)}>
+          fechar
+        </button>
+      </div>
+
+      <p className="vj-comp-nota" style={{ margin: 0 }}>
+        No portal da NFS-e: Exportação de NFS-e → notas emitidas → um arquivo por mês. Pode
+        selecionar vários de uma vez. Entram apenas as do código 6297 (corretagem) que não
+        estejam canceladas; a taxa de administração fica de fora.
+      </p>
+
+      <input type="file" accept=".csv,text/csv" multiple onChange={(e) => lerArquivos(e.target.files)} />
+      {nomes.length > 0 && <div className="vj-sub-id">{nomes.join(" · ")}</div>}
+
+      {erro && <div className="vj-erro-in">{erro}</div>}
+      {feito && <div className="vj-ok-in">{feito}</div>}
+
+      {csv && !previa && (
+        <button className="vj-btn vj-primary" onClick={() => chamar(false)} disabled={ocupado}>
+          {ocupado ? "Lendo…" : "Conferir o que será importado"}
+        </button>
+      )}
+
+      {r && (
+        <>
+          <table className="vj-previa">
+            <tbody>
+              <tr><td>Notas lidas</td><td className="num">{r.lidas}</td></tr>
+              <tr><td>De corretagem (6297)</td><td className="num">{r.corretagem}</td></tr>
+              <tr><td>Canceladas, ignoradas</td><td className="num">{r.canceladas}</td></tr>
+              <tr><td>De outro serviço, ignoradas</td><td className="num">{r.outro_servico}</td></tr>
+              <tr><td>Já cadastradas aqui</td><td className="num">{r.ja_cadastradas}</td></tr>
+              <tr className="destaque"><td>A importar</td><td className="num">{r.novas} · {brl(r.soma)}</td></tr>
+            </tbody>
+          </table>
+
+          {r.invalidas?.length > 0 && (
+            <div className="vj-aviso-in">
+              {r.invalidas.length} nota(s) sem dado essencial (valor, data ou CPF/CNPJ do tomador)
+              não entram: {r.invalidas.map((x: any) => x.numero).join(", ")}
+            </div>
+          )}
+
+          <div className="vj-aviso-in">
+            As notas importadas entram sem operação vinculada — aparecem marcadas em vermelho e
+            só passam a contar na planilha da DIMOB depois de você vinculá-las.
+          </div>
+
+          {r.novas > 0 && (
+            <button className="vj-btn vj-gerar" onClick={() => chamar(true)} disabled={ocupado}>
+              {ocupado ? "Importando…" : `Importar ${r.novas} nota(s)`}
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Registro de uma NFS-e emitida fora do painel.
+ *
+ * Nota feita à mão no site da Prefeitura existe no fisco e não existe aqui —
+ * some da aba Emitidas e, o que importa mais, não entra na planilha da DIMOB.
+ * Aqui ela é apenas registrada: nada é emitido, nenhum RPS é consumido.
+ */
+function RegistrarEmitida({ onPronto }: { onPronto: () => void }) {
+  const [aberto, setAberto] = useState(false);
+  const [numero, setNumero] = useState("");
+  const [verificacao, setVerificacao] = useState("");
+  const [dataEmissao, setDataEmissao] = useState("");
+  const [nome, setNome] = useState("");
+  const [doc, setDoc] = useState("");
+  const [lado, setLado] = useState("");
+  const [valor, setValor] = useState("");
+  const [operacaoId, setOperacaoId] = useState("");
+  const [opLabel, setOpLabel] = useState<string | null>(null);
+  const [salvando, setSalvando] = useState(false);
+  const [msg, setMsg] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
+
+  function limpar() {
+    setNumero("");
+    setVerificacao("");
+    setNome("");
+    setDoc("");
+    setValor("");
+    setLado("");
+    setOperacaoId("");
+    setOpLabel(null);
+  }
+
+  async function salvar() {
+    setMsg(null);
+    setSalvando(true);
+    try {
+      const r = await fetch("/api/adm/notas-comissao/registrar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          numero_nota: numero,
+          codigo_verificacao: verificacao,
+          data_emissao: dataEmissao,
+          valor_servico: paraNumero(valor),
+          operacao_id: operacaoId ? Number(operacaoId) : null,
+          tomador: { nome, doc, lado },
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) setMsg({ tipo: "erro", texto: d?.error || "Falha ao registrar." });
+      else {
+        setMsg({ tipo: "ok", texto: `NFS-e nº ${numero} registrada.` });
+        limpar();
+        onPronto();
+      }
+    } catch {
+      setMsg({ tipo: "erro", texto: "Erro de rede." });
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  if (!aberto) {
+    return (
+      <button type="button" className="vj-add-btn" onClick={() => setAberto(true)}>
+        ＋ Registrar nota já emitida fora do painel
+      </button>
+    );
+  }
+
+  return (
+    <div className="vj-tomador">
+      <div className="vj-tomador-cab">
+        <span className="vj-tag">Nota emitida fora do painel</span>
+        <button type="button" className="vj-link" onClick={() => setAberto(false)}>
+          fechar
+        </button>
+      </div>
+
+      <div className="vj-frow">
+        <label className="vj-f" style={{ maxWidth: 160 }}>
+          <span>Nº da NFS-e</span>
+          <input value={numero} onChange={(e) => setNumero(e.target.value)} inputMode="numeric" />
+        </label>
+        <label className="vj-f" style={{ maxWidth: 200 }}>
+          <span>Código de verificação</span>
+          <input value={verificacao} onChange={(e) => setVerificacao(e.target.value)} />
+        </label>
+        <label className="vj-f" style={{ maxWidth: 190 }}>
+          <span>Data de emissão</span>
+          <input type="date" value={dataEmissao} onChange={(e) => setDataEmissao(e.target.value)} />
+        </label>
+      </div>
+
+      <div className="vj-frow">
+        <label className="vj-f">
+          <span>Tomador</span>
+          <input value={nome} onChange={(e) => setNome(e.target.value)} />
+        </label>
+        <label className="vj-f" style={{ maxWidth: 200 }}>
+          <span>CPF/CNPJ</span>
+          <input value={doc} onChange={(e) => setDoc(e.target.value)} inputMode="numeric" />
+        </label>
+        <label className="vj-f" style={{ maxWidth: 170 }}>
+          <span>Valor da nota</span>
+          <input value={valor} onChange={(e) => setValor(e.target.value)} inputMode="decimal" />
+        </label>
+      </div>
+
+      <label className="vj-f" style={{ maxWidth: 220 }}>
+        <span>Lado do tomador</span>
+        <select value={lado} onChange={(e) => setLado(e.target.value)}>
+          <option value="">— não informar —</option>
+          <option value="comprador">comprador</option>
+          <option value="vendedor">vendedor</option>
+          <option value="outro">outro</option>
+        </select>
+      </label>
+
+      <BuscaOperacao
+        escolhida={opLabel}
+        onEscolher={(id, label) => {
+          setOperacaoId(String(id));
+          setOpLabel(label);
+        }}
+        onLimpar={() => {
+          setOperacaoId("");
+          setOpLabel(null);
+        }}
+      />
+
+      {!operacaoId && (
+        <div className="vj-aviso-in">
+          Sem operação vinculada esta nota não entra na planilha da DIMOB. Dá para vincular
+          depois, pelo &quot;vincular agora&quot; na lista.
+        </div>
+      )}
+
+      {msg && <div className={msg.tipo === "ok" ? "vj-ok-in" : "vj-erro-in"}>{msg.texto}</div>}
+
+      <button className="vj-btn vj-primary" onClick={salvar} disabled={salvando}>
+        {salvando ? "Registrando…" : "Registrar nota"}
       </button>
     </div>
   );
@@ -1455,6 +1993,17 @@ const CSS = `
 .vj-comp tr.ville td{font-weight:700;color:var(--azul)}
 .vj-resumo-emitidas{font-size:13px;color:var(--mut);font-weight:600;margin-bottom:10px}
 .vj-resumo-emitidas em{font-style:normal;color:#8B1A24}
+.vj-lote{border:1px solid var(--linha);border-radius:12px;padding:14px;background:#F8FAFD;display:flex;flex-direction:column;gap:12px;margin-bottom:12px}
+.vj-lote-item{background:#fff;border:1px solid var(--linha);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.vj-lote-item.incompleto{border-color:#FADFA0;background:#FFFDF7}
+.vj-lote-cab{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px}
+.vj-lote-cab select{font:inherit;font-size:12px;padding:5px 8px;border:1px solid var(--linha);border-radius:7px;background:#fff}
+.vj-chk{display:flex;align-items:center;gap:8px;cursor:pointer}
+.vj-discri{white-space:pre-wrap;font:inherit;font-size:12px;color:var(--mut);background:#fff;border:1px solid var(--linha);border-radius:8px;padding:10px;margin:8px 0 0;max-height:220px;overflow:auto}
+.vj-previa{width:100%;border-collapse:collapse;font-size:13px}
+.vj-previa td{padding:5px 6px;border-top:1px solid var(--linha)}
+.vj-previa td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.vj-previa tr.destaque td{font-weight:700;color:var(--azul)}
 .vj-export{display:inline-block;text-decoration:none;margin:0 0 14px}
 .vj-op-sel{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;border:1px solid var(--linha);border-radius:11px;padding:11px 14px;background:#F8FAFD;font-size:14px}
 .vj-op-item{display:block;width:100%;text-align:left;font:inherit;font-size:13px;background:#fff;border:1px solid var(--linha);border-radius:9px;padding:9px 12px;margin-top:6px;cursor:pointer}
