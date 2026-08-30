@@ -23,6 +23,7 @@ const REGRAS: Regra[] = [
   { re: /^\/contratos(\/|$)/, perm: 'pode_cobrancas', legacy: true },
   { re: /^\/repasses(\/|$)/, perm: 'pode_repasse', legacy: true },
   { re: /^\/seguros(\/|$)/, perm: 'admin', legacy: true },
+  { re: /^\/notas-comissao(\/|$)/, perm: 'pode_notas', legacy: false },
   { re: /^\/notas(\/|$)/, perm: 'pode_notas', legacy: true },
   { re: /^\/pagamentos(\/|$)/, perm: 'pode_pagamentos', legacy: false },
   { re: /^\/api\/adm(\/|$)/, perm: 'any', legacy: true },
