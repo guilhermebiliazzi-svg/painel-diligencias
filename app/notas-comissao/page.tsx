@@ -39,6 +39,7 @@ type Sugestao = {
   comissao_total: number | null;
   composicao: { credor: string; valor: number; destino: string }[];
   operacao_id: number | null;
+  candidatos: { nome: string; doc: string; lado: string; paga: boolean }[];
 };
 
 type Cobranca = {
@@ -108,6 +109,10 @@ const DESTINO_ROTULO: Record<string, string> = {
   fora_split_proprio: "recebe por fora",
 };
 
+/** aceita "3.412,50", "3412,50" e "3412.50" */
+const paraNumero = (v: string) =>
+  Number(String(v ?? "").replace(/\./g, "").replace(",", ".")) || 0;
+
 const hojeISO = () => new Date().toISOString().slice(0, 10);
 
 const tomadorVazio = (): Tomador => ({
@@ -153,6 +158,7 @@ export default function NotasComissaoPage() {
   const [operacoes, setOperacoes] = useState<Operacao[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null);
   const [aba, setAba] = useState<"asaas" | "avulsa" | "operacoes">("asaas");
 
   async function carregar() {
@@ -169,6 +175,9 @@ export default function NotasComissaoPage() {
       else {
         setCobrancas(dN.cobrancas || []);
         setAvulsas(dN.avulsas || []);
+        // se a ficha da diligência não veio, a tela precisa dizer por quê em
+        // vez de simplesmente aparecer vazia
+        setAviso(dN.sugestao_erro || null);
       }
       if (rO.ok) setOperacoes(dO.operacoes || []);
     } catch {
@@ -214,6 +223,11 @@ export default function NotasComissaoPage() {
         </nav>
 
         {erro && <div className="vj-card vj-erro">{erro}</div>}
+        {aviso && (
+          <div className="vj-card vj-aviso-in">
+            Não consegui ler a ficha do negócio para preencher os tomadores: {aviso}
+          </div>
+        )}
         {carregando && <div className="vj-card vj-vazio">Carregando…</div>}
 
         {!carregando && aba === "asaas" && (
@@ -295,18 +309,33 @@ function CamposTomador({
   onChange,
   onRemover,
   podeRemover,
-  partes,
+  candidatos,
+  disponivel,
   indice,
 }: {
   t: Tomador;
   onChange: (t: Tomador) => void;
   onRemover: () => void;
   podeRemover: boolean;
-  partes: { nome: string; doc: string; papel: string }[];
+  candidatos: { nome: string; doc: string; lado: string; paga: boolean }[];
+  disponivel: number | null;
   indice: number;
 }) {
   const set = (campo: keyof Tomador, valor: string) => onChange({ ...t, [campo]: valor });
   const ehPJ = dig(t.doc).length === 14;
+
+  const valorNum = paraNumero(t.valor);
+  const pct = disponivel && disponivel > 0 ? (valorNum / disponivel) * 100 : 0;
+
+  // Digitar o % é o jeito natural de dividir uma comissão; o valor sai daí.
+  function aplicarPct(txt: string) {
+    const p = paraNumero(txt);
+    if (disponivel == null || disponivel <= 0) return;
+    const v = Math.round(disponivel * (p / 100) * 100) / 100;
+    onChange({ ...t, valor: String(v).replace(".", ",") });
+  }
+
+  const escolhido = candidatos.find((c) => dig(c.doc) === dig(t.doc));
 
   return (
     <div className="vj-tomador">
@@ -319,27 +348,26 @@ function CamposTomador({
         )}
       </div>
 
-      {partes.length > 0 && (
-        <div className="vj-chips">
-          <span className="vj-chips-h">Preencher com:</span>
-          {partes.map((p) => (
-            <button
-              key={p.doc + p.papel}
-              type="button"
-              className="vj-chip"
-              onClick={() =>
-                onChange({
-                  ...t,
-                  nome: p.nome,
-                  doc: p.doc,
-                  lado: p.papel === "adquirente" ? "comprador" : "vendedor",
-                })
-              }
-            >
-              {p.nome} <i>({p.papel === "adquirente" ? "comprador" : "vendedor"})</i>
-            </button>
-          ))}
-        </div>
+      {candidatos.length > 0 && (
+        <label className="vj-f">
+          <span>Quem recebe a nota</span>
+          <select
+            value={escolhido ? dig(escolhido.doc) : "__manual"}
+            onChange={(e) => {
+              const c = candidatos.find((x) => dig(x.doc) === e.target.value);
+              if (!c) onChange({ ...t, nome: "", doc: "", lado: "" });
+              else onChange({ ...t, nome: c.nome, doc: c.doc, lado: c.lado });
+            }}
+          >
+            {candidatos.map((c) => (
+              <option key={c.doc} value={dig(c.doc)}>
+                {c.nome} — {c.lado}
+                {c.paga ? " (paga a comissão)" : ""}
+              </option>
+            ))}
+            <option value="__manual">— outro: digitar à mão —</option>
+          </select>
+        </label>
       )}
 
       <div className="vj-frow">
@@ -357,7 +385,18 @@ function CamposTomador({
           <span>E-mail (opcional)</span>
           <input value={t.email} onChange={(e) => set("email", e.target.value)} />
         </label>
-        <label className="vj-f">
+        {disponivel != null && (
+          <label className="vj-f" style={{ maxWidth: 130 }}>
+            <span>% da comissão</span>
+            <input
+              value={pct ? pct.toFixed(2).replace(".", ",") : ""}
+              onChange={(e) => aplicarPct(e.target.value)}
+              inputMode="decimal"
+              placeholder="100"
+            />
+          </label>
+        )}
+        <label className="vj-f" style={{ maxWidth: 180 }}>
           <span>Valor da nota</span>
           <input
             value={t.valor}
@@ -612,14 +651,29 @@ function FormEmissao({
   }
 
   const op = operacoes.find((o) => String(o.id) === operacaoId) || null;
-  const partes = op
-    ? [
-        ...(op.alienantes || []).map((p) => ({ nome: p.nome, doc: p.doc, papel: "alienante" })),
-        ...(op.adquirentes || []).map((p) => ({ nome: p.nome, doc: p.doc, papel: "adquirente" })),
-      ]
-    : [];
+  // Quem pode receber a nota: as pessoas do negócio. Preferimos a ficha da
+  // diligência; se ela não veio, caímos nas partes da operação escolhida.
+  const candidatos =
+    sugestao?.candidatos?.length
+      ? sugestao.candidatos
+      : op
+        ? [
+            ...(op.adquirentes || []).map((p) => ({
+              nome: p.nome,
+              doc: p.doc,
+              lado: "comprador",
+              paga: false,
+            })),
+            ...(op.alienantes || []).map((p) => ({
+              nome: p.nome,
+              doc: p.doc,
+              lado: "vendedor",
+              paga: false,
+            })),
+          ]
+        : [];
 
-  const num = (v: string) => Number(String(v).replace(/\./g, "").replace(",", ".")) || 0;
+  const num = paraNumero;
   const soma = tomadores.reduce((a, t) => a + num(t.valor), 0);
   const sobra = disponivel == null ? null : Math.round((disponivel - soma) * 100) / 100;
 
@@ -739,7 +793,8 @@ function FormEmissao({
           key={i}
           t={t}
           indice={i}
-          partes={partes}
+          candidatos={candidatos}
+          disponivel={disponivel}
           podeRemover={tomadores.length > 1}
           onChange={(nt) => setTomadores((ts) => ts.map((x, j) => (j === i ? nt : x)))}
           onRemover={() => setTomadores((ts) => ts.filter((_, j) => j !== i))}
@@ -749,7 +804,20 @@ function FormEmissao({
       <button
         type="button"
         className="vj-add-btn"
-        onClick={() => setTomadores((ts) => [...ts, tomadorVazio()])}
+        onClick={() =>
+          setTomadores((ts) => {
+            const falta =
+              disponivel == null
+                ? 0
+                : Math.round(
+                    (disponivel - ts.reduce((a, x) => a + paraNumero(x.valor), 0)) * 100
+                  ) / 100;
+            return [
+              ...ts,
+              { ...tomadorVazio(), valor: falta > 0 ? String(falta).replace(".", ",") : "" },
+            ];
+          })
+        }
       >
         ＋ Dividir com outro tomador
       </button>

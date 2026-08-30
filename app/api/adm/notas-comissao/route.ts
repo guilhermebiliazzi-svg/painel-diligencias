@@ -4,7 +4,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { somaSplits } from "@/lib/asaas-split";
-import { pool } from "@/lib/db";
 import { montarSugestao, type Sugestao } from "@/lib/sugestao-comissao";
 
 /**
@@ -74,27 +73,34 @@ export async function GET() {
       new Set(brutas.map((cb) => cb.diligencia_id).filter(Boolean))
     ) as string[];
     const sugestaoPor: Record<string, Sugestao> = {};
+    let sugestaoErro: string | null = null;
     if (dilIds.length) {
+      const lista = dilIds.join(",");
       try {
+        // PostgREST com a service role: mesma porta que o resto desta rota usa.
         const [rDil, rOps] = await Promise.all([
-          pool.query(
-            `SELECT id::text AS id, endereco, preco, dados_completos
-               FROM diligencias WHERE id = ANY($1::uuid[])`,
-            [dilIds]
+          fetch(
+            `${c.url}/rest/v1/diligencias?id=in.(${lista})&select=id,endereco,preco,dados_completos`,
+            { headers: c.headers, cache: "no-store" }
           ),
-          pool.query(
-            `SELECT id, diligencia_id::text AS diligencia_id
-               FROM adm_operacoes_imobiliarias WHERE diligencia_id = ANY($1::uuid[])`,
-            [dilIds]
+          fetch(
+            `${c.url}/rest/v1/adm_operacoes_imobiliarias?diligencia_id=in.(${lista})&select=id,diligencia_id`,
+            { headers: c.headers, cache: "no-store" }
           ),
         ]);
+        if (!rDil.ok) throw new Error(`diligencias: ${await rDil.text()}`);
+        const dils = (await rDil.json()) as any[];
+        const ops = rOps.ok ? ((await rOps.json()) as any[]) : [];
         const opPor: Record<string, number> = {};
-        for (const o of rOps.rows) opPor[o.diligencia_id] = Number(o.id);
-        for (const d of rDil.rows) {
-          sugestaoPor[d.id] = montarSugestao(d, opPor[d.id] ?? null);
+        for (const o of ops) opPor[String(o.diligencia_id)] = Number(o.id);
+        for (const d of dils) {
+          sugestaoPor[String(d.id)] = montarSugestao(d, opPor[String(d.id)] ?? null);
         }
-      } catch {
-        // sem sugestão a tela ainda funciona no braço; não derrubar a listagem
+        if (!dils.length) sugestaoErro = "nenhuma diligência encontrada para estas cobranças";
+      } catch (e: any) {
+        // Antes isso morria em silêncio e a tela só aparecia vazia, sem dizer
+        // por quê. O motivo vai junto na resposta.
+        sugestaoErro = String((e && e.message) || e).slice(0, 300);
       }
     }
 
@@ -118,7 +124,7 @@ export async function GET() {
 
     const avulsas = notas.filter((nt) => nt.origem === "avulsa");
 
-    return NextResponse.json({ cobrancas, avulsas });
+    return NextResponse.json({ cobrancas, avulsas, sugestao_erro: sugestaoErro });
   } catch (e: any) {
     return NextResponse.json({ error: "Erro de rede", detail: String(e) }, { status: 502 });
   }

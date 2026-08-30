@@ -11,6 +11,9 @@ const txt = (v: unknown) => String(v ?? "").trim();
 
 export type ParteSugerida = { nome: string; doc: string };
 
+/** uma pessoa do negócio que pode ser tomadora da nota */
+export type Candidato = { nome: string; doc: string; lado: "comprador" | "vendedor"; paga: boolean };
+
 export type Sugestao = {
   diligencia_id: string;
   /** quem paga a comissão — vira o tomador da nota */
@@ -26,6 +29,8 @@ export type Sugestao = {
   composicao: { credor: string; valor: number; destino: string }[];
   /** operação já cadastrada para esta diligência, se houver */
   operacao_id: number | null;
+  /** todo mundo do negócio: a nota pode ir para qualquer um deles */
+  candidatos: Candidato[];
 };
 
 function obj(v: unknown): Record<string, any> {
@@ -87,8 +92,22 @@ export function montarSugestao(
 
   const splitBruto = Array.isArray(comissao.split) ? comissao.split : [];
 
+  const candidatos: Candidato[] = [
+    ...adquirentes.map((p) => ({
+      ...p,
+      lado: "comprador" as const,
+      paga: pagador === "comprador",
+    })),
+    ...alienantes.map((p) => ({
+      ...p,
+      lado: "vendedor" as const,
+      paga: pagador === "vendedor",
+    })),
+  ];
+
   return {
     diligencia_id: linha.id,
+    candidatos,
     tomador: primeiro
       ? {
           nome: primeiro.nome,
