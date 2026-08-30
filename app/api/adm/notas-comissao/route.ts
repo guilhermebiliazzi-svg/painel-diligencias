@@ -167,3 +167,43 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Erro de rede", detail: String(e) }, { status: 502 });
   }
 }
+
+/**
+ * PATCH /api/adm/notas-comissao   { nota_id, operacao_id }
+ *
+ * Amarra uma nota já emitida a uma operação. Serve para as avulsas, que nascem
+ * antes de a venda estar cadastrada: sem esse vínculo a nota fica fora da
+ * DIMOB para sempre, e reemitir só por isso seria absurdo.
+ */
+export async function PATCH(req: Request) {
+  const c = creds();
+  if (!c) return NextResponse.json({ error: "Supabase não configurado." }, { status: 500 });
+
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Corpo inválido." }, { status: 400 });
+  }
+
+  const notaId = Number(body?.nota_id);
+  const operacaoId = Number(body?.operacao_id);
+  if (!notaId || !operacaoId) {
+    return NextResponse.json({ error: "nota_id e operacao_id são obrigatórios." }, { status: 400 });
+  }
+
+  try {
+    const r = await fetch(`${c.url}/rest/v1/adm_notas_comissao?id=eq.${notaId}`, {
+      method: "PATCH",
+      headers: { ...c.headers, "Content-Type": "application/json", Prefer: "return=representation" },
+      body: JSON.stringify({ operacao_id: operacaoId, updated_at: new Date().toISOString() }),
+      cache: "no-store",
+    });
+    if (!r.ok) {
+      return NextResponse.json({ error: "Falha ao vincular", detail: await r.text() }, { status: 502 });
+    }
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    return NextResponse.json({ error: "Erro de rede", detail: String(e) }, { status: 502 });
+  }
+}

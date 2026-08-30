@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 
 type Nota = {
   id: number;
+  operacao_id?: number | null;
   status: string;
   tomador_nome: string;
   tomador_doc: string;
@@ -116,7 +117,7 @@ const paraNumero = (v: string) =>
 
 // Marcador de versão: com upload manual pelo GitHub é fácil olhar para uma
 // tela antiga e achar que a correção não funcionou. Fica visível no cabeçalho.
-const VERSAO = "v8";
+const VERSAO = "v9";
 
 const hojeISO = () => new Date().toISOString().slice(0, 10);
 
@@ -279,10 +280,18 @@ export default function NotasComissaoPage() {
                 />
               </label>
             </div>
+            <a
+              className="vj-btn vj-primary vj-export"
+              href={`/api/adm/dimob?ano=${mes.slice(0, 4)}`}
+            >
+              Baixar planilha da DIMOB de {mes.slice(0, 4)}
+            </a>
             {emitidas.length === 0 ? (
               <div className="vj-vazio">Nenhuma nota de comissão neste mês.</div>
             ) : (
-              emitidas.map((nt) => <LinhaNota key={nt.id} nota={nt} />)
+              emitidas.map((nt) => (
+                <LinhaNota key={nt.id} nota={nt} onMudou={() => carregar()} />
+              ))
             )}
           </section>
         )}
@@ -308,24 +317,66 @@ export default function NotasComissaoPage() {
 /* nota já existente                                                    */
 /* ------------------------------------------------------------------ */
 
-function LinhaNota({ nota }: { nota: Nota }) {
+function LinhaNota({ nota, onMudou }: { nota: Nota; onMudou?: () => void }) {
   const emitida = nota.status === "emitida";
+  const [vinculando, setVinculando] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function vincular(operacaoId: number) {
+    setMsg(null);
+    try {
+      const r = await fetch("/api/adm/notas-comissao", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nota_id: nota.id, operacao_id: operacaoId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) setMsg(d?.error || "Falha ao vincular.");
+      else {
+        setVinculando(false);
+        onMudou?.();
+      }
+    } catch {
+      setMsg("Erro de rede.");
+    }
+  }
+
   return (
-    <div className={`vj-nota ${emitida ? "ok" : "pend"}`}>
-      <div>
-        <b>{nota.tomador_nome}</b>
-        <span className="vj-sub-id">
-          {fmtDoc(nota.tomador_doc)} · {brl(nota.valor_servico)}
-          {emitida && nota.numero_nota ? ` · NFS-e nº ${nota.numero_nota}` : ` · ${nota.status}`}
-        </span>
-        {nota.emissao_erro && <span className="vj-erro-txt">{nota.emissao_erro}</span>}
+    <>
+      <div className={`vj-nota ${emitida ? "ok" : "pend"}`}>
+        <div>
+          <b>{nota.tomador_nome}</b>
+          <span className="vj-sub-id">
+            {fmtDoc(nota.tomador_doc)} · {brl(nota.valor_servico)}
+            {emitida && nota.numero_nota ? ` · NFS-e nº ${nota.numero_nota}` : ` · ${nota.status}`}
+          </span>
+          {nota.emissao_erro && <span className="vj-erro-txt">{nota.emissao_erro}</span>}
+          {emitida && !nota.operacao_id && (
+            <span className="vj-erro-txt">
+              fora da DIMOB — sem operação vinculada{" "}
+              <button type="button" className="vj-link" onClick={() => setVinculando((v) => !v)}>
+                {vinculando ? "cancelar" : "vincular agora"}
+              </button>
+            </span>
+          )}
+        </div>
+        {nota.pdf_url && (
+          <a href={nota.pdf_url} target="_blank" rel="noopener noreferrer" className="vj-nota-link">
+            Abrir nota
+          </a>
+        )}
       </div>
-      {nota.pdf_url && (
-        <a href={nota.pdf_url} target="_blank" rel="noopener noreferrer" className="vj-nota-link">
-          Abrir nota
-        </a>
+      {vinculando && (
+        <div className="vj-form">
+          {msg && <div className="vj-erro-in">{msg}</div>}
+          <BuscaOperacao
+            escolhida={null}
+            onLimpar={() => setVinculando(false)}
+            onEscolher={(id) => vincular(id)}
+          />
+        </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -657,20 +708,22 @@ function ConfirmarOperacao({
   onCriada,
   onCancelar,
 }: {
-  sugestao: Sugestao;
+  /** null na nota avulsa: não há diligência, cadastra-se do zero */
+  sugestao: Sugestao | null;
   onCriada: (op: Operacao) => void;
   onCancelar: () => void;
 }) {
+  const base = sugestao?.operacao;
   const [valor, setValor] = useState(
-    sugestao.operacao.valor_alienacao ? String(sugestao.operacao.valor_alienacao).replace(".", ",") : ""
+    base?.valor_alienacao ? String(base.valor_alienacao).replace(".", ",") : ""
   );
-  const [endereco, setEndereco] = useState(sugestao.operacao.endereco_texto || "");
+  const [endereco, setEndereco] = useState(base?.endereco_texto || "");
   const [dataContrato, setDataContrato] = useState(hojeISO());
   const [alienantes, setAlienantes] = useState<Parte[]>(
-    sugestao.operacao.alienantes.length ? sugestao.operacao.alienantes.map((p) => ({ ...p })) : [{ nome: "", doc: "" }]
+    base?.alienantes.length ? base.alienantes.map((p) => ({ ...p })) : [{ nome: "", doc: "" }]
   );
   const [adquirentes, setAdquirentes] = useState<Parte[]>(
-    sugestao.operacao.adquirentes.length ? sugestao.operacao.adquirentes.map((p) => ({ ...p })) : [{ nome: "", doc: "" }]
+    base?.adquirentes.length ? base.adquirentes.map((p) => ({ ...p })) : [{ nome: "", doc: "" }]
   );
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -685,7 +738,7 @@ function ConfirmarOperacao({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          diligencia_id: sugestao.diligencia_id,
+          diligencia_id: sugestao?.diligencia_id ?? null,
           data_contrato: dataContrato,
           valor_alienacao: paraNumero(valor),
           imovel_logradouro: endereco,
@@ -734,8 +787,8 @@ function ConfirmarOperacao({
 
       {faltaComprador && (
         <div className="vj-aviso-in">
-          A ficha desta diligência não trouxe o comprador. Preencha nome e CPF/CNPJ: é ele que a
-          DIMOB declara e que a discriminação cita.
+          Preencha o comprador (nome e CPF/CNPJ): é ele que a DIMOB declara e que a discriminação
+          cita.
         </div>
       )}
       {erro && <div className="vj-erro-in">{erro}</div>}
@@ -759,6 +812,7 @@ function BuscaOperacao({
   const [q, setQ] = useState("");
   const [itens, setItens] = useState<Operacao[]>([]);
   const [buscando, setBuscando] = useState(false);
+  const [cadastrando, setCadastrando] = useState(false);
 
   async function buscar() {
     setBuscando(true);
@@ -786,9 +840,22 @@ function BuscaOperacao({
     );
   }
 
+  if (cadastrando) {
+    return (
+      <ConfirmarOperacao
+        sugestao={null}
+        onCancelar={() => setCadastrando(false)}
+        onCriada={(op) => {
+          setCadastrando(false);
+          onEscolher(op.id, resumoOperacao(op));
+        }}
+      />
+    );
+  }
+
   return (
     <div className="vj-f">
-      <span>Operação imobiliária (monta a discriminação)</span>
+      <span>Operação imobiliária (monta a discriminação e alimenta a DIMOB)</span>
       <div className="vj-frow">
         <input
           value={q}
@@ -815,6 +882,9 @@ function BuscaOperacao({
           {resumoOperacao(o)}
         </button>
       ))}
+      <button type="button" className="vj-add-btn" onClick={() => setCadastrando(true)}>
+        ＋ Cadastrar a venda desta comissão
+      </button>
     </div>
   );
 }
@@ -977,6 +1047,13 @@ function FormEmissao({
             setOpLabel(null);
           }}
         />
+      )}
+
+      {!operacaoId && (
+        <div className="vj-aviso-in">
+          Sem operação, esta nota não entra na planilha da DIMOB: o endereço e as partes escritos
+          só na discriminação são texto livre, ninguém consegue somá-los depois.
+        </div>
       )}
 
       {!operacaoId && (
@@ -1324,6 +1401,10 @@ const CSS = `
 .vj-comp td{padding:5px 6px;border-top:1px solid var(--linha)}
 .vj-comp td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .vj-comp tr.ville td{font-weight:700;color:var(--azul)}
+.vj-export{display:inline-block;text-decoration:none;margin:0 0 14px}
+.vj-op-sel{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;border:1px solid var(--linha);border-radius:11px;padding:11px 14px;background:#F8FAFD;font-size:14px}
+.vj-op-item{display:block;width:100%;text-align:left;font:inherit;font-size:13px;background:#fff;border:1px solid var(--linha);border-radius:9px;padding:9px 12px;margin-top:6px;cursor:pointer}
+.vj-op-item:hover{border-color:var(--azul);color:var(--azul)}
 .vj-comp-nota{font-size:12px;color:var(--mut);margin:8px 0 0;line-height:1.5}
 @media (max-width:640px){.vj-frow{flex-direction:column;align-items:stretch}}
 `;
