@@ -117,7 +117,7 @@ const paraNumero = (v: string) =>
 
 // Marcador de versão: com upload manual pelo GitHub é fácil olhar para uma
 // tela antiga e achar que a correção não funcionou. Fica visível no cabeçalho.
-const VERSAO = "v9";
+const VERSAO = "v10";
 
 const hojeISO = () => new Date().toISOString().slice(0, 10);
 
@@ -173,13 +173,18 @@ export default function NotasComissaoPage() {
   const [erro, setErro] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [aba, setAba] = useState<"asaas" | "emitidas" | "avulsa" | "operacoes">("asaas");
+  // a DIMOB é anual; o acerto com o contador, mensal
+  const [periodo, setPeriodo] = useState<"mes" | "ano">("mes");
+  const [ano, setAno] = useState(String(new Date().getFullYear()));
 
-  async function carregar(mesAlvo = mes) {
+  async function carregar(
+    filtro: { tipo: "mes" | "ano"; valor: string } = { tipo: periodo, valor: periodo === "mes" ? mes : ano }
+  ) {
     setCarregando(true);
     setErro(null);
     try {
       const [rN, rO] = await Promise.all([
-        fetch(`/api/adm/notas-comissao?mes=${mesAlvo}`, { cache: "no-store" }),
+        fetch(`/api/adm/notas-comissao?${filtro.tipo}=${filtro.valor}`, { cache: "no-store" }),
         fetch("/api/adm/operacoes", { cache: "no-store" }),
       ]);
       const dN = await rN.json().catch(() => ({}));
@@ -268,26 +273,73 @@ export default function NotasComissaoPage() {
         {!carregando && aba === "emitidas" && (
           <section className="vj-card">
             <div className="vj-sel">
-              <label className="vj-f" style={{ maxWidth: 200 }}>
-                <span>Competência</span>
-                <input
-                  type="month"
-                  value={mes}
+              <label className="vj-f" style={{ maxWidth: 150 }}>
+                <span>Período</span>
+                <select
+                  value={periodo}
                   onChange={(e) => {
-                    setMes(e.target.value);
-                    carregar(e.target.value);
+                    const p = e.target.value as "mes" | "ano";
+                    setPeriodo(p);
+                    carregar({ tipo: p, valor: p === "mes" ? mes : ano });
                   }}
-                />
+                >
+                  <option value="mes">Mês</option>
+                  <option value="ano">Ano inteiro</option>
+                </select>
               </label>
+
+              {periodo === "mes" ? (
+                <label className="vj-f" style={{ maxWidth: 200 }}>
+                  <span>Competência</span>
+                  <input
+                    type="month"
+                    value={mes}
+                    onChange={(e) => {
+                      setMes(e.target.value);
+                      carregar({ tipo: "mes", valor: e.target.value });
+                    }}
+                  />
+                </label>
+              ) : (
+                <label className="vj-f" style={{ maxWidth: 140 }}>
+                  <span>Ano</span>
+                  <input
+                    type="number"
+                    min="2020"
+                    max="2099"
+                    value={ano}
+                    onChange={(e) => {
+                      setAno(e.target.value);
+                      if (/^\d{4}$/.test(e.target.value)) {
+                        carregar({ tipo: "ano", valor: e.target.value });
+                      }
+                    }}
+                  />
+                </label>
+              )}
             </div>
+
+            <div className="vj-resumo-emitidas">
+              {emitidas.length} nota{emitidas.length === 1 ? "" : "s"} ·{" "}
+              {brl(emitidas.reduce((a, n) => a + (Number(n.valor_servico) || 0), 0))}
+              {(() => {
+                const fora = emitidas.filter((n) => n.status === "emitida" && !n.operacao_id).length;
+                return fora ? (
+                  <em> · {fora} sem operação, fora da planilha</em>
+                ) : null;
+              })()}
+            </div>
+
             <a
               className="vj-btn vj-primary vj-export"
-              href={`/api/adm/dimob?ano=${mes.slice(0, 4)}`}
+              href={`/api/adm/dimob?ano=${periodo === "ano" ? ano : mes.slice(0, 4)}`}
             >
-              Baixar planilha da DIMOB de {mes.slice(0, 4)}
+              Baixar planilha da DIMOB de {periodo === "ano" ? ano : mes.slice(0, 4)}
             </a>
             {emitidas.length === 0 ? (
-              <div className="vj-vazio">Nenhuma nota de comissão neste mês.</div>
+              <div className="vj-vazio">
+                Nenhuma nota de comissão {periodo === "ano" ? `em ${ano}` : "neste mês"}.
+              </div>
             ) : (
               emitidas.map((nt) => (
                 <LinhaNota key={nt.id} nota={nt} onMudou={() => carregar()} />
@@ -1401,6 +1453,8 @@ const CSS = `
 .vj-comp td{padding:5px 6px;border-top:1px solid var(--linha)}
 .vj-comp td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .vj-comp tr.ville td{font-weight:700;color:var(--azul)}
+.vj-resumo-emitidas{font-size:13px;color:var(--mut);font-weight:600;margin-bottom:10px}
+.vj-resumo-emitidas em{font-style:normal;color:#8B1A24}
 .vj-export{display:inline-block;text-decoration:none;margin:0 0 14px}
 .vj-op-sel{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;border:1px solid var(--linha);border-radius:11px;padding:11px 14px;background:#F8FAFD;font-size:14px}
 .vj-op-item{display:block;width:100%;text-align:left;font:inherit;font-size:13px;background:#fff;border:1px solid var(--linha);border-radius:9px;padding:9px 12px;margin-top:6px;cursor:pointer}

@@ -46,7 +46,14 @@ export async function GET(req: Request) {
   const c = creds();
   if (!c) return NextResponse.json({ error: "Supabase não configurado." }, { status: 500 });
 
-  const mes = mesValido(new URL(req.url).searchParams.get("mes"));
+  // A DIMOB é anual, o fechamento com o contador é mensal. A tela precisa dos
+  // dois recortes, então a rota aceita ?mes=AAAA-MM ou ?ano=AAAA.
+  const params = new URL(req.url).searchParams;
+  const anoTxt = params.get("ano") || "";
+  const porAno = /^\d{4}$/.test(anoTxt);
+  const mes = mesValido(params.get("mes"));
+  const inicio = porAno ? `${anoTxt}-01-01` : `${mes}-01`;
+  const fim = porAno ? `${Number(anoTxt) + 1}-01-01` : proximoMes(mes);
 
   try {
     const [rCob, rNotas] = await Promise.all([
@@ -60,7 +67,7 @@ export async function GET(req: Request) {
       // que só cresce.
       fetch(
         `${c.url}/rest/v1/adm_notas_comissao?order=created_at.desc&limit=500` +
-          `&created_at=gte.${mes}-01&created_at=lt.${proximoMes(mes)}`,
+          `&created_at=gte.${inicio}&created_at=lt.${fim}`,
         { headers: c.headers, cache: "no-store" }
       ),
     ]);
@@ -160,6 +167,7 @@ export async function GET(req: Request) {
       cobrancas: cobrancas.filter((cb) => !cb.nota),
       emitidas: notasDoMes,
       mes,
+      periodo: porAno ? { tipo: "ano", valor: anoTxt } : { tipo: "mes", valor: mes },
       pendentes_total: cobrancas.filter((cb) => !cb.nota).length,
       sugestao_erro: sugestaoErro,
     });
