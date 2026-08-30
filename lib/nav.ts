@@ -27,6 +27,7 @@ export function getNav(): ItemNav[] {
     item('cobrancas', 'Cobranças', 'Boletos, faturas e situação de pagamentos.', 'PAINEL_URL_COBRANCAS', '/cobrancas', 'cobrancas', 'amber', 'pode_cobrancas'),
     item('repasse', 'Repasse', 'Repasses aos locadores e conciliação de valores.', 'PAINEL_URL_REPASSE', '/repasses', 'repasse', 'emerald', 'pode_repasse'),
     item('notas', 'Notas', 'Emissão e conciliação de NFS-e da administração.', 'PAINEL_URL_NOTAS', '/notas', 'notas', 'violet', 'pode_notas'),
+    item('notas-comissao', 'Notas de comissão', 'NFS-e de corretagem sobre os recebimentos do Asaas e notas avulsas.', 'PAINEL_URL_NOTAS_COMISSAO', '/notas-comissao', 'notas', 'violet', 'pode_notas'),
     item('pagamentos', 'Pagamentos', 'Pagar boletos da imobiliária (IPTU/condomínio) pelo Banco Inter.', 'PAINEL_URL_PAGAMENTOS', '/pagamentos', 'cobrancas', 'slate', 'pode_pagamentos'),
   ];
 }
