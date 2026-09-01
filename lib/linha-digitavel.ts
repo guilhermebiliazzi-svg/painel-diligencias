@@ -82,10 +82,32 @@ export function vencimentoDaLinhaDigitavel(linhaOuBarras: string): string | null
   return escolhido.toISOString().slice(0, 10);
 }
 
+// Valor do título embutido na linha digitável / código de barras bancário:
+// 10 dígitos em centavos, logo depois do fator de vencimento. Vale o mesmo
+// aviso do fator — é o número que o banco valida, mais confiável que o texto
+// impresso. Zero significa "boleto sem valor fixo"; devolvemos null nesse caso.
+// Arrecadação (48 díg., começa com 8) fica de fora: lá a posição do valor
+// varia com o "identificador de valor efetivo" e o palpite erraria.
+export function valorDaLinhaDigitavel(linhaOuBarras: string): number | null {
+  const d = String(linhaOuBarras || "").replace(/\D/g, "");
+  if (!d || d.startsWith("8")) return null;
+  let centavos: string | null = null;
+  if (d.length === 47) centavos = d.slice(37, 47);      // linha digitável bancária
+  else if (d.length === 44) centavos = d.slice(9, 19);  // código de barras
+  else return null;
+  const n = parseInt(centavos, 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n) / 100;
+}
+
 // Lê o PDF (buffer) e devolve a linha digitável + vencimento, se encontrar.
-export async function lerLinhaDigitavelDoPdf(
-  buffer: ArrayBuffer | Uint8Array
-): Promise<{ linha: string; tipo: string; vencimento: string | null } | null> {
+export async function lerLinhaDigitavelDoPdf(buffer: ArrayBuffer | Uint8Array): Promise<{
+  linha: string;
+  tipo: string;
+  vencimento: string | null;
+  vencimento_origem: "codigo-de-barras" | "texto";
+  valor: number | null;
+} | null> {
   try {
     const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
     const pdf = await getDocumentProxy(bytes);
@@ -93,7 +115,17 @@ export async function lerLinhaDigitavelDoPdf(
     const txt = Array.isArray(text) ? text.join("\n") : String(text || "");
     const ld = extrairLinhaDigitavel(txt);
     if (!ld) return null;
-    return { ...ld, vencimento: extrairVencimento(txt) };
+    // O fator de vencimento é a fonte da verdade: é o que o banco valida.
+    // A data varrida do texto só entra quando não há fator (arrecadação),
+    // porque ela pega qualquer dd/mm/aaaa da página — inclusive datas que
+    // nada têm a ver com o título.
+    const vencFator = vencimentoDaLinhaDigitavel(ld.linha);
+    return {
+      ...ld,
+      vencimento: vencFator || extrairVencimento(txt),
+      vencimento_origem: vencFator ? "codigo-de-barras" : "texto",
+      valor: valorDaLinhaDigitavel(ld.linha),
+    };
   } catch {
     return null; // PDF escaneado (imagem) ou ilegível → sem sugestão
   }

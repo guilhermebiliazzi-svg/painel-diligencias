@@ -191,6 +191,7 @@ function NovoBoleto({ item, competencia, autoRead }: { item: Item; competencia: 
   const [erro, setErro] = useState<string | null>(null);
   const [lida, setLida] = useState(false);
   const [avisoVenc, setAvisoVenc] = useState<string | null>(null);
+  const [vencOrigem, setVencOrigem] = useState<string | null>(null);
 
   // Lê a linha do boleto anexado (só o primeiro formulário).
   useEffect(() => {
@@ -202,8 +203,15 @@ function NovoBoleto({ item, competencia, autoRead }: { item: Item; competencia: 
         const d = await r.json();
         if (!vivo) return;
         if (d.linha) { setLinha((a) => (a.replace(/\D/g, "") ? a : d.linha)); setLida(true); }
+        // O valor vem do próprio código de barras, em centavos — é o que o
+        // banco cobra. Só preenche se o campo ainda estiver vazio.
+        if (d.valor > 0) setValor((a) => (a ? a : String(d.valor)));
         if (d.vencimento) {
           setVenc((a) => a || d.vencimento);
+          setVencOrigem(d.vencimento_origem || null);
+          // Data de pagamento = vencimento, desde que não esteja no passado.
+          const hojeISO = new Date().toISOString().slice(0, 10);
+          if (String(d.vencimento) >= hojeISO) setDataPag((a) => a || d.vencimento);
           const [cy, cm] = competencia.split("-").map(Number);
           const [vy, vm] = String(d.vencimento).slice(0, 7).split("-").map(Number);
           if (vy * 12 + vm - (cy * 12 + cm) !== 0) {
@@ -257,7 +265,13 @@ function NovoBoleto({ item, competencia, autoRead }: { item: Item; competencia: 
       </label>
       <div className="vj-frow">
         <label className="vj-f"><span>Valor a pagar</span><input type="number" step="0.01" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0,00" /></label>
-        <label className="vj-f"><span>Vencimento</span><input type="date" value={venc} onChange={(e) => setVenc(e.target.value)} /></label>
+        <label className="vj-f">
+          <span>
+            Vencimento{" "}
+            {vencOrigem === "codigo-de-barras" && <b className="vj-lida">· do código de barras</b>}
+          </span>
+          <input type="date" value={venc} onChange={(e) => setVenc(e.target.value)} />
+        </label>
         <label className="vj-f"><span>CPF/CNPJ beneficiário (opcional)</span><input value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="só números" inputMode="numeric" /></label>
         <label className="vj-f"><span>Data de pagamento (vazio = hoje; futura = agenda)</span><input type="date" value={dataPag} onChange={(e) => setDataPag(e.target.value)} /></label>
       </div>
