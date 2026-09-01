@@ -45,8 +45,10 @@ export function extrairVencimento(texto: string): string | null {
     const d = /(\d{2})\/(\d{2})\/(\d{4})/.exec(seg);
     if (d) return `${d[3]}-${d[2]}-${d[1]}`;
   }
-  const datas = [...t.matchAll(/(\d{2})\/(\d{2})\/(\d{4})/g)].map((x) => `${x[3]}-${x[2]}-${x[1]}`);
-  if (datas.length) return datas.sort()[datas.length - 1];
+  // Antes havia um palpite aqui: a MAIOR data dd/mm/aaaa da página. Numa
+  // página de condomínio ou IPTU há várias datas que não são o vencimento, e o
+  // palpite errava — foi o que fez um boleto de 01/09 aparecer como 25/09.
+  // Sem rótulo, é melhor devolver nada e deixar quem paga digitar.
   return null;
 }
 
@@ -82,22 +84,48 @@ export function vencimentoDaLinhaDigitavel(linhaOuBarras: string): string | null
   return escolhido.toISOString().slice(0, 10);
 }
 
-// Valor do título embutido na linha digitável / código de barras bancário:
-// 10 dígitos em centavos, logo depois do fator de vencimento. Vale o mesmo
-// aviso do fator — é o número que o banco valida, mais confiável que o texto
-// impresso. Zero significa "boleto sem valor fixo"; devolvemos null nesse caso.
-// Arrecadação (48 díg., começa com 8) fica de fora: lá a posição do valor
-// varia com o "identificador de valor efetivo" e o palpite erraria.
+// Valor do título embutido na linha digitável / código de barras.
+//
+// Boleto bancário: 10 dígitos em centavos logo após o fator de vencimento.
+//
+// Arrecadação/convênio (IPTU, água, luz): o valor tem 11 dígitos e mora no
+// código de barras de 44. A linha de 48 é o mesmo código com um dígito
+// verificador ao fim de cada bloco de 12 — tirando esses quatro DVs, volta-se
+// ao código de barras. O 3º dígito diz o que aquele campo significa:
+//   6 e 8 -> valor efetivo em reais   (dá para usar)
+//   7 e 9 -> quantidade de moeda/referência, NÃO é em reais (devolvemos null)
+// Chutar nos casos 7 e 9 mandaria um valor errado ao banco.
+//
+// Em qualquer formato, valor zero significa "boleto sem valor fixo" e também
+// devolve null: melhor o campo em branco do que um zero que parece lido.
 export function valorDaLinhaDigitavel(linhaOuBarras: string): number | null {
   const d = String(linhaOuBarras || "").replace(/\D/g, "");
-  if (!d || d.startsWith("8")) return null;
-  let centavos: string | null = null;
-  if (d.length === 47) centavos = d.slice(37, 47);      // linha digitável bancária
-  else if (d.length === 44) centavos = d.slice(9, 19);  // código de barras
-  else return null;
-  const n = parseInt(centavos, 10);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.round(n) / 100;
+  if (!d) return null;
+
+  const emReais = (digitos: string) => {
+    const n = parseInt(digitos, 10);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) / 100 : null;
+  };
+
+  // --- arrecadação / convênio ---
+  if (d.startsWith("8")) {
+    let barras: string;
+    if (d.length === 48) {
+      // remove o DV de cada bloco de 12 -> 44 dígitos
+      barras = d.slice(0, 11) + d.slice(12, 23) + d.slice(24, 35) + d.slice(36, 47);
+    } else if (d.length === 44) {
+      barras = d;
+    } else return null;
+    if (barras.length !== 44) return null;
+    const identificador = barras[2];
+    if (identificador !== "6" && identificador !== "8") return null; // não é valor em reais
+    return emReais(barras.slice(4, 15));
+  }
+
+  // --- boleto bancário ---
+  if (d.length === 47) return emReais(d.slice(37, 47));   // linha digitável
+  if (d.length === 44) return emReais(d.slice(9, 19));    // código de barras
+  return null;
 }
 
 // Lê o PDF (buffer) e devolve a linha digitável + vencimento, se encontrar.
