@@ -112,6 +112,11 @@ export async function POST(req: Request) {
     // quando a comissão é parcelada, cada parcela vira uma nota e o texto
     // precisa dizer qual delas é
     let parcelamento: { parcela: number; total: number } | null = null;
+    // Uma tentativa que a Prefeitura recusou fica gravada com status 'a_emitir'
+    // e sem numero_nota. Ela NAO e nota viva: nao ocupa o teto da cobranca e
+    // nao pode bloquear uma nova tentativa. Reaproveitamos a propria linha em
+    // vez de criar outra, senao cada recusa deixaria um fantasma na lista.
+    let idReaproveitar: number | null = null;
 
     if (origem === "asaas") {
       const rCob = await fetch(
@@ -137,10 +142,17 @@ export async function POST(req: Request) {
 
       const rJa = await fetch(
         `${c.url}/rest/v1/adm_notas_comissao?asaas_payment_id=eq.${asaas_payment_id}` +
-          `&status=neq.cancelada&select=valor_servico,tomador_doc,numero_nota`,
+          `&status=neq.cancelada&select=id,status,valor_servico,tomador_doc,numero_nota`,
         { headers: c.headers, cache: "no-store" }
       );
-      const jaEmitidas = rJa.ok ? ((await rJa.json()) as any[]) : [];
+      const doPagamento = rJa.ok ? ((await rJa.json()) as any[]) : [];
+      const recusada = (x: any) => x.status === "a_emitir" && !x.numero_nota;
+      const jaEmitidas = doPagamento.filter((x) => !recusada(x));
+
+      const anterior = doPagamento.find(
+        (x) => recusada(x) && dig(x.tomador_doc) === tomadorDoc
+      );
+      if (anterior) idReaproveitar = Number(anterior.id) || null;
 
       if (jaEmitidas.some((x) => dig(x.tomador_doc) === tomadorDoc)) {
         return NextResponse.json(
@@ -261,7 +273,18 @@ export async function POST(req: Request) {
         cache: "no-store",
       });
 
-    const nota = teste ? null : await gravar({ status: "enviando" });
+    // PATCH na linha da tentativa recusada: mesmo id, dados novos, erro limpo.
+    const reaproveitar = async (id: number, campos: any) => {
+      const r = await atualizar(id, { ...linha, ...campos, emissao_erro: null });
+      const rows = r.ok ? ((await r.json()) as any[]) : [];
+      return rows[0] || null;
+    };
+
+    const nota = teste
+      ? null
+      : idReaproveitar
+      ? await reaproveitar(idReaproveitar, { status: "enviando" })
+      : await gravar({ status: "enviando" });
     if (!teste && !nota) {
       return NextResponse.json({ error: "Falha ao gravar a nota antes do envio." }, { status: 502 });
     }

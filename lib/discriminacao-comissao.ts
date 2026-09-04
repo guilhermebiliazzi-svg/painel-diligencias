@@ -35,6 +35,35 @@ export function formatarDoc(v: any): string {
   return String(v ?? "");
 }
 
+/**
+ * A Prefeitura de SP valida a discriminação contra o tipo `tpDiscriminacao`,
+ * cujo pattern só aceita caracteres da tabela Latin-1. Travessão (— U+2014),
+ * aspas curvas, reticências e espaço não separável entram no texto sem
+ * ninguém perceber — vindos de `toLocaleString`, de um nome colado de outro
+ * sistema, ou do próprio código — e a nota inteira é recusada com
+ * "1001: XML não compatível com Schema … Pattern constraint failed",
+ * sem dizer qual caractere ofendeu.
+ *
+ * Trocamos o que tem equivalente ASCII e removemos o resto. Melhor uma
+ * discriminação com hífen no lugar do travessão do que uma nota que não sai.
+ */
+export function sanitizarDiscriminacao(texto: string): string {
+  return String(texto ?? "")
+    .normalize("NFC")
+    // travessões, meia-risca e sinal de menos → hífen
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
+    // aspas simples e duplas tipográficas → aspas retas
+    .replace(/[\u2018\u2019\u201A\u201B\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"')
+    .replace(/\u2026/g, "...")
+    // espaços especiais (o R$ do toLocaleString vem com U+00A0) → espaço comum
+    .replace(/[\u00A0\u2007\u2009\u200A\u202F]/g, " ")
+    // marcas invisíveis que sobrevivem a copiar e colar
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    // o que sobrou fora do Latin-1 imprimível não tem como ir no XML
+    .replace(/[^\x20-\x7E\u00A1-\u00FF\n]/g, "");
+}
+
 export function brl(v: number | string): string {
   const n = Number(v) || 0;
   return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -49,7 +78,7 @@ export function enderecoImovel(o: Operacao): string {
     o.imovel_cep ? `CEP ${dig(o.imovel_cep).replace(/(\d{5})(\d{3})/, "$1-$2")}` : null,
     o.imovel_uf || null,
   ].filter(Boolean);
-  return partes.join(" — ");
+  return partes.join(" - ");
 }
 
 /**
@@ -69,9 +98,9 @@ export function ladoDoTomador(
   return "outro";
 }
 
-/** "Fulano — CPF 000.000.000-00 e Beltrano — CPF 111..." */
+/** "Fulano - CPF 000.000.000-00 e Beltrano - CPF 111..." */
 function listarPartes(partes: Parte[]): string {
-  const itens = (partes || []).map((p) => `${p.nome} — CPF/CNPJ ${formatarDoc(p.doc)}`);
+  const itens = (partes || []).map((p) => `${p.nome} - CPF/CNPJ ${formatarDoc(p.doc)}`);
   if (itens.length <= 1) return itens[0] || "";
   return itens.slice(0, -1).join("; ") + " e " + itens[itens.length - 1];
 }
@@ -98,7 +127,7 @@ export function montarDiscriminacao(
   // senao o tomador recebe N notas identicas e nao sabe distinguir
   const cabecalho =
     parcelamento && parcelamento.total > 1
-      ? `Comissão pela intermediação na venda de imóvel — parcela ${parcelamento.parcela} de ${parcelamento.total}.`
+      ? `Comissão pela intermediação na venda de imóvel - parcela ${parcelamento.parcela} de ${parcelamento.total}.`
       : "Comissão pela intermediação na venda de imóvel.";
 
   const linhas = [
@@ -115,5 +144,5 @@ export function montarDiscriminacao(
     if ((o.adquirentes || []).length) linhas.push(`Comprador(es): ${listarPartes(o.adquirentes)}`);
   }
 
-  return linhas.join("\n").slice(0, 2000);
+  return sanitizarDiscriminacao(linhas.join("\n")).slice(0, 2000);
 }

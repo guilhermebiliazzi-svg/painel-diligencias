@@ -168,8 +168,13 @@ export async function GET(req: Request) {
     });
 
     return NextResponse.json({
-      // a aba de trabalho mostra só o que falta emitir
-      cobrancas: cobrancas.filter((cb) => !cb.nota),
+      // A aba de trabalho mostra o que falta emitir. Uma tentativa recusada
+      // pela Prefeitura (status 'a_emitir', sem numero_nota) NAO conta como
+      // nota: antes ela escondia a cobranca aqui e a nota ficava num limbo,
+      // sem aparecer em lugar nenhum de onde desse para tentar de novo.
+      cobrancas: cobrancas.filter(
+        (cb) => !cb.nota || (cb.nota.status === "a_emitir" && !cb.nota.numero_nota)
+      ),
       emitidas: notasDoMes,
       mes,
       periodo: porAno ? { tipo: "ano", valor: anoTxt } : { tipo: "mes", valor: mes },

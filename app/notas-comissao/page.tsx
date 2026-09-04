@@ -120,7 +120,7 @@ const paraNumero = (v: string) =>
 
 // Marcador de versão: com upload manual pelo GitHub é fácil olhar para uma
 // tela antiga e achar que a correção não funcionou. Fica visível no cabeçalho.
-const VERSAO = "v15";
+const VERSAO = "v16";
 
 const hojeISO = () => new Date().toISOString().slice(0, 10);
 
@@ -322,16 +322,27 @@ export default function NotasComissaoPage() {
               )}
             </div>
 
-            <div className="vj-resumo-emitidas">
-              {emitidas.length} nota{emitidas.length === 1 ? "" : "s"} pela data de emissão ·{" "}
-              {brl(emitidas.reduce((a, n) => a + (Number(n.valor_servico) || 0), 0))}
-              {(() => {
-                const fora = emitidas.filter((n) => n.status === "emitida" && !n.operacao_id).length;
-                return fora ? (
-                  <em> · {fora} sem operação, fora da planilha</em>
-                ) : null;
-              })()}
-            </div>
+            {/* v16: nota recusada pela Prefeitura nao e nota emitida. Ela continua
+                aparecendo aqui (senao sumiria de todo periodo), mas fora da
+                contagem e fora do total — antes ela inflava os dois. */}
+            {(() => {
+              const saiu = emitidas.filter((n) => n.status !== "a_emitir");
+              const falhou = emitidas.filter((n) => n.status === "a_emitir");
+              const fora = saiu.filter((n) => n.status === "emitida" && !n.operacao_id).length;
+              return (
+                <div className="vj-resumo-emitidas">
+                  {saiu.length} nota{saiu.length === 1 ? "" : "s"} pela data de emissão ·{" "}
+                  {brl(saiu.reduce((a, n) => a + (Number(n.valor_servico) || 0), 0))}
+                  {fora ? <em> · {fora} sem operação, fora da planilha</em> : null}
+                  {falhou.length ? (
+                    <em>
+                      {" "}
+                      · {falhou.length} recusada{falhou.length === 1 ? "" : "s"} pela Prefeitura
+                    </em>
+                  ) : null}
+                </div>
+              );
+            })()}
 
             <ImportarCsv onPronto={() => carregar()} />
             <VincularLote notas={emitidas} onPronto={() => carregar()} />
@@ -644,6 +655,10 @@ function CardCobranca({
 }) {
   const [aberto, setAberto] = useState(false);
   const comp = cobranca.sugestao?.composicao || [];
+  // tentativa que a Prefeitura recusou: a cobranca volta a ser emitivel
+  const recusada =
+    !!cobranca.nota && cobranca.nota.status === "a_emitir" && !cobranca.nota.numero_nota;
+  const temNota = !!cobranca.nota && !recusada;
   return (
     <section className="vj-card">
       <div className="vj-boleto-cab">
@@ -655,13 +670,19 @@ function CardCobranca({
             vencimento {fmtData(cobranca.vencimento)}
           </span>
           <span className="vj-sub-id">{cobranca.asaas_payment_id}</span>
+          {recusada && (
+            <span className="vj-erro-txt">
+              Tentativa anterior recusada pela Prefeitura
+              {cobranca.nota?.emissao_erro ? `: ${cobranca.nota.emissao_erro}` : "."}
+            </span>
+          )}
         </div>
         <div>
-          {cobranca.nota ? (
+          {temNota ? (
             <span className="vj-badge efet">nota emitida</span>
           ) : (
             <button className="vj-btn vj-primary" onClick={() => setAberto((v) => !v)}>
-              {aberto ? "Fechar" : "Emitir nota"}
+              {aberto ? "Fechar" : recusada ? "Tentar de novo" : "Emitir nota"}
             </button>
           )}
         </div>
