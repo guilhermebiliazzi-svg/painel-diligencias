@@ -42,6 +42,25 @@ function proximoMes(mes: string): string {
   return m === 12 ? `${a + 1}-01-01` : `${a}-${String(m + 1).padStart(2, "0")}-01`;
 }
 
+/**
+ * Uma linha de nota que nao virou NFS-e.
+ *
+ *  - 'a_emitir' sem numero: a Prefeitura recusou, da para tentar de novo.
+ *  - 'enviando' parado ha mais de 10 minutos: a funcao morreu antes de
+ *    registrar o desfecho (timeout do serviço de emissão). O RPS foi
+ *    consumido e a nota PODE ter sido aceita — quem decide e a pessoa,
+ *    conferindo no portal; aqui so deixamos de fingir que esta tudo bem.
+ */
+export function tentativaMorta(nt: any): boolean {
+  if (!nt || nt.numero_nota) return false;
+  if (nt.status === "a_emitir") return true;
+  if (nt.status === "enviando") {
+    const t = Date.parse(nt.updated_at || nt.created_at || "");
+    return Number.isFinite(t) && Date.now() - t > 10 * 60 * 1000;
+  }
+  return false;
+}
+
 export async function GET(req: Request) {
   const c = creds();
   if (!c) return NextResponse.json({ error: "Supabase não configurado." }, { status: 500 });
@@ -97,7 +116,7 @@ export async function GET(req: Request) {
     // é global, o filtro por mês vale só para a listagem das emitidas.
     const rVivas = await fetch(
       `${c.url}/rest/v1/adm_notas_comissao?status=neq.cancelada&asaas_payment_id=not.is.null` +
-        `&select=asaas_payment_id,status,numero_nota,pdf_url,valor_servico,tomador_nome,tomador_doc,emissao_erro,origem,created_at,id`,
+        `&select=asaas_payment_id,status,numero_nota,pdf_url,valor_servico,tomador_nome,tomador_doc,emissao_erro,origem,created_at,updated_at,rps_serie,rps_numero,id`,
       { headers: c.headers, cache: "no-store" }
     );
     const vivas = rVivas.ok ? ((await rVivas.json()) as any[]) : [];
@@ -168,13 +187,12 @@ export async function GET(req: Request) {
     });
 
     return NextResponse.json({
-      // A aba de trabalho mostra o que falta emitir. Uma tentativa recusada
-      // pela Prefeitura (status 'a_emitir', sem numero_nota) NAO conta como
-      // nota: antes ela escondia a cobranca aqui e a nota ficava num limbo,
-      // sem aparecer em lugar nenhum de onde desse para tentar de novo.
-      cobrancas: cobrancas.filter(
-        (cb) => !cb.nota || (cb.nota.status === "a_emitir" && !cb.nota.numero_nota)
-      ),
+      // A aba de trabalho mostra o que falta emitir. Uma tentativa que nao
+      // virou nota NAO conta como nota: antes ela escondia a cobranca aqui e
+      // a emissao ficava num limbo, sem aparecer em lugar nenhum de onde
+      // desse para tentar de novo. Vale para a recusada pela Prefeitura
+      // ('a_emitir') e para a que morreu no meio do envio ('enviando').
+      cobrancas: cobrancas.filter((cb) => !cb.nota || tentativaMorta(cb.nota)),
       emitidas: notasDoMes,
       mes,
       periodo: porAno ? { tipo: "ano", valor: anoTxt } : { tipo: "mes", valor: mes },

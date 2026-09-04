@@ -25,6 +25,9 @@ type Nota = {
   numero_nota: string | null;
   pdf_url: string | null;
   emissao_erro: string | null;
+  rps_serie?: string | null;
+  rps_numero?: number | null;
+  updated_at?: string | null;
   origem: string;
   created_at: string;
 };
@@ -120,7 +123,7 @@ const paraNumero = (v: string) =>
 
 // Marcador de versão: com upload manual pelo GitHub é fácil olhar para uma
 // tela antiga e achar que a correção não funcionou. Fica visível no cabeçalho.
-const VERSAO = "v16";
+const VERSAO = "v17";
 
 const hojeISO = () => new Date().toISOString().slice(0, 10);
 
@@ -655,10 +658,12 @@ function CardCobranca({
 }) {
   const [aberto, setAberto] = useState(false);
   const comp = cobranca.sugestao?.composicao || [];
-  // tentativa que a Prefeitura recusou: a cobranca volta a ser emitivel
-  const recusada =
-    !!cobranca.nota && cobranca.nota.status === "a_emitir" && !cobranca.nota.numero_nota;
-  const temNota = !!cobranca.nota && !recusada;
+  // tentativa que nao virou nota: a cobranca volta a ser emitivel
+  const nt = cobranca.nota;
+  const recusada = !!nt && nt.status === "a_emitir" && !nt.numero_nota;
+  // envio que morreu no meio: o RPS foi consumido e a nota PODE existir
+  const interrompida = !!nt && nt.status === "enviando" && !nt.numero_nota;
+  const temNota = !!nt && !recusada && !interrompida;
   return (
     <section className="vj-card">
       <div className="vj-boleto-cab">
@@ -673,7 +678,15 @@ function CardCobranca({
           {recusada && (
             <span className="vj-erro-txt">
               Tentativa anterior recusada pela Prefeitura
-              {cobranca.nota?.emissao_erro ? `: ${cobranca.nota.emissao_erro}` : "."}
+              {nt?.emissao_erro ? `: ${nt.emissao_erro}` : "."}
+            </span>
+          )}
+          {interrompida && (
+            <span className="vj-erro-txt">
+              Envio interrompido antes da resposta — o RPS{" "}
+              {nt?.rps_serie || ""} nº {nt?.rps_numero ?? "?"} já foi consumido e a nota{" "}
+              <b>pode ter sido aceita</b> pela Prefeitura. Confira no portal antes de emitir de
+              novo, senão sai em duplicidade.
             </span>
           )}
         </div>
@@ -682,7 +695,7 @@ function CardCobranca({
             <span className="vj-badge efet">nota emitida</span>
           ) : (
             <button className="vj-btn vj-primary" onClick={() => setAberto((v) => !v)}>
-              {aberto ? "Fechar" : recusada ? "Tentar de novo" : "Emitir nota"}
+              {aberto ? "Fechar" : recusada || interrompida ? "Tentar de novo" : "Emitir nota"}
             </button>
           )}
         </div>

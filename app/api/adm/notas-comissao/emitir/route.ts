@@ -142,11 +142,21 @@ export async function POST(req: Request) {
 
       const rJa = await fetch(
         `${c.url}/rest/v1/adm_notas_comissao?asaas_payment_id=eq.${asaas_payment_id}` +
-          `&status=neq.cancelada&select=id,status,valor_servico,tomador_doc,numero_nota`,
+          `&status=neq.cancelada&select=id,status,valor_servico,tomador_doc,numero_nota,created_at,updated_at`,
         { headers: c.headers, cache: "no-store" }
       );
       const doPagamento = rJa.ok ? ((await rJa.json()) as any[]) : [];
-      const recusada = (x: any) => x.status === "a_emitir" && !x.numero_nota;
+      // mesma regra da listagem: recusada pela Prefeitura, ou envio que morreu
+      // no meio (status 'enviando' parado ha mais de 10 min)
+      const recusada = (x: any) => {
+        if (x.numero_nota) return false;
+        if (x.status === "a_emitir") return true;
+        if (x.status === "enviando") {
+          const t = Date.parse(x.updated_at || x.created_at || "");
+          return Number.isFinite(t) && Date.now() - t > 10 * 60 * 1000;
+        }
+        return false;
+      };
       const jaEmitidas = doPagamento.filter((x) => !recusada(x));
 
       const anterior = doPagamento.find(
@@ -319,7 +329,7 @@ export async function POST(req: Request) {
         cache: "no-store",
       });
       resultado = await rEmitir.json().catch(() => null);
-      if (!rEmitir.ok && !resultado) erroRede = `HTTP ${rEmitir.status}`;
+      if (!rEmitir.ok && !resultado) erroRede = `serviço de emissão respondeu HTTP ${rEmitir.status}`;
     } catch (e: any) {
       erroRede = String((e && e.message) || e);
     }
@@ -340,9 +350,15 @@ export async function POST(req: Request) {
     }
 
     if (erroRede || !resultado || resultado.sucesso !== true) {
+      // "falha desconhecida" nao ajuda ninguem: quando o serviço responde sem
+      // a lista de erros, levamos o corpo bruto (cortado) para o card.
       const motivo =
         erroRede ||
         (resultado?.erros || []).map((e: any) => `${e.codigo}: ${e.descricao}`).join(" · ") ||
+        resultado?.mensagem ||
+        resultado?.message ||
+        resultado?.erro ||
+        (resultado ? `resposta inesperada do serviço: ${JSON.stringify(resultado).slice(0, 400)}` : null) ||
         "falha desconhecida";
       await atualizar(nota!.id, { status: "a_emitir", emissao_erro: motivo.slice(0, 1000) });
       return NextResponse.json(
