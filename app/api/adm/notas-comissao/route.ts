@@ -224,6 +224,46 @@ export async function PATCH(req: Request) {
 
   const notaId = Number(body?.nota_id);
   const operacaoId = Number(body?.operacao_id);
+  const acao = String(body?.acao || "").trim();
+
+  // v18: marcar como cancelada.
+  //
+  // Isto NAO cancela a NFS-e na Prefeitura — o cancelamento de verdade e
+  // feito no portal, a mao. Aqui so registramos o fato, para a cobranca
+  // voltar a ficar emitivel e para a nota sair da DIMOB (a view
+  // adm_v_dimob_comissoes filtra status = 'emitida').
+  if (acao === "cancelar") {
+    if (!notaId) {
+      return NextResponse.json({ error: "nota_id é obrigatório." }, { status: 400 });
+    }
+    try {
+      // so cancela o que esta emitido: evita mexer em tentativa que falhou
+      // ou em linha ja cancelada por engano de clique duplo
+      const r = await fetch(
+        `${c.url}/rest/v1/adm_notas_comissao?id=eq.${notaId}&status=eq.emitida`,
+        {
+          method: "PATCH",
+          headers: { ...c.headers, "Content-Type": "application/json", Prefer: "return=representation" },
+          body: JSON.stringify({ status: "cancelada", updated_at: new Date().toISOString() }),
+          cache: "no-store",
+        }
+      );
+      if (!r.ok) {
+        return NextResponse.json({ error: "Falha ao cancelar", detail: await r.text() }, { status: 502 });
+      }
+      const linhas = (await r.json()) as any[];
+      if (!linhas.length) {
+        return NextResponse.json(
+          { error: "Nada foi alterado: esta nota não está com status 'emitida'. Recarregue a tela." },
+          { status: 409 }
+        );
+      }
+      return NextResponse.json({ ok: true, nota: linhas[0] });
+    } catch (e: any) {
+      return NextResponse.json({ error: "Erro de rede", detail: String(e) }, { status: 502 });
+    }
+  }
+
   if (!notaId || !operacaoId) {
     return NextResponse.json({ error: "nota_id e operacao_id são obrigatórios." }, { status: 400 });
   }

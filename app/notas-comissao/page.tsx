@@ -123,7 +123,7 @@ const paraNumero = (v: string) =>
 
 // Marcador de versão: com upload manual pelo GitHub é fácil olhar para uma
 // tela antiga e achar que a correção não funcionou. Fica visível no cabeçalho.
-const VERSAO = "v17";
+const VERSAO = "v18";
 
 const hojeISO = () => new Date().toISOString().slice(0, 10);
 
@@ -329,8 +329,14 @@ export default function NotasComissaoPage() {
                 aparecendo aqui (senao sumiria de todo periodo), mas fora da
                 contagem e fora do total — antes ela inflava os dois. */}
             {(() => {
-              const saiu = emitidas.filter((n) => n.status !== "a_emitir");
+              // v18: cancelada tambem sai da contagem e do total. Ela some da
+              // DIMOB (a view filtra status='emitida'), entao somar aqui daria
+              // um numero que nao bate com nada.
+              const saiu = emitidas.filter(
+                (n) => n.status !== "a_emitir" && n.status !== "cancelada"
+              );
               const falhou = emitidas.filter((n) => n.status === "a_emitir");
+              const canceladas = emitidas.filter((n) => n.status === "cancelada");
               const fora = saiu.filter((n) => n.status === "emitida" && !n.operacao_id).length;
               return (
                 <div className="vj-resumo-emitidas">
@@ -341,6 +347,13 @@ export default function NotasComissaoPage() {
                     <em>
                       {" "}
                       · {falhou.length} recusada{falhou.length === 1 ? "" : "s"} pela Prefeitura
+                    </em>
+                  ) : null}
+                  {canceladas.length ? (
+                    <em>
+                      {" "}
+                      · {canceladas.length} cancelada{canceladas.length === 1 ? "" : "s"} (fora do
+                      total e da DIMOB)
                     </em>
                   ) : null}
                 </div>
@@ -392,9 +405,38 @@ export default function NotasComissaoPage() {
 
 function LinhaNota({ nota, onMudou }: { nota: Nota; onMudou?: () => void }) {
   const emitida = nota.status === "emitida";
+  const cancelada = nota.status === "cancelada";
   const [vinculando, setVinculando] = useState(false);
   const [criandoDaDiscri, setCriandoDaDiscri] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [cancelando, setCancelando] = useState(false);
+
+  // v18: registra no painel uma nota que ja foi cancelada NA PREFEITURA.
+  // Nao cancela nada la — por isso o texto do confirm e explicito.
+  async function marcarCancelada() {
+    const ok = window.confirm(
+      `Marcar a NFS-e nº ${nota.numero_nota} (${nota.tomador_nome}) como CANCELADA no painel?\n\n` +
+        `Isto NÃO cancela a nota na Prefeitura — faça isso antes, no portal da NFS-e.\n\n` +
+        `Aqui a nota sai do total do mês e da DIMOB, e a cobrança volta para "A emitir".`
+    );
+    if (!ok) return;
+    setCancelando(true);
+    setMsg(null);
+    try {
+      const r = await fetch("/api/adm/notas-comissao", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nota_id: nota.id, acao: "cancelar" }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) setMsg(d?.error || "Falha ao cancelar.");
+      else onMudou?.();
+    } catch {
+      setMsg("Erro de rede.");
+    } finally {
+      setCancelando(false);
+    }
+  }
 
   async function vincular(operacaoId: number) {
     setMsg(null);
@@ -417,13 +459,27 @@ function LinhaNota({ nota, onMudou }: { nota: Nota; onMudou?: () => void }) {
 
   return (
     <>
-      <div className={`vj-nota ${emitida ? "ok" : "pend"}`}>
+      <div className={`vj-nota ${emitida ? "ok" : cancelada ? "cancel" : "pend"}`}>
         <div>
           <b>{nota.tomador_nome}</b>
           <span className="vj-sub-id">
             {fmtDoc(nota.tomador_doc)} · {brl(nota.valor_servico)}
             {emitida && nota.numero_nota ? ` · NFS-e nº ${nota.numero_nota}` : ` · ${nota.status}`}
+            {cancelada && nota.numero_nota ? ` (nº ${nota.numero_nota})` : ""}
           </span>
+          {emitida && (
+            <span className="vj-sub-id">
+              <button
+                type="button"
+                className="vj-link"
+                disabled={cancelando}
+                onClick={marcarCancelada}
+              >
+                {cancelando ? "marcando…" : "marcar como cancelada"}
+              </button>
+            </span>
+          )}
+          {msg && <span className="vj-erro-txt">{msg}</span>}
           {nota.emissao_erro && <span className="vj-erro-txt">{nota.emissao_erro}</span>}
           {emitida && !nota.operacao_id && (
             <span className="vj-erro-txt">
@@ -2018,6 +2074,9 @@ const CSS = `
 .vj-soma.ruim{color:#8B1A24}
 .vj-nota{display:flex;justify-content:space-between;align-items:center;gap:12px;border:1px solid var(--linha);border-radius:11px;padding:12px 14px;margin-top:10px;background:#F8FAFD}
 .vj-nota.ok{border-color:#BCE3D0;background:#F3FAF6}
+/* v18: cancelada fica cinza e riscada — nao conta no mes nem na DIMOB */
+.vj-nota.cancel{border-color:#D8DCE3;background:#F1F2F4;opacity:.72}
+.vj-nota.cancel b{text-decoration:line-through}
 .vj-nota-link{color:var(--azul);font-weight:600;font-size:13px;text-decoration:none;white-space:nowrap}
 .vj-comp{border:1px solid var(--linha);border-radius:11px;padding:10px 14px;background:#F8FAFD;margin-top:6px}
 .vj-comp summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--azul)}
