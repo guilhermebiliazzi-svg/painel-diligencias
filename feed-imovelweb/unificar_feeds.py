@@ -100,11 +100,23 @@ def baixar(origem, destino, tentativas=3):
     raise RuntimeError(f"nao consegui baixar {origem} -> {ultimo}")
 
 
+def sem_cache(url):
+    """Acrescenta um selo unico a URL.
+
+    As origens ficam atras de CDN. Cada ponto da rede guarda a sua copia, e
+    ja pegamos uma de 11 dias atras (07/09): o XML sairia perfeito, so com
+    estoque velho — falha silenciosa, sem erro e sem alarme. Um parametro
+    novo a cada execucao vira uma chave de cache inedita e obriga a CDN a
+    buscar na origem.
+    """
+    return url + ("&" if "?" in url else "?") + "_=" + str(int(time.time()))
+
+
 def obter(origem):
     """Le de arquivo local ou baixa de URL. Retorna caminho local."""
     if origem.startswith("http"):
         destino = f"/tmp/feed_{abs(hash(origem))}.xml"
-        return baixar(origem, destino)
+        return baixar(sem_cache(origem), destino)
     return origem
 
 
