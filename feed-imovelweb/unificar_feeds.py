@@ -12,8 +12,12 @@ Uso:
 """
 
 import re
+import shutil
 import sys
 import os
+import time
+import urllib.error
+import urllib.request
 from collections import Counter
 from datetime import datetime
 
@@ -57,13 +61,45 @@ RE_TIPO_PUB = re.compile(r"<tipoPublicacao>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*
 
 # ---------------------------------------------------------------- io
 
+# Alguns provedores (goiconnect/Akamai) recusam o User-Agent padrao do Python
+# com 403 ou 404. Pedimos como um navegador normal.
+CABECALHOS_HTTP = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/xml,text/xml,application/rss+xml,*/*;q=0.8",
+    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+    "Connection": "close",
+}
+
+
+def baixar(origem, destino, tentativas=3):
+    """Baixa a URL para destino, em streaming. Erro traz a URL e o codigo HTTP."""
+    ultimo = "sem detalhe"
+    for n in range(1, tentativas + 1):
+        pedido = urllib.request.Request(origem, headers=CABECALHOS_HTTP)
+        try:
+            with urllib.request.urlopen(pedido, timeout=300) as r:
+                with open(destino, "wb") as f:
+                    shutil.copyfileobj(r, f, 1 << 20)
+            return destino
+        except urllib.error.HTTPError as e:
+            ultimo = f"HTTP {e.code} {e.reason}"
+            if e.code in (401, 403, 404, 410):
+                break  # repetir nao resolve
+        except Exception as e:
+            ultimo = f"{type(e).__name__}: {e}"
+        if n < tentativas:
+            time.sleep(3 * n)
+    raise RuntimeError(f"nao consegui baixar {origem} -> {ultimo}")
+
+
 def obter(origem):
     """Le de arquivo local ou baixa de URL. Retorna caminho local."""
     if origem.startswith("http"):
-        import urllib.request
         destino = f"/tmp/feed_{abs(hash(origem))}.xml"
-        urllib.request.urlretrieve(origem, destino)
-        return destino
+        return baixar(origem, destino)
     return origem
 
 
