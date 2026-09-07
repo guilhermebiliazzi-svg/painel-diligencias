@@ -70,9 +70,8 @@
   .acoes button.on.super{background:var(--ouro);border-color:var(--ouro);color:#fff}
   .acoes button.on.dest{background:var(--azul);border-color:var(--azul);color:#fff}
   .acoes button.on.simp{background:var(--cinza);border-color:var(--cinza);color:#fff}
-  .acoes button.auto.super{background:var(--ouroclaro);border-color:#fed7aa;color:var(--ouro)}
-  .acoes button.auto.dest{background:var(--azulclaro);border-color:#c7d7fe;color:var(--azul)}
-  .acoes button.auto.simp{background:var(--cinzaclaro);color:var(--cinza)}
+  .tag.autosuper{background:var(--ouroclaro);color:var(--ouro);border-color:#fed7aa}
+  .tag.autodest{background:var(--azulclaro);color:var(--azul);border-color:#c7d7fe}
   .rodape{position:fixed;left:0;right:0;bottom:0;background:var(--papel);
           border-top:1px solid var(--linha);padding:12px 18px;display:flex;
           gap:12px;align-items:center;justify-content:flex-end}
@@ -164,8 +163,10 @@
   <div id="aviso"></div>
   <div id="lista"></div>
   <div class="legenda">
-    Botão <b>cheio</b> = escolha sua. Botão <b>colorido claro</b> = decidido
-    automaticamente. Clicar de novo no mesmo botão devolve o imóvel para o automático.
+    Botão pintado = escolha sua; clicar nele de novo desfaz. A etiqueta
+    <span class="tag autosuper">Super automático</span> ou
+    <span class="tag autodest">Destaque automático</span> mostra o que o sistema
+    decidiu sozinho — some assim que você escolher algo para aquele imóvel.
   </div>
 </main>
 
@@ -379,9 +380,10 @@
       var cod = esc(it.c);
       var e = efetivo[it.c] || 'SIMPLE';
       var m = manual[it.c];
+      // O botao so acende quando a escolha e da pessoa. O que o sistema
+      // decidiu aparece como etiqueta na linha, para nao virar meio-termo.
       function cls(tipo, sufixo){
-        if (e !== tipo) return sufixo;
-        return sufixo + (m === tipo ? ' on' : ' auto');
+        return sufixo + (m === tipo ? ' on' : '');
       }
       var capa = it.u
         ? '<img src="' + esc(it.u) + '" alt="" loading="lazy" ' +
@@ -389,6 +391,8 @@
         : '<div class="vazia">sem foto</div>';
       var tags = '<span class="tag ' + (it.f === 'i' ? 'ilist">iList' : 'nonstop">Nonstop') + '</span>';
       if (it.o === 'ALUGUEL') tags += '<span class="tag aluguel">Aluguel</span>';
+      if (!m && e === 'HOME')  tags += '<span class="tag autosuper">Super automático</span>';
+      if (!m && e === 'DESTACADO') tags += '<span class="tag autodest">Destaque automático</span>';
 
       html += '<tr>' +
         '<td class="capa">' + capa + '</td>' +
