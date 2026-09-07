@@ -87,6 +87,9 @@ def subir(caminho, nome_arquivo, content_type):
                 "Content-Type": content_type,
                 "Content-Length": str(tamanho),
                 "x-upsert": "true",
+                # o padrao do Storage e 1 hora; com 5 min o portal nunca
+                # pega uma copia velha logo depois de uma regeracao
+                "cache-control": "max-age=300",
             },
             data=f,
             timeout=600,
