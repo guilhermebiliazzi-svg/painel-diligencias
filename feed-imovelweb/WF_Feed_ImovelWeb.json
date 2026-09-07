@@ -1,0 +1,276 @@
+{
+  "name": "Feed ImovelWeb — gerar e publicar (Ville, Homemark, Alcance)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "13 5 * * *"
+            }
+          ]
+        }
+      },
+      "id": "e1a00000-0000-4000-8000-000000000001",
+      "name": "Cron — 05:13 UTC (02:13 BRT)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "notes": "Minuto escolhido para nao colidir com os pesados (:00 da EVA, :07/:22/:23/:37/:52). Ver incidente_oom_agendamentos_23ago.md."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FEED_RENDER_URL }}/gerar",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-feed-token",
+              "value": "={{ $env.FEED_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "e1a00000-0000-4000-8000-000000000002",
+      "name": "Disparar Geração",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "Responde 202 na hora; quem trabalha e o Render. 409 quer dizer que ja havia uma geracao em andamento."
+    },
+    {
+      "parameters": {
+        "amount": 4,
+        "unit": "minutes"
+      },
+      "id": "e1a00000-0000-4000-8000-000000000003",
+      "name": "Aguardar 4 min",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        0
+      ],
+      "webhookId": "feed-imovelweb-espera"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.FEED_RENDER_URL }}/status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-feed-token",
+              "value": "={{ $env.FEED_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "e1a00000-0000-4000-8000-000000000004",
+      "name": "Consultar Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lê o /status do serviço no Render e decide se vale acordar alguém.\n//\n// Avisa quando: o job não concluiu, alguma sucursal deu erro, a contagem\n// desabou (fonte fora do ar costuma parecer \"imóvel sumiu\") ou estourou a cota.\n// Silêncio quer dizer que os três feeds subiram com volume normal.\n\n// Referências medidas em 07/09/2026. Atualize se o estoque mudar de patamar.\nconst REFERENCIA = { ville: 2671, homemark: 2186, alcance: 444 };\nconst PISO = 0.6; // abaixo de 60% da referência é suspeito\n\nconst j = $input.first().json || {};\nconst linhas = [];\nconst problemas = [];\n\nif (!j.estado || (j.estado !== 'concluido' && j.estado !== 'concluido_com_erro')) {\n  problemas.push('O serviço não terminou a geração (estado: ' + (j.estado || 'desconhecido') + ').');\n}\n\nfor (const s of (j.sucursais || [])) {\n  const nome = s.sucursal;\n  if (s.estado !== 'ok') {\n    problemas.push(nome + ': ' + (s.erro || 'falhou'));\n    linhas.push('• ' + nome + ': ERRO');\n    continue;\n  }\n  const ref = REFERENCIA[nome] || 0;\n  const alerta = [];\n  if (ref && s.total < Math.round(ref * PISO)) {\n    alerta.push('queda de volume (esperado ~' + ref + ')');\n  }\n  if (s.livres < 0) {\n    alerta.push('excede a cota em ' + (-s.livres));\n  }\n  if (alerta.length) problemas.push(nome + ': ' + alerta.join('; '));\n  linhas.push('• ' + nome + ': ' + s.total + ' imóveis, ' + s.mb + ' MB, ' +\n              s.livres + ' vagas livres' + (alerta.length ? '  ⚠ ' + alerta.join('; ') : ''));\n}\n\nif (!(j.sucursais || []).length) problemas.push('Nenhuma sucursal foi processada.');\n\nconst cabecalho = problemas.length\n  ? '⚠️ Feed ImovelWeb — atenção'\n  : '✅ Feed ImovelWeb atualizado';\n\nconst mensagem = [cabecalho, '']\n  .concat(linhas)\n  .concat(problemas.length ? ['', 'Problemas:'].concat(problemas.map(p => '– ' + p)) : [])\n  .join('\\n');\n\nreturn [{ json: { avisar: problemas.length > 0, mensagem, problemas, estado: j.estado || null, job_id: j.job_id || null } }];"
+      },
+      "id": "e1a00000-0000-4000-8000-000000000005",
+      "name": "Avaliar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "a",
+              "leftValue": "={{ $json.avisar }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e1a00000-0000-4000-8000-000000000006",
+      "name": "Precisa avisar?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v21.0/{{ $env.WA_PHONE_NUMBER_ID }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.WA_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $env.ADMIN_WHATSAPP, type: 'text', text: { body: $json.mensagem } }) }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "e1a00000-0000-4000-8000-000000000007",
+      "name": "Avisar no WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        -96
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {},
+      "id": "e1a00000-0000-4000-8000-000000000008",
+      "name": "Tudo certo (sem aviso)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        96
+      ],
+      "notes": "A execucao guarda os numeros de cada sucursal no no Avaliar."
+    }
+  ],
+  "connections": {
+    "Cron — 05:13 UTC (02:13 BRT)": {
+      "main": [
+        [
+          {
+            "node": "Disparar Geração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Disparar Geração": {
+      "main": [
+        [
+          {
+            "node": "Aguardar 4 min",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar 4 min": {
+      "main": [
+        [
+          {
+            "node": "Consultar Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar Status": {
+      "main": [
+        [
+          {
+            "node": "Avaliar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avaliar": {
+      "main": [
+        [
+          {
+            "node": "Precisa avisar?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Precisa avisar?": {
+      "main": [
+        [
+          {
+            "node": "Avisar no WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tudo certo (sem aviso)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}
