@@ -32,6 +32,12 @@
   .cota.cheia{outline:2px solid currentColor}
   input[type=search]{flex:1 1 220px;min-width:170px;padding:8px 12px;border-radius:8px;
         border:1px solid var(--linha);font-size:14px;background:var(--papel)}
+  .faixa{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--fraco);
+         border:1px solid var(--linha);border-radius:8px;padding:3px 10px;background:var(--papel)}
+  .faixa input{width:104px;padding:5px 2px;border:0;font-size:13.5px;background:transparent;
+               font-variant-numeric:tabular-nums}
+  .faixa input:focus{outline:0}
+  .faixa.ativa{border-color:var(--azul);color:var(--azul)}
   select{padding:8px 10px;border-radius:8px;border:1px solid var(--linha);
          background:var(--papel);font-size:13.5px}
   button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--linha);
@@ -78,7 +84,8 @@
   .rodape .msg{margin-right:auto;font-size:13px;color:var(--fraco)}
   .rodape .msg.ok{color:var(--verde)} .rodape .msg.err{color:var(--vermelho)}
   .vazio{padding:26px;text-align:center;color:var(--fraco)}
-  .corte{padding:10px 12px;color:var(--fraco);font-size:13px;background:#fafbfc}
+  .corte{padding:12px;background:#fafbfc;text-align:center;color:var(--fraco);font-size:13px}
+  .corte button{margin-right:10px}
   .legenda{color:var(--fraco);font-size:12.5px;margin:10px 2px 0}
   /* tela de login */
   #entrada{display:none;min-height:100vh;align-items:center;justify-content:center;padding:24px}
@@ -151,6 +158,12 @@
       <option value="SIMPLE">Só simples</option>
       <option value="escolhidos">Só os que escolhi</option>
     </select>
+    <div class="faixa" id="caixaFaixa">
+      <span>R$</span>
+      <input type="number" id="vMin" min="0" step="1000" placeholder="de">
+      <span>até</span>
+      <input type="number" id="vMax" min="0" step="1000" placeholder="sem limite">
+    </div>
     <select id="ordem">
       <option value="origem">Ordem do XML (iList, depois Nonstop)</option>
       <option value="maior">Maior valor</option>
@@ -180,11 +193,12 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 (function(){
-  var LIMITE = 200;
+  var PASSO = 200;      // quantos imoveis a mais a cada carregamento
+  var mostrados = PASSO;
   var partes = location.pathname.split('/').filter(Boolean);
   var sucursal = partes[partes.length - 1] || '';
   var sb = null, sessao = null;
-  var itens = [], cotaH = 0, cotaD = 0, sujo = false;
+  var itens = [], caros = [], linhas = [], cotaH = 0, cotaD = 0, sujo = false;
   var manual = {};   // codigo -> HOME | DESTACADO | SIMPLE (escolha de gente)
   var efetivo = {};  // codigo -> o que vai sair no XML
   var totais = {HOME:0, DESTACADO:0, SIMPLE:0, escolhaH:0, escolhaD:0, escolhaS:0};
@@ -279,7 +293,6 @@
     itens.forEach(function(it){
       if (manual[it.c] === 'SIMPLE') { efetivo[it.c]='SIMPLE'; }
     });
-    var caros = itens.slice().sort(function(a,b){ return (b.p||0) - (a.p||0); });
     for (var i = 0; i < caros.length && (nh < cotaH || nd < cotaD); i++) {
       var c = caros[i].c;
       if (efetivo[c]) continue;
@@ -336,7 +349,10 @@
       manual[codigo] = tipo;
     }
     sujo = true; recado('');
-    calcular(); desenhar();
+    calcular();
+    contar();
+    if ($('fPublicacao').value) desenhar();   // o filtro muda quem aparece
+    else atualizarLinhas();
   }
 
   // ------------------------------------------------------------- desenho
@@ -355,10 +371,16 @@
     contar();
     var termo = semAcento($('busca').value.trim());
     var op = $('fOperacao').value, org = $('fOrigem').value, pub = $('fPublicacao').value;
+    var vmin = parseFloat($('vMin').value), vmax = parseFloat($('vMax').value);
+    if (!isFinite(vmin)) vmin = null;
+    if (!isFinite(vmax)) vmax = null;
+    $('caixaFaixa').classList.toggle('ativa', vmin !== null || vmax !== null);
 
     var visiveis = itens.filter(function(it){
       if (op && it.o !== op) return false;
       if (org && it.f !== org) return false;
+      if (vmin !== null && (it.p || 0) < vmin) return false;
+      if (vmax !== null && (it.p || 0) > vmax) return false;
       if (pub === 'escolhidos' && !manual[it.c]) return false;
       if ((pub === 'HOME' || pub === 'DESTACADO' || pub === 'SIMPLE')
           && (efetivo[it.c] || 'SIMPLE') !== pub) return false;
@@ -372,7 +394,8 @@
       return;
     }
 
-    var mostrar = visiveis.slice(0, LIMITE);
+    if (mostrados > visiveis.length) mostrados = Math.max(PASSO, visiveis.length);
+    var mostrar = visiveis.slice(0, mostrados);
     var html = '<table><thead><tr><th></th><th>Imóvel</th>' +
       '<th class="preco">Valor</th><th></th></tr></thead><tbody>';
 
@@ -391,13 +414,13 @@
         : '<div class="vazia">sem foto</div>';
       var tags = '<span class="tag ' + (it.f === 'i' ? 'ilist">iList' : 'nonstop">Nonstop') + '</span>';
       if (it.o === 'ALUGUEL') tags += '<span class="tag aluguel">Aluguel</span>';
-      if (!m && e === 'HOME')  tags += '<span class="tag autosuper">Super automático</span>';
-      if (!m && e === 'DESTACADO') tags += '<span class="tag autodest">Destaque automático</span>';
 
-      html += '<tr>' +
+
+      html += '<tr data-c="' + cod + '">' +
         '<td class="capa">' + capa + '</td>' +
         '<td><div class="tit">' + esc(it.t) + '</div>' +
-        '<div class="end">' + tags + esc(it.e) + ' · ' + cod + '</div></td>' +
+        '<div class="end">' + tags + '<span class="estado"></span>' +
+        esc(it.e) + ' · ' + cod + '</div></td>' +
         '<td class="preco">' + (it.p ? moeda.format(it.p) : '—') +
           (it.o === 'ALUGUEL' ? '<small>por mês</small>' : '') + '</td>' +
         '<td class="acoes">' +
@@ -407,14 +430,77 @@
         '</td></tr>';
     });
     html += '</tbody></table>';
-    if (visiveis.length > LIMITE) {
-      html += '<div class="corte">Mostrando os ' + LIMITE + ' primeiros de ' +
-              num(visiveis.length) + '. Use a busca ou os filtros para chegar num imóvel.</div>';
+    var faltam = visiveis.length - mostrar.length;
+    if (faltam > 0) {
+      html += '<div class="corte"><button id="mais">Mostrar mais ' +
+              num(Math.min(PASSO, faltam)) + '</button>' +
+              'mostrando ' + num(mostrar.length) + ' de ' + num(visiveis.length) +
+              ' · role a página para carregar sozinho</div>';
+    } else if (visiveis.length > PASSO) {
+      html += '<div class="corte">' + num(visiveis.length) + ' imóveis — fim da lista.</div>';
     }
     $('lista').innerHTML = html;
 
     Array.prototype.forEach.call($('lista').querySelectorAll('.acoes button'), function(b){
       b.onclick = function(){ alternar(b.getAttribute('data-c'), b.getAttribute('data-t')); };
+    });
+    var bt = $('mais');
+    if (bt) bt.onclick = carregarMais;
+
+    linhas = [];
+    Array.prototype.forEach.call($('lista').querySelectorAll('tbody tr'), function(tr){
+      linhas.push({
+        c: tr.getAttribute('data-c'),
+        botoes: tr.querySelectorAll('.acoes button'),
+        estado: tr.querySelector('.estado'),
+      });
+    });
+    atualizarLinhas();
+  }
+
+  function carregarMais(){
+    mostrados += PASSO;
+    desenhar();
+  }
+
+  // Rolou perto do fim? carrega o proximo lote sozinho.
+  window.addEventListener('scroll', function(){
+    if (!$('mais')) return;
+    var falta = document.body.scrollHeight - (window.scrollY + window.innerHeight);
+    if (falta < 600) carregarMais();
+  });
+
+  // Atualiza so o que mudou nas linhas ja desenhadas: um clique muda o estado
+  // de outros imoveis (o automatico remaneja), e redesenhar a tabela inteira
+  // com milhares de linhas travaria a pagina a cada clique.
+  var CLASSES = ['super', 'dest', 'simp'];
+  var TIPOS = ['HOME', 'DESTACADO', 'SIMPLE'];
+
+  function atualizarLinhas(){
+    linhas.forEach(function(linha){
+      var m = manual[linha.c], e = efetivo[linha.c] || 'SIMPLE';
+      for (var i = 0; i < linha.botoes.length; i++) {
+        var classe = CLASSES[i] + (m === TIPOS[i] ? ' on' : '');
+        if (linha.botoes[i].className !== classe) linha.botoes[i].className = classe;
+      }
+      var alvo = linha.estado;
+      if (!alvo) return;
+      // trocar className/textContent e muito mais barato que recriar o no —
+      // com a lista inteira aberta sao milhares deles a cada clique
+      if (!m && e === 'HOME') {
+        if (alvo.className !== 'tag autosuper estado') {
+          alvo.className = 'tag autosuper estado';
+          alvo.textContent = 'Super automático';
+        }
+      } else if (!m && e === 'DESTACADO') {
+        if (alvo.className !== 'tag autodest estado') {
+          alvo.className = 'tag autodest estado';
+          alvo.textContent = 'Destaque automático';
+        }
+      } else if (alvo.className !== 'estado') {
+        alvo.className = 'estado';
+        alvo.textContent = '';
+      }
     });
   }
 
@@ -452,6 +538,8 @@
           return;
         }
         itens = d.catalogo.itens;
+        // usada pelo preenchimento automatico a cada clique: ordenar uma vez
+        caros = itens.slice().sort(function(a, b){ return (b.p || 0) - (a.p || 0); });
         var i = 0, n = 0;
         itens.forEach(function(x){ if (x.f === 'i') i++; else n++; });
         var quando = d.catalogo.gerado_em
@@ -472,8 +560,11 @@
       });
   }
 
-  ['busca'].forEach(function(id){ $(id).oninput = desenhar; });
-  ['fOperacao','fOrigem','fPublicacao','ordem'].forEach(function(id){ $(id).onchange = desenhar; });
+  function recomecar(){ mostrados = PASSO; desenhar(); }
+  $('busca').oninput = recomecar;
+  $('vMin').oninput = recomecar;
+  $('vMax').oninput = recomecar;
+  ['fOperacao','fOrigem','fPublicacao','ordem'].forEach(function(id){ $(id).onchange = recomecar; });
 
   $('limpar').onclick = function(){
     var tem = false; for (var k in manual) { tem = true; break; }
