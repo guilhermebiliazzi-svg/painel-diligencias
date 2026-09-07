@@ -25,6 +25,7 @@
   .cota{padding:6px 12px;border-radius:8px;border:1px solid var(--linha);
         font-size:13px;white-space:nowrap}
   .cota b{font-size:15px;font-variant-numeric:tabular-nums}
+  .cota .auto{opacity:.7;font-size:12px}
   .cota.super{background:var(--ouroclaro);border-color:#fed7aa;color:var(--ouro)}
   .cota.dest{background:var(--azulclaro);border-color:#c7d7fe;color:var(--azul)}
   .cota.simp{background:var(--cinzaclaro);color:var(--cinza)}
@@ -185,7 +186,7 @@
   var itens = [], cotaH = 0, cotaD = 0, sujo = false;
   var manual = {};   // codigo -> HOME | DESTACADO | SIMPLE (escolha de gente)
   var efetivo = {};  // codigo -> o que vai sair no XML
-  var totais = {HOME:0, DESTACADO:0, SIMPLE:0};
+  var totais = {HOME:0, DESTACADO:0, SIMPLE:0, escolhaH:0, escolhaD:0, escolhaS:0};
 
   var $ = function(id){ return document.getElementById(id); };
   var moeda = new Intl.NumberFormat('pt-BR',
@@ -284,17 +285,36 @@
       if (nh < cotaH) { efetivo[c]='HOME'; nh++; }
       else if (nd < cotaD) { efetivo[c]='DESTACADO'; nd++; }
     }
-    totais = {HOME:nh, DESTACADO:nd, SIMPLE: itens.length - nh - nd};
+    var eh = 0, ed = 0, es = 0;
+    for (var c in manual) {
+      if (efetivo[c] !== manual[c]) continue;   // escolha que coube de fato
+      if (manual[c] === 'HOME') eh++;
+      else if (manual[c] === 'DESTACADO') ed++;
+      else es++;
+    }
+    totais = {HOME:nh, DESTACADO:nd, SIMPLE: itens.length - nh - nd,
+              escolhaH:eh, escolhaD:ed, escolhaS:es};
   }
 
   function contar(){
-    $('cotaSuper').innerHTML = 'Superdestaque <b>' + totais.HOME + '</b> / ' + cotaH;
-    $('cotaDest').innerHTML  = 'Destaque <b>' + totais.DESTACADO + '</b> / ' + cotaD;
-    $('cotaSimp').innerHTML  = 'Simples <b>' + num(totais.SIMPLE) + '</b>';
-    var mh = 0, md = 0;
-    for (var c in manual) { if (manual[c]==='HOME') mh++; if (manual[c]==='DESTACADO') md++; }
-    $('cotaSuper').classList.toggle('cheia', mh >= cotaH);
-    $('cotaDest').classList.toggle('cheia', md >= cotaD);
+    // O numero grande e o que a pessoa escolheu — e o unico que responde ao
+    // clique. O total do XML esta sempre cheio, porque o automatico completa
+    // a cota; mostrar so ele daria a impressao de que clicar nao faz nada.
+    function texto(rotulo, escolha, cota, auto){
+      var t = rotulo + ' <b>' + escolha + '</b> / ' + cota;
+      if (auto > 0) t += ' <span class="auto">+' + num(auto) + ' automático' +
+                         (auto > 1 ? 's' : '') + '</span>';
+      return t;
+    }
+    $('cotaSuper').innerHTML = texto('Superdestaque', totais.escolhaH, cotaH,
+                                     totais.HOME - totais.escolhaH);
+    $('cotaDest').innerHTML  = texto('Destaque', totais.escolhaD, cotaD,
+                                     totais.DESTACADO - totais.escolhaD);
+    $('cotaSimp').innerHTML  = 'Simples <b>' + num(totais.SIMPLE) + '</b>' +
+      (totais.escolhaS ? ' <span class="auto">' + totais.escolhaS +
+                         ' fixado' + (totais.escolhaS > 1 ? 's' : '') + '</span>' : '');
+    $('cotaSuper').classList.toggle('cheia', totais.escolhaH >= cotaH);
+    $('cotaDest').classList.toggle('cheia', totais.escolhaD >= cotaD);
     $('salvar').disabled = !sujo;
   }
 
@@ -434,10 +454,11 @@
           ? new Date(d.catalogo.gerado_em).toLocaleString('pt-BR') : '—';
         $('subtitulo').textContent = num(itens.length) + ' imóveis · ' +
           num(i) + ' do iList e ' + num(n) + ' do Nonstop · lista gerada em ' + quando;
-        aviso('Os três contadores mostram como o XML vai sair. As vagas que você não ' +
-              'usar são preenchidas automaticamente pelos imóveis de maior valor — ' +
-              'marcar um imóvel como <b>Simples</b> tira ele desse preenchimento de vez. ' +
-              'A mudança entra no ar na próxima geração do feed.');
+        aviso('As cotas já saem cheias: o que você não escolher é preenchido pelos ' +
+              'imóveis de maior valor, para nenhuma vaga ficar ociosa. Nos contadores, ' +
+              'o número grande é o que <b>você</b> escolheu e o cinza é o que o sistema ' +
+              'completou. Marcar um imóvel como <b>Simples</b> tira ele desse ' +
+              'preenchimento de vez. A mudança entra no ar na próxima geração do feed.');
         calcular(); desenhar();
       })
       .catch(function(e){
