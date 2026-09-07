@@ -1,280 +1,403 @@
 #!/usr/bin/env python3
 """
-Serviço do feed unificado ImovelWeb — Aliança Multi Offices
-(RE/MAX Ville, Homemark, Alcance)
+Unificacao de feeds para o ImovelWeb — Aliança Multi Offices
+Para cada sucursal: iList + Nonstop -> 1 XML de saida.
 
-Roda no Render. O n8n só agenda e confere; o trabalho pesado mora aqui,
-porque montar 52 MB de XML dentro de um Code node derruba a instância do
-n8n Cloud (ver incidente_oom_agendamentos_23ago.md).
+Regra: se um imovel do Nonstop traz na descricao "Código NNNNNN-NN" e
+esse codigo existe no feed do iList, ele e descartado (fica a versao iList).
 
-Endpoints
-    GET  /saude              — vivo?
-    POST /gerar              — começa a geração (assíncrona). Devolve job_id.
-    GET  /status             — estado do último job
-    GET  /status/{job_id}    — estado de um job específico
-    GET  /testar             — confere se as 6 URLs de origem respondem
-
-Autenticação: header  x-feed-token  igual à variável de ambiente FEED_TOKEN.
-(GET /saude é aberto, para o health check do Render.)
-
-Variáveis de ambiente
-    FEED_TOKEN            obrigatório — segredo do endpoint
-    SUPABASE_URL          ex.: https://xxxx.supabase.co
-    SUPABASE_SERVICE_KEY  service role (grava no Storage)
-    SUPABASE_BUCKET       padrão: criativos-imoveis
-    FEED_PREFIXO          padrão: feeds       (pasta dentro do bucket)
-    DIR_SAIDA             padrão: /tmp/feeds
-    GZIP                  "1" para subir também o .xml.gz
+Uso:
+    python3 unificar_feeds.py                # processa todas as sucursais
+    python3 unificar_feeds.py ville          # processa uma
 """
 
-import gzip
-import os
+import re
 import shutil
-import threading
-import traceback
-import uuid
-from datetime import datetime, timezone
+import sys
+import os
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime
 
-import requests
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
-from fastapi.responses import JSONResponse
+# ---------------------------------------------------------------- config
 
-import unificar_feeds as uf
+SUCURSAIS = {
+    "ville": {
+        "ilist":   "https://feeds.goiconnect.com/RemaxBrazil_Imovelweb/94EEE515-2BC3-459C-A1A3-5F717DFF984B/Remax_60124.xml",
+        "nonstop": "https://www.usenonstop.com/integracoes/imovelweb/remaxville",
+        "saida":   "remax_ville.xml",
+        "vagas":   2742, "cota_home": 67, "cota_destacado": 175,
+    },
+    "homemark": {
+        "ilist":   "https://feeds.goiconnect.com/RemaxBrazil_Imovelweb/1C94D1D6-CA17-45CE-AEB0-BBAC413D5683/Remax_60227.xml",
+        "nonstop": "https://www.usenonstop.com/integracoes/imovelweb/homemark",
+        "saida":   "remax_homemark.xml",
+        "vagas":   2742, "cota_home": 67, "cota_destacado": 175,
+    },
+    "alcance": {
+        "ilist":   "https://feeds.goiconnect.com/RemaxBrazil_Imovelweb/6EA466C8-B177-4712-9626-DC8315C4EE5B/Remax_60226.xml",
+        "nonstop": "https://www.usenonstop.com/integracoes/imovelweb/remaxalcance",
+        "saida":   "remax_alcance.xml",
+        "vagas":   2741, "cota_home": 66, "cota_destacado": 175,
+    },
+}
 
-FEED_TOKEN = os.environ.get("FEED_TOKEN", "")
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
-BUCKET = os.environ.get("SUPABASE_BUCKET", "criativos-imoveis")
-PREFIXO = os.environ.get("FEED_PREFIXO", "feeds").strip("/")
-USAR_GZIP = os.environ.get("GZIP", "") == "1"
+DIR_SAIDA = os.environ.get("DIR_SAIDA", "./saida")
 
-uf.DIR_SAIDA = os.environ.get("DIR_SAIDA", "/tmp/feeds")
+# Padrao do codigo RE/MAX inserido na descricao do Nonstop.
+# Aceita "Codigo"/"Código", com ou sem dois-pontos, no fim ou no meio do texto.
+PADRAO_CODIGO = re.compile(r"C[óo]digo\s*:?\s*(\d{6,}-\d{1,3})")
 
-app = FastAPI(title="Feed unificado ImovelWeb")
+# Codigo de anuncio do iList (sempre vem em CDATA)
+RE_COD_ILIST = re.compile(r"<codigoAnuncio><!\[CDATA\[(.*?)\]\]></codigoAnuncio>")
 
-# job store em memória: o serviço roda uma instância e um job por vez
-JOBS = {}
-LOCK = threading.Lock()
+# Codigo de anuncio generico (com ou sem CDATA)
+RE_COD = re.compile(r"<codigoAnuncio>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</codigoAnuncio>")
+RE_DESC = re.compile(r"<descricao>(.*?)</descricao>", re.S)
+RE_TIPO_PUB = re.compile(r"<tipoPublicacao>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</tipoPublicacao>", re.S)
 
-
-def agora():
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def confere_token(token):
-    if not FEED_TOKEN:
-        raise HTTPException(500, "FEED_TOKEN não configurado no serviço.")
-    if token != FEED_TOKEN:
-        raise HTTPException(401, "token inválido")
-
-
-def url_publica(nome_arquivo):
-    return f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET}/{PREFIXO}/{nome_arquivo}"
-
-
-def subir(caminho, nome_arquivo, content_type):
-    """Envia o arquivo ao Storage do Supabase, em streaming (não carrega em RAM)."""
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        raise RuntimeError("SUPABASE_URL/SUPABASE_SERVICE_KEY não configurados.")
-    destino = f"{SUPABASE_URL}/storage/v1/object/{BUCKET}/{PREFIXO}/{nome_arquivo}"
-    tamanho = os.path.getsize(caminho)
-    with open(caminho, "rb") as f:
-        r = requests.post(
-            destino,
-            headers={
-                "Authorization": f"Bearer {SUPABASE_KEY}",
-                "apikey": SUPABASE_KEY,
-                "Content-Type": content_type,
-                "Content-Length": str(tamanho),
-                "x-upsert": "true",
-            },
-            data=f,
-            timeout=600,
-        )
-    if r.status_code >= 400:
-        # o limite de tamanho do bucket aparece aqui, como 413
-        raise RuntimeError(
-            f"Storage recusou {nome_arquivo}: HTTP {r.status_code} {r.text[:300]}"
-        )
-    return tamanho
+# Bloco de fotos do anuncio. Fica dentro de <multimidia>, ao lado de <plantas>
+# e <videos> — por isso a busca e no bloco <imagens>, e nao no <urlImagem> solto:
+# a primeira planta tambem tem urlImagem e nao serve de capa.
+RE_IMAGENS = re.compile(r"<imagens>(.*?)</imagens>", re.S)
+RE_URL_IMG = re.compile(r"<urlImagem>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</urlImagem>", re.S)
 
 
-def comprimir(caminho):
-    destino = caminho + ".gz"
-    with open(caminho, "rb") as e, gzip.open(destino, "wb", compresslevel=6) as s:
-        shutil.copyfileobj(e, s, length=1 << 20)
-    return destino
+# ---------------------------------------------------------------- io
+
+# Alguns provedores (goiconnect/Akamai) recusam o User-Agent padrao do Python
+# com 403 ou 404. Pedimos como um navegador normal.
+CABECALHOS_HTTP = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/xml,text/xml,application/rss+xml,*/*;q=0.8",
+    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+    "Connection": "close",
+}
 
 
-def rodar(job_id, alvos):
-    job = JOBS[job_id]
-    job["estado"] = "rodando"
+def baixar(origem, destino, tentativas=3):
+    """Baixa a URL para destino, em streaming. Erro traz a URL e o codigo HTTP."""
+    ultimo = "sem detalhe"
+    for n in range(1, tentativas + 1):
+        pedido = urllib.request.Request(origem, headers=CABECALHOS_HTTP)
+        try:
+            with urllib.request.urlopen(pedido, timeout=300) as r:
+                with open(destino, "wb") as f:
+                    shutil.copyfileobj(r, f, 1 << 20)
+            return destino
+        except urllib.error.HTTPError as e:
+            ultimo = f"HTTP {e.code} {e.reason}"
+            if e.code in (401, 403, 404, 410):
+                break  # repetir nao resolve
+        except Exception as e:
+            ultimo = f"{type(e).__name__}: {e}"
+        if n < tentativas:
+            time.sleep(3 * n)
+    raise RuntimeError(f"nao consegui baixar {origem} -> {ultimo}")
+
+
+def obter(origem):
+    """Le de arquivo local ou baixa de URL. Retorna caminho local."""
+    if origem.startswith("http"):
+        destino = f"/tmp/feed_{abs(hash(origem))}.xml"
+        return baixar(origem, destino)
+    return origem
+
+
+def blocos_imovel(caminho, tam=1 << 20):
+    """Gera cada <Imovel>...</Imovel> lendo em blocos, sem depender de quebras de linha."""
+    resto = ""
+    with open(caminho, encoding="utf-8-sig", errors="replace") as f:
+        while True:
+            pedaco = f.read(tam)
+            if not pedaco:
+                break
+            resto += pedaco
+            while True:
+                i = resto.find("<Imovel>")
+                if i == -1:
+                    resto = resto[-16:] if len(resto) > 16 else resto
+                    break
+                j = resto.find("</Imovel>", i)
+                if j == -1:
+                    resto = resto[i:]
+                    break
+                yield resto[i:j + 9]
+                resto = resto[j + 9:]
+
+
+# ---------------------------------------------------------------- core
+
+def foto_de(bloco):
+    """URL da primeira foto util do anuncio. O iList costuma abrir a lista com
+    um <urlImagem /> vazio, entao nao basta pegar a primeira."""
+    m = RE_IMAGENS.search(bloco)
+    if not m:
+        return ""
+    for url in RE_URL_IMG.findall(m.group(1)):
+        url = url.strip()
+        if url.startswith("http"):
+            return url
+    return ""
+
+
+def operacao_de(bloco):
+    """Normaliza a operacao. As origens escrevem em espanhol e em caixas
+    diferentes: Venta, VENTA, Alquiler."""
+    o = campo("operacao", bloco).strip().upper()
+    if o.startswith("VEN"):
+        return "VENDA"
+    if o.startswith("ALQ") or o.startswith("ALUG") or o.startswith("LOC"):
+        return "ALUGUEL"
+    return o[:20]
+
+
+def preco_de(bloco):
+    """Primeiro valor de <precos><preco><quantidade>. 0 quando nao ha."""
     try:
-        os.makedirs(uf.DIR_SAIDA, exist_ok=True)
-        for nome in alvos:
-            cfg = uf.SUCURSAIS[nome]
-            item = {"sucursal": nome, "estado": "rodando"}
-            job["sucursais"].append(item)
-            try:
-                rel = uf.processar(nome, cfg)
-                caminho = os.path.join(uf.DIR_SAIDA, cfg["saida"])
-                bytes_xml = subir(caminho, cfg["saida"], "application/xml; charset=utf-8")
-
-                item.update(
-                    estado="ok",
-                    total=rel["total"],
-                    vagas=rel["vagas"],
-                    livres=rel["vagas"] - rel["total"],
-                    descartados=rel["descartados"],
-                    marcados=rel["marcados"],
-                    tipos=rel["tipos"],
-                    mb=round(bytes_xml / 1024 / 1024, 1),
-                    url=url_publica(cfg["saida"]),
-                )
-
-                if USAR_GZIP:
-                    gz = comprimir(caminho)
-                    bytes_gz = subir(gz, cfg["saida"] + ".gz", "application/gzip")
-                    item["url_gz"] = url_publica(cfg["saida"] + ".gz")
-                    item["mb_gz"] = round(bytes_gz / 1024 / 1024, 1)
-                    os.remove(gz)
-
-                os.remove(caminho)  # disco do Render é efêmero e pequeno
-            except Exception as e:
-                item.update(estado="erro", erro=f"{type(e).__name__}: {e}")
-                job["erros"] += 1
-                traceback.print_exc()
-
-        job["estado"] = "concluido" if job["erros"] == 0 else "concluido_com_erro"
-    except Exception as e:  # falha fora do laço
-        job["estado"] = "erro"
-        job["erro"] = f"{type(e).__name__}: {e}"
-        job["erros"] += 1
-        traceback.print_exc()
-    finally:
-        job["fim"] = agora()
-        # limpa os downloads temporários do urlretrieve
-        for f in os.listdir("/tmp"):
-            if f.startswith("feed_") and f.endswith(".xml"):
-                try:
-                    os.remove(os.path.join("/tmp", f))
-                except OSError:
-                    pass
+        return float(campo("quantidade", bloco) or 0)
+    except ValueError:
+        return 0.0
 
 
-@app.get("/saude")
-def saude():
-    return {
-        "ok": True,
-        "sucursais": list(uf.SUCURSAIS),
-        "bucket": BUCKET,
-        "prefixo": PREFIXO,
-        "gzip": USAR_GZIP,
-        "agora": agora(),
-    }
+def decidir_marcacao(itens, escolhas, cota_home, cota_destacado):
+    """Monta o mapa codigo -> tipoPublicacao.
 
-
-@app.post("/gerar")
-def gerar(
-    tarefas: BackgroundTasks,
-    sucursal: str = "",
-    x_feed_token: str = Header(default=""),
-):
-    confere_token(x_feed_token)
-
-    alvos = [sucursal] if sucursal else list(uf.SUCURSAIS)
-    desconhecidas = [a for a in alvos if a not in uf.SUCURSAIS]
-    if desconhecidas:
-        raise HTTPException(400, f"sucursal desconhecida: {', '.join(desconhecidas)}")
-
-    with LOCK:
-        rodando = [j for j in JOBS.values() if j["estado"] == "rodando"]
-        if rodando:
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "erro": "já existe uma geração em andamento",
-                    "job_id": rodando[0]["job_id"],
-                },
-            )
-        job_id = uuid.uuid4().hex[:12]
-        JOBS[job_id] = {
-            "job_id": job_id,
-            "estado": "na fila",
-            "inicio": agora(),
-            "fim": None,
-            "alvos": alvos,
-            "sucursais": [],
-            "erros": 0,
-        }
-        JOBS["ultimo"] = JOBS[job_id]
-
-    tarefas.add_task(rodar, job_id, alvos)
-    return JSONResponse(status_code=202, content={"job_id": job_id, "estado": "na fila"})
-
-
-@app.get("/gerar")
-def gerar_pelo_navegador(
-    tarefas: BackgroundTasks,
-    token: str = "",
-    sucursal: str = "",
-):
-    """Mesma coisa que o POST, mas dá para colar no navegador.
-
-    Existe para o disparo manual: POST com header não se faz pela barra de
-    endereço. O n8n continua usando o POST com o header.
+    Primeiro entram as escolhas feitas na tela, na ordem em que foram salvas.
+    Depois, se sobrar cota, ela e completada pelos imoveis de maior valor —
+    assim nenhuma vaga de destaque fica ociosa se ninguem mexer na tela.
     """
-    confere_token(token)
-    return gerar(tarefas, sucursal=sucursal, x_feed_token=token)
+    escolhas = escolhas or {}
+    presentes = {c for c, _ in itens}
+    home, destacado, vistos = [], [], set()
+
+    # Marcados como SIMPLE de proposito: ficam fora do preenchimento automatico.
+    travados = {str(c).strip() for c in (escolhas.get("SIMPLE") or [])}
+
+    for codigo in (escolhas.get("HOME") or []):
+        if codigo in presentes and codigo not in vistos and len(home) < cota_home:
+            home.append(codigo)
+            vistos.add(codigo)
+    for codigo in (escolhas.get("DESTACADO") or []):
+        if codigo in presentes and codigo not in vistos and len(destacado) < cota_destacado:
+            destacado.append(codigo)
+            vistos.add(codigo)
+
+    manuais = len(home), len(destacado)
+
+    if len(home) < cota_home or len(destacado) < cota_destacado:
+        for codigo, _ in sorted(itens, key=lambda x: -x[1]):
+            if codigo in vistos or codigo in travados:
+                continue
+            if len(home) < cota_home:
+                home.append(codigo)
+            elif len(destacado) < cota_destacado:
+                destacado.append(codigo)
+            else:
+                break
+            vistos.add(codigo)
+
+    mapa = {c: "HOME" for c in home}
+    mapa.update({c: "DESTACADO" for c in destacado})
+    return mapa, manuais
 
 
-@app.get("/testar")
-def testar(token: str = "", x_feed_token: str = Header(default="")):
-    """Diagnostico: bate nas 6 URLs de origem e devolve o codigo HTTP de cada uma.
+def processar(nome, cfg, escolhas=None):
+    print(f"\n{'='*58}\n{nome.upper()}\n{'='*58}")
 
-    Serve para separar "o site bloqueou o servidor" de "a URL mudou".
-    """
-    confere_token(x_feed_token or token)
-    testes = []
-    for nome, cfg in uf.SUCURSAIS.items():
-        for origem in ("ilist", "nonstop"):
-            url = cfg[origem]
-            item = {"sucursal": nome, "origem": origem, "url": url}
-            try:
-                r = requests.get(
-                    url,
-                    headers=uf.CABECALHOS_HTTP,
-                    stream=True,
-                    timeout=60,
-                    allow_redirects=True,
-                )
-                item["http"] = r.status_code
-                item["tipo"] = r.headers.get("Content-Type", "")
-                item["tamanho"] = r.headers.get("Content-Length", "")
-                if r.url != url:
-                    item["redirecionou_para"] = r.url
-                trecho = next(r.iter_content(300), b"")
-                item["inicio"] = trecho.decode("utf-8", "replace")
-                r.close()
-            except Exception as e:
-                item["erro"] = f"{type(e).__name__}: {e}"
-            testes.append(item)
-    return {"testes": testes}
+    # 1. codigos de referencia do iList
+    #
+    # Duas familias de codigo convivem no feed do iList:
+    #   601241001-24            formato antigo (vem em CDATA)
+    #   lucasaukar#NZ35X        formato novo, por corretor (vem sem CDATA)
+    # O que identifica o imovel no formato novo e o sufixo depois do "#":
+    # o mesmo anuncio aparece no Nonstop como remaxville#NZ35X.
+    p_ilist = obter(cfg["ilist"])
+    codigos_ilist, sufixos_ilist = set(), set()
+    for bloco in blocos_imovel(p_ilist):
+        m = RE_COD.search(bloco)
+        if not m:
+            continue
+        codigo = m.group(1).strip()
+        codigos_ilist.add(codigo)
+        if "#" in codigo:
+            sufixos_ilist.add(codigo.split("#", 1)[1].strip().upper())
+    print(f"  iList ......... {len(codigos_ilist)} imoveis "
+          f"({len(sufixos_ilist)} no formato corretor#CODIGO)")
+
+    # 2. varre o Nonstop, descartando o que ja existe no iList
+    #
+    # A varredura so CONTA e decide; a escrita faz outra passada pelo arquivo
+    # local. Guardar os blocos numa lista significaria o XML inteiro (52 MB na
+    # Ville) na memoria — foi assim que a v1 estourou.
+    p_nonstop = obter(cfg["nonstop"])
+
+    def descartar(bloco):
+        """True se este bloco do Nonstop duplica um imovel do iList.
+
+        Regra 1 (atual): o codigo do Nonstop e remaxville#NZ35X e o mesmo
+        sufixo NZ35X aparece no iList como lucasaukar#NZ35X.
+
+        Regra 2 (legado): a descricao do Nonstop trazia "Codigo 601241001-24".
+        O Nonstop parou de publicar isso, mas a regra fica: nao custa nada e
+        volta a funcionar sozinha se o texto reaparecer.
+        """
+        m = RE_COD.search(bloco)
+        if m and "#" in m.group(1):
+            sufixo = m.group(1).split("#", 1)[1].strip().upper()
+            if sufixo in sufixos_ilist:
+                return True, m.group(1).strip()
+
+        m_desc = RE_DESC.search(bloco)
+        if not m_desc:
+            return False, None
+        m = PADRAO_CODIGO.search(m_desc.group(1))
+        if not m:
+            return False, None
+        codigo = m.group(1)
+        return (codigo in codigos_ilist), codigo
+
+    descartados, marcados, mantidos_n = [], 0, 0
+    for bloco in blocos_imovel(p_nonstop):
+        fora, codigo = descartar(bloco)
+        if codigo:
+            marcados += 1  # blocos em que deu para identificar um codigo
+        if fora:
+            cod_ns = RE_COD.search(bloco)
+            descartados.append((cod_ns.group(1) if cod_ns else "?", codigo))
+        else:
+            mantidos_n += 1
+
+    total_ns = mantidos_n + len(descartados)
+    print(f"  Nonstop ....... {total_ns} imoveis ({marcados} com codigo reconhecido)")
+    print(f"  descartados ... {len(descartados)} (duplicados do iList)")
+
+    # 3. levanta codigo e preco de tudo que vai entrar, para decidir os destaques
+    itens = []
+    for bloco in blocos_imovel(p_ilist):
+        m = RE_COD.search(bloco)
+        if m:
+            itens.append((m.group(1).strip(), preco_de(bloco)))
+    for bloco in blocos_imovel(p_nonstop):
+        fora, _ = descartar(bloco)
+        if fora:
+            continue
+        m = RE_COD.search(bloco)
+        if m:
+            itens.append((m.group(1).strip(), preco_de(bloco)))
+
+    cota_h = cfg.get("cota_home", 0)
+    cota_d = cfg.get("cota_destacado", 0)
+    marcacao, (manual_h, manual_d) = decidir_marcacao(itens, escolhas, cota_h, cota_d)
+
+    # 4. monta o XML de saida, ja com o tipoPublicacao decidido
+    os.makedirs(DIR_SAIDA, exist_ok=True)
+    destino = os.path.join(DIR_SAIDA, cfg["saida"])
+    tipos = {}
+    total = 0
+    catalogo = []
+
+    def escrever(out, bloco, fonte):
+        nonlocal total
+        codigo = ""
+        m = RE_COD.search(bloco)
+        if m:
+            codigo = m.group(1).strip()
+        # O tipoPublicacao passa a ser SEMPRE nosso: o que nao foi escolhido
+        # vira SIMPLE. Sem isso, um HOME que ja viesse da origem se somaria
+        # aos nossos e a cota estouraria por um ou dois.
+        tipo = marcacao.get(codigo, "SIMPLE")
+        bloco, trocas = RE_BLOCO_PUB.subn(
+            f"<tipoPublicacao>{tipo}</tipoPublicacao>", bloco, count=1)
+        if not trocas:
+            tipo = "sem tipoPublicacao"
+        out.write(bloco.rstrip() + "\n")
+        total += 1
+        tipos[tipo] = tipos.get(tipo, 0) + 1
+        catalogo.append({
+            "c": codigo,
+            "t": campo("titulo", bloco)[:110],
+            "e": campo("endereco", bloco).strip()[:70],
+            "p": preco_de(bloco),
+            "o": operacao_de(bloco),
+            "u": foto_de(bloco),
+            "f": fonte,
+        })
+
+    with open(destino, "w", encoding="utf-8") as out:
+        out.write('<?xml version="1.0" encoding="UTF-8"?>\n<OpenNavent>\n<Imoveis>\n')
+
+        for bloco in blocos_imovel(p_ilist):          # iList integral
+            escrever(out, bloco, "i")
+
+        for bloco in blocos_imovel(p_nonstop):        # Nonstop filtrado
+            fora, _ = descartar(bloco)
+            if fora:
+                continue
+            escrever(out, bloco, "n")
+
+        out.write("</Imoveis>\n</OpenNavent>\n")
+
+    # 5. relatorio
+    mb = os.path.getsize(destino) / 1024 / 1024
+    print(f"\n  SAIDA: {destino}  ({total} imoveis, {mb:.1f} MB)")
+    print(f"  tipoPublicacao: " + " | ".join(f"{k}={v}" for k, v in sorted(tipos.items())))
+    print(f"  destaques: {tipos.get('HOME', 0)}/{cota_h} super "
+          f"({manual_h} escolhidos na tela), "
+          f"{tipos.get('DESTACADO', 0)}/{cota_d} destaque "
+          f"({manual_d} escolhidos na tela)")
+
+    livres = cfg["vagas"] - total
+    if livres >= 0:
+        print(f"  vagas: {total}/{cfg['vagas']}  ->  {livres} livres")
+    else:
+        print(f"  ATENCAO: excede a cota em {-livres} anuncios")
+
+    if descartados:
+        print(f"\n  removidos:")
+        for cod_ns, cod_il in descartados[:10]:
+            print(f"    {cod_ns}  ->  {cod_il}")
+        if len(descartados) > 10:
+            print(f"    (+{len(descartados)-10})")
+
+    return {"unidade": nome, "total": total, "descartados": len(descartados),
+            "marcados": marcados, "vagas": cfg["vagas"], "tipos": tipos,
+            "catalogo": catalogo,
+            "home": tipos.get("HOME", 0), "destacado": tipos.get("DESTACADO", 0),
+            "home_manual": manual_h, "destacado_manual": manual_d,
+            "cota_home": cota_h, "cota_destacado": cota_d}
 
 
-@app.get("/status")
-def status_ultimo(x_feed_token: str = Header(default=""), token: str = ""):
-    confere_token(x_feed_token or token)
-    ultimo = JOBS.get("ultimo")
-    if not ultimo:
-        return {"estado": "nenhuma geração ainda"}
-    return ultimo
+def main():
+    alvos = sys.argv[1:] or list(SUCURSAIS)
+    print(f"Unificacao de feeds — {datetime.now():%d/%m/%Y %H:%M}")
+    rel = [processar(n, SUCURSAIS[n]) for n in alvos if n in SUCURSAIS]
+
+    print(f"\n{'='*58}\nRESUMO\n{'='*58}")
+    print(f"{'unidade':<12}{'imoveis':>9}{'vagas':>8}{'livres':>9}{'dedup':>8}")
+    for r in rel:
+        print(f"{r['unidade']:<12}{r['total']:>9}{r['vagas']:>8}"
+              f"{r['vagas']-r['total']:>9}{r['descartados']:>8}")
 
 
-@app.get("/status/{job_id}")
-def status(job_id: str, x_feed_token: str = Header(default=""), token: str = ""):
-    confere_token(x_feed_token or token)
-    job = JOBS.get(job_id)
-    if not job:
-        raise HTTPException(404, "job não encontrado")
-    return job
+
+
+# ---------------------------------------------------------------- auxiliares
+#
+# A escolha dos destaques mora na tela servida pelo app.py; aqui ficam so as
+# pecas que a unificacao usa para aplicar essa escolha ao XML.
+
+RE_BLOCO_PUB = re.compile(r"<tipoPublicacao>.*?</tipoPublicacao>", re.S)
+
+
+def campo(tag, bloco):
+    m = re.search(r"<%s>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</%s>" % (tag, tag), bloco, re.S)
+    return m.group(1).strip() if m else ""
+
+
+if __name__ == "__main__":
+    main()
