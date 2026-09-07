@@ -26,19 +26,19 @@ from datetime import datetime
 SUCURSAIS = {
     "ville": {
         "ilist":   "https://feeds.goiconnect.com/RemaxBrazil_Imovelweb/94EEE515-2BC3-459C-A1A3-5F717DFF984B/Remax_60124.xml",
-        "nonstop": "https://www.usenonstop.com/xml/imovelweb/remaxville",
+        "nonstop": "https://www.usenonstop.com/integracoes/imovelweb/remaxville",
         "saida":   "remax_ville.xml",
         "vagas":   2742, "cota_home": 67, "cota_destacado": 175,
     },
     "homemark": {
-        "ilist":   "https://feeds.goiconnect.com/RemaxBrazil_Imovelweb/94EEE515-2BC3-459C-A1A3-5F717DFF984B/Remax_60227.xml",
-        "nonstop": "https://www.usenonstop.com/xml/imovelweb/homemark",
+        "ilist":   "https://feeds.goiconnect.com/RemaxBrazil_Imovelweb/1C94D1D6-CA17-45CE-AEB0-BBAC413D5683/Remax_60227.xml",
+        "nonstop": "https://www.usenonstop.com/integracoes/imovelweb/homemark",
         "saida":   "remax_homemark.xml",
         "vagas":   2742, "cota_home": 67, "cota_destacado": 175,
     },
     "alcance": {
-        "ilist":   "https://feeds.goiconnect.com/RemaxBrazil_Imovelweb/94EEE515-2BC3-459C-A1A3-5F717DFF984B/Remax_60226.xml",
-        "nonstop": "https://www.usenonstop.com/xml/imovelweb/remaxalcance",
+        "ilist":   "https://feeds.goiconnect.com/RemaxBrazil_Imovelweb/6EA466C8-B177-4712-9626-DC8315C4EE5B/Remax_60226.xml",
+        "nonstop": "https://www.usenonstop.com/integracoes/imovelweb/remaxalcance",
         "saida":   "remax_alcance.xml",
         "vagas":   2741, "cota_home": 66, "cota_destacado": 175,
     },
