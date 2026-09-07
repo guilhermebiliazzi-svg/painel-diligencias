@@ -118,7 +118,7 @@ def rodar(job_id, alvos):
             try:
                 rel = uf.processar(nome, cfg)
                 caminho = os.path.join(uf.DIR_SAIDA, cfg["saida"])
-                bytes_xml = subir(caminho, cfg["saida"], "application/xml")
+                bytes_xml = subir(caminho, cfg["saida"], "application/xml; charset=utf-8")
 
                 item.update(
                     estado="ok",
