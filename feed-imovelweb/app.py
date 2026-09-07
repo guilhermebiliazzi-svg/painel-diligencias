@@ -12,6 +12,7 @@ Endpoints
     POST /gerar              — começa a geração (assíncrona). Devolve job_id.
     GET  /status             — estado do último job
     GET  /status/{job_id}    — estado de um job específico
+    GET  /testar             — confere se as 6 URLs de origem respondem
 
 Autenticação: header  x-feed-token  igual à variável de ambiente FEED_TOKEN.
 (GET /saude é aberto, para o health check do Render.)
@@ -225,6 +226,40 @@ def gerar_pelo_navegador(
     """
     confere_token(token)
     return gerar(tarefas, sucursal=sucursal, x_feed_token=token)
+
+
+@app.get("/testar")
+def testar(token: str = "", x_feed_token: str = Header(default="")):
+    """Diagnostico: bate nas 6 URLs de origem e devolve o codigo HTTP de cada uma.
+
+    Serve para separar "o site bloqueou o servidor" de "a URL mudou".
+    """
+    confere_token(x_feed_token or token)
+    testes = []
+    for nome, cfg in uf.SUCURSAIS.items():
+        for origem in ("ilist", "nonstop"):
+            url = cfg[origem]
+            item = {"sucursal": nome, "origem": origem, "url": url}
+            try:
+                r = requests.get(
+                    url,
+                    headers=uf.CABECALHOS_HTTP,
+                    stream=True,
+                    timeout=60,
+                    allow_redirects=True,
+                )
+                item["http"] = r.status_code
+                item["tipo"] = r.headers.get("Content-Type", "")
+                item["tamanho"] = r.headers.get("Content-Length", "")
+                if r.url != url:
+                    item["redirecionou_para"] = r.url
+                trecho = next(r.iter_content(300), b"")
+                item["inicio"] = trecho.decode("utf-8", "replace")
+                r.close()
+            except Exception as e:
+                item["erro"] = f"{type(e).__name__}: {e}"
+            testes.append(item)
+    return {"testes": testes}
 
 
 @app.get("/status")
