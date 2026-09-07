@@ -212,9 +212,24 @@ def gerar(
     return JSONResponse(status_code=202, content={"job_id": job_id, "estado": "na fila"})
 
 
+@app.get("/gerar")
+def gerar_pelo_navegador(
+    tarefas: BackgroundTasks,
+    token: str = "",
+    sucursal: str = "",
+):
+    """Mesma coisa que o POST, mas dá para colar no navegador.
+
+    Existe para o disparo manual: POST com header não se faz pela barra de
+    endereço. O n8n continua usando o POST com o header.
+    """
+    confere_token(token)
+    return gerar(tarefas, sucursal=sucursal, x_feed_token=token)
+
+
 @app.get("/status")
-def status_ultimo(x_feed_token: str = Header(default="")):
-    confere_token(x_feed_token)
+def status_ultimo(x_feed_token: str = Header(default=""), token: str = ""):
+    confere_token(x_feed_token or token)
     ultimo = JOBS.get("ultimo")
     if not ultimo:
         return {"estado": "nenhuma geração ainda"}
@@ -222,8 +237,8 @@ def status_ultimo(x_feed_token: str = Header(default="")):
 
 
 @app.get("/status/{job_id}")
-def status(job_id: str, x_feed_token: str = Header(default="")):
-    confere_token(x_feed_token)
+def status(job_id: str, x_feed_token: str = Header(default=""), token: str = ""):
+    confere_token(x_feed_token or token)
     job = JOBS.get(job_id)
     if not job:
         raise HTTPException(404, "job não encontrado")
