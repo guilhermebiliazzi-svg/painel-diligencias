@@ -13,6 +13,9 @@ Endpoints
     GET  /status             — estado do último job
     GET  /status/{job_id}    — estado de um job específico
     GET  /testar             — confere se as 6 URLs de origem respondem
+    GET  /destaques/{sucursal}      — tela de escolha dos destaques
+    GET  /api/destaques/{sucursal}  — catalogo + escolha atual (JSON)
+    POST /api/destaques/{sucursal}  — grava a escolha
 
 Autenticação: header  x-feed-token  igual à variável de ambiente FEED_TOKEN.
 (GET /saude é aberto, para o health check do Render.)
@@ -25,19 +28,27 @@ Variáveis de ambiente
     FEED_PREFIXO          padrão: feeds       (pasta dentro do bucket)
     DIR_SAIDA             padrão: /tmp/feeds
     GZIP                  "1" para subir também o .xml.gz
+    SUPABASE_ANON_KEY     chave publicavel (a mesma do painel) — o login usa ela
+    ACESSOS               acesso de emergencia a tela, fora do banco:
+                          fulano@x.com:ville,homemark;beltrano@x.com:*
+
+Quem entra na tela sai da tabela public.feed_acessos (ver sql_feed_acessos.sql).
+Estar nela nao da acesso nenhum ao painel — sao listas separadas de proposito.
 """
 
 import gzip
+import json
 import os
 import shutil
 import threading
+import time
 import traceback
 import uuid
 from datetime import datetime, timezone
 
 import requests
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import BackgroundTasks, Body, FastAPI, Header, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
 
 import unificar_feeds as uf
 
@@ -47,6 +58,27 @@ SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 BUCKET = os.environ.get("SUPABASE_BUCKET", "criativos-imoveis")
 PREFIXO = os.environ.get("FEED_PREFIXO", "feeds").strip("/")
 USAR_GZIP = os.environ.get("GZIP", "") == "1"
+SUPABASE_ANON = os.environ.get("SUPABASE_ANON_KEY", "")
+
+
+def _ler_acessos(texto):
+    """fulano@x.com:ville,homemark;beltrano@x.com:*  ->  {email: {sucursais}}"""
+    mapa = {}
+    for parte in (texto or "").replace("\n", ";").split(";"):
+        parte = parte.strip()
+        if not parte or ":" not in parte:
+            continue
+        email, alvos = parte.split(":", 1)
+        email = email.strip().lower()
+        if not email:
+            continue
+        mapa.setdefault(email, set()).update(
+            a.strip().lower() for a in alvos.split(",") if a.strip()
+        )
+    return mapa
+
+
+ACESSOS = _ler_acessos(os.environ.get("ACESSOS", ""))
 
 uf.DIR_SAIDA = os.environ.get("DIR_SAIDA", "/tmp/feeds")
 
@@ -102,6 +134,177 @@ def subir(caminho, nome_arquivo, content_type):
     return tamanho
 
 
+# Login da tela: o mesmo do painel — conta Google via Supabase Auth.
+# O navegador faz o login e manda o token; aqui so perguntamos ao Supabase
+# de quem e esse token. Guardamos a resposta por 5 minutos para nao
+# consultar a cada clique.
+_SESSOES = {}
+_VALIDADE = 300
+
+
+def email_do_pedido(authorization):
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(401, "faça login para continuar")
+    token = authorization[7:].strip()
+
+    agora_s = time.time()
+    guardado = _SESSOES.get(token)
+    if guardado and guardado[1] > agora_s:
+        return guardado[0]
+
+    if not SUPABASE_ANON:
+        raise HTTPException(500, "SUPABASE_ANON_KEY não configurada no serviço.")
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={"Authorization": f"Bearer {token}", "apikey": SUPABASE_ANON},
+            timeout=20,
+        )
+    except Exception:
+        traceback.print_exc()
+        raise HTTPException(503, "não consegui validar o login agora")
+    if r.status_code != 200:
+        raise HTTPException(401, "sessão expirada — entre de novo")
+
+    email = (r.json().get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(401, "conta sem e-mail")
+
+    if len(_SESSOES) > 500:
+        _SESSOES.clear()
+    _SESSOES[token] = (email, agora_s + _VALIDADE)
+    return email
+
+
+_PERFIS = {}
+
+
+def _acesso_no_banco(email):
+    """Le public.feed_acessos — a lista de quem pode mexer nos destaques.
+
+    E uma tabela so desta tela: estar nela nao da acesso nenhum ao painel.
+    Devolve o conjunto de sucursais, ou None quando nao deu para consultar.
+    """
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return None
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/feed_acessos",
+            headers={**_cabecalhos(), "Accept": "application/json"},
+            params={"select": "email,ativo,sucursais", "email": f"eq.{email}",
+                    "limit": "1"},
+            timeout=20,
+        )
+    except Exception:
+        traceback.print_exc()
+        return None
+    if r.status_code >= 400:
+        print(f"[acessos] feed_acessos respondeu HTTP {r.status_code}: {r.text[:200]}")
+        return None
+
+    linhas = r.json()
+    if not linhas:
+        return set()
+    linha = linhas[0]
+    if not linha.get("ativo", True):
+        return set()
+    alvos = {str(a).strip().lower() for a in (linha.get("sucursais") or [])}
+    if "*" in alvos:
+        return set(uf.SUCURSAIS)
+    return {a for a in alvos if a in uf.SUCURSAIS}
+
+
+def _marcar_acesso(email):
+    """Carimba o ultimo acesso. Falhar aqui nao pode atrapalhar ninguem."""
+    try:
+        requests.patch(
+            f"{SUPABASE_URL}/rest/v1/feed_acessos",
+            headers={**_cabecalhos(), "Content-Type": "application/json",
+                     "Prefer": "return=minimal"},
+            params={"email": f"eq.{email}"},
+            data=json.dumps({"ultimo_acesso": agora()}),
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+
+def sucursais_de(email):
+    """Quem pode o que. A tabela manda; a variavel ACESSOS soma a ela.
+
+    A variavel existe como porta de emergencia: se o banco estiver fora do ar,
+    voce ainda entra.
+    """
+    agora_s = time.time()
+    guardado = _PERFIS.get(email)
+    if guardado and guardado[1] > agora_s:
+        alvos = set(guardado[0])
+    else:
+        alvos = _acesso_no_banco(email)
+        if alvos is not None:
+            if len(_PERFIS) > 500:
+                _PERFIS.clear()
+            _PERFIS[email] = (set(alvos), agora_s + _VALIDADE)
+            if alvos:
+                _marcar_acesso(email)
+        else:
+            alvos = set()
+
+    do_ambiente = ACESSOS.get(email, set())
+    if "*" in do_ambiente:
+        return set(uf.SUCURSAIS)
+    return alvos | {a for a in do_ambiente if a in uf.SUCURSAIS}
+
+
+def exige_acesso(authorization, sucursal):
+    """Devolve o e-mail de quem pediu, ou barra."""
+    email = email_do_pedido(authorization)
+    if sucursal not in sucursais_de(email):
+        raise HTTPException(403, f"{email} não tem acesso a esta sucursal")
+    return email
+
+
+def _url_config(nome_arquivo):
+    return f"{SUPABASE_URL}/storage/v1/object/{BUCKET}/{PREFIXO}/config/{nome_arquivo}"
+
+
+def _cabecalhos():
+    return {"Authorization": f"Bearer {SUPABASE_KEY}", "apikey": SUPABASE_KEY}
+
+
+def ler_config(nome_arquivo, padrao):
+    """Le um JSON de configuracao do Storage. Ausente = valor padrao."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return padrao
+    try:
+        r = requests.get(_url_config(nome_arquivo), headers=_cabecalhos(), timeout=60)
+        if r.status_code >= 400:
+            return padrao
+        return r.json()
+    except Exception:
+        traceback.print_exc()
+        return padrao
+
+
+def gravar_config(nome_arquivo, dados):
+    corpo = json.dumps(dados, ensure_ascii=False).encode("utf-8")
+    r = requests.post(
+        _url_config(nome_arquivo),
+        headers={
+            **_cabecalhos(),
+            "Content-Type": "application/json; charset=utf-8",
+            "x-upsert": "true",
+            "cache-control": "max-age=60",
+        },
+        data=corpo,
+        timeout=120,
+    )
+    if r.status_code >= 400:
+        raise RuntimeError(f"Storage recusou {nome_arquivo}: "
+                           f"HTTP {r.status_code} {r.text[:300]}")
+    return len(corpo)
+
+
 def comprimir(caminho):
     destino = caminho + ".gz"
     with open(caminho, "rb") as e, gzip.open(destino, "wb", compresslevel=6) as s:
@@ -119,12 +322,27 @@ def rodar(job_id, alvos):
             item = {"sucursal": nome, "estado": "rodando"}
             job["sucursais"].append(item)
             try:
-                rel = uf.processar(nome, cfg)
+                escolhas = ler_config(f"destaques_{nome}.json",
+                                      {"HOME": [], "DESTACADO": [], "SIMPLE": []})
+                rel = uf.processar(nome, cfg, escolhas=escolhas)
                 caminho = os.path.join(uf.DIR_SAIDA, cfg["saida"])
                 bytes_xml = subir(caminho, cfg["saida"], "application/xml; charset=utf-8")
 
+                # o catalogo alimenta a tela de destaques
+                gravar_config(f"catalogo_{nome}.json", {
+                    "sucursal": nome,
+                    "gerado_em": agora(),
+                    "cota_home": rel["cota_home"],
+                    "cota_destacado": rel["cota_destacado"],
+                    "itens": rel["catalogo"],
+                })
+
                 item.update(
                     estado="ok",
+                    home=rel["home"],
+                    home_manual=rel["home_manual"],
+                    destacado=rel["destacado"],
+                    destacado_manual=rel["destacado_manual"],
                     total=rel["total"],
                     vagas=rel["vagas"],
                     livres=rel["vagas"] - rel["total"],
@@ -263,6 +481,93 @@ def testar(token: str = "", x_feed_token: str = Header(default="")):
                 item["erro"] = f"{type(e).__name__}: {e}"
             testes.append(item)
     return {"testes": testes}
+
+
+@app.get("/api/config")
+def config_da_tela():
+    """Dados publicos que a tela precisa para fazer o login com o Google."""
+    return {"supabase_url": SUPABASE_URL, "supabase_anon_key": SUPABASE_ANON}
+
+
+@app.get("/destaques/{sucursal}", response_class=HTMLResponse)
+def tela_destaques(sucursal: str):
+    """A pagina em si e publica; ela nao mostra nada sem login.
+
+    Quem guarda os dados sao as rotas /api/destaques, e essas exigem uma
+    conta Google autorizada.
+    """
+    if sucursal not in uf.SUCURSAIS:
+        raise HTTPException(404, "sucursal desconhecida")
+    caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "destaques.html")
+    with open(caminho, encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/api/destaques/{sucursal}")
+def api_destaques(sucursal: str, authorization: str = Header(default="")):
+    if sucursal not in uf.SUCURSAIS:
+        raise HTTPException(404, "sucursal desconhecida")
+    email = exige_acesso(authorization, sucursal)
+    cfg = uf.SUCURSAIS[sucursal]
+    catalogo = ler_config(f"catalogo_{sucursal}.json", None)
+    escolha = ler_config(f"destaques_{sucursal}.json",
+                         {"HOME": [], "DESTACADO": [], "SIMPLE": [],
+                          "atualizado_em": None})
+    return {
+        "sucursal": sucursal,
+        "email": email,
+        "minhas_sucursais": sorted(sucursais_de(email)),
+        "cota_home": cfg.get("cota_home", 0),
+        "cota_destacado": cfg.get("cota_destacado", 0),
+        "catalogo": catalogo,
+        "escolha": escolha,
+    }
+
+
+@app.post("/api/destaques/{sucursal}")
+def salvar_destaques(
+    sucursal: str,
+    corpo: dict = Body(...),
+    authorization: str = Header(default=""),
+):
+    if sucursal not in uf.SUCURSAIS:
+        raise HTTPException(404, "sucursal desconhecida")
+    email = exige_acesso(authorization, sucursal)
+    cfg = uf.SUCURSAIS[sucursal]
+
+    def lista(chave):
+        valores = corpo.get(chave) or []
+        if not isinstance(valores, list):
+            raise HTTPException(400, f"{chave} deve ser uma lista")
+        limpos, vistos = [], set()
+        for v in valores:
+            v = str(v).strip()
+            if v and v not in vistos:
+                vistos.add(v)
+                limpos.append(v)
+        return limpos
+
+    home, destacado = lista("HOME"), lista("DESTACADO")
+    # SIMPLE aqui quer dizer "nunca destaque este": fica de fora tambem do
+    # preenchimento automatico. Nao tem cota.
+    simples = lista("SIMPLE")
+    for a, b, rotulo in ((home, destacado, "superdestaque e destaque"),
+                         (home, simples, "superdestaque e simples"),
+                         (destacado, simples, "destaque e simples")):
+        repetidos = set(a) & set(b)
+        if repetidos:
+            raise HTTPException(400, f"o mesmo imóvel está marcado como {rotulo}: "
+                                     + ", ".join(sorted(repetidos)[:5]))
+    if len(home) > cfg.get("cota_home", 0):
+        raise HTTPException(400, f"máximo de {cfg['cota_home']} superdestaques")
+    if len(destacado) > cfg.get("cota_destacado", 0):
+        raise HTTPException(400, f"máximo de {cfg['cota_destacado']} destaques")
+
+    dados = {"HOME": home, "DESTACADO": destacado, "SIMPLE": simples,
+             "por": email, "atualizado_em": agora()}
+    gravar_config(f"destaques_{sucursal}.json", dados)
+    return {"ok": True, "home": len(home), "destacado": len(destacado),
+            "simples": len(simples), "atualizado_em": dados["atualizado_em"]}
 
 
 @app.get("/status")
