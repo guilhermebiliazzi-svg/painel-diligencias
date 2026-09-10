@@ -11,6 +11,7 @@ Uso:
     python3 unificar_feeds.py ville          # processa uma
 """
 
+import hashlib
 import re
 import shutil
 import sys
@@ -39,7 +40,7 @@ SUCURSAIS = {
         "ilist":   "https://feeds.goiconnect.com/RemaxBrazil_Imovelweb/6EA466C8-B177-4712-9626-DC8315C4EE5B/Remax_60226.xml",
         "nonstop": "https://www.usenonstop.com/integracoes/imovelweb/remaxalcance",
         "saida":   "remax_alcance.xml",
-        "vagas":   2741, "cota_home": 66, "cota_destacado": 175,
+        "vagas":   2742, "cota_home": 67, "cota_destacado": 175,
     },
 }
 
@@ -174,6 +175,149 @@ def preco_de(bloco):
         return float(campo("quantidade", bloco) or 0)
     except ValueError:
         return 0.0
+
+
+# ------------------------------------------------- diferenciacao por sucursal
+#
+# O mesmo imovel pode ser anunciado por mais de uma sucursal — cada uma tem
+# a sua conta e o seu direito de anunciar. So que hoje os anuncios saem
+# IDENTICOS (titulo, descricao e fotos, nos 1.451 casos medidos em 10/09), e
+# o portal marca como duplicata.
+#
+# Aqui a gente diferencia o que e apresentacao, nunca o que e o imovel:
+# a ordem das fotos e a construcao do titulo mudam por sucursal; endereco,
+# valor, area e comodos ficam intactos.
+#
+# Tudo e deterministico (semente = codigo + sucursal): o mesmo imovel gera
+# sempre o mesmo resultado. Anuncio que muda de cara todo dia perde posicao.
+
+RE_BLOCO_IMAGENS = re.compile(r"(<imagens>)(.*?)(</imagens>)", re.S)
+RE_UMA_IMAGEM = re.compile(r"<imagem>.*?</imagem>", re.S)
+RE_CARACTERISTICA = re.compile(
+    r"<caracteristica>\s*(?:<id>.*?</id>\s*)?<nome>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</nome>"
+    r"\s*<valor>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</valor>", re.S)
+
+POSICAO_SUCURSAL = {"ville": 0, "homemark": 1, "alcance": 2}
+
+
+def chave_compartilhada(codigo):
+    """O que identifica o IMOVEL entre sucursais: o sufixo depois do '#'.
+
+    remaxville#1A57L, homemark#1A57L e alcance#1A57L sao o mesmo imovel.
+    A semente tem que sair daqui — se sair do codigo inteiro, cada sucursal
+    sorteia por conta propria e as capas podem coincidir.
+    """
+    return (codigo.split("#", 1)[1] if "#" in codigo else codigo).strip().upper()
+
+
+def _semente(codigo):
+    chave = chave_compartilhada(codigo)
+    return int(hashlib.md5(chave.encode("utf-8")).hexdigest()[:8], 16)
+
+
+def rotacionar_fotos(bloco, codigo, sucursal):
+    """Gira a lista de fotos para que cada sucursal tenha uma capa diferente.
+
+    Nenhuma foto e removida nem alterada — muda so a ordem. Os deslocamentos
+    das tres sucursais ficam a um terco de distancia um do outro, entao a capa
+    nunca coincide (a mediana e de 41 fotos por anuncio).
+    """
+    m = RE_BLOCO_IMAGENS.search(bloco)
+    if not m:
+        return bloco
+    itens = RE_UMA_IMAGEM.findall(m.group(2))
+    n = len(itens)
+    if n < 3:
+        return bloco
+    passo = max(1, n // 3)
+    giro = (_semente(codigo) + POSICAO_SUCURSAL.get(sucursal, 0) * passo) % n
+    if giro == 0:
+        return bloco
+    ordenadas = itens[giro:] + itens[:giro]
+    return bloco[:m.start(2)] + "\n" + "\n".join(ordenadas) + "\n" + bloco[m.end(2):]
+
+
+def _atributos(bloco):
+    """Le os campos estruturados do anuncio. Nada e inventado nem estimado."""
+    c = {k.strip().upper(): v.strip() for k, v in RE_CARACTERISTICA.findall(bloco)}
+    def inteiro(chave):
+        v = re.sub(r"[^\d]", "", c.get(chave, ""))
+        return int(v) if v else None
+    bairro = campo("localidade", bloco).split(",")[0].strip()
+    tipo = campo("tipo", bloco).strip()
+    sub = campo("subTipo", bloco).strip()
+    if sub and sub.lower() not in ("padrão", "padrao", "", tipo.lower()):
+        tipo = f"{tipo} {sub.lower()}"
+    return {
+        "tipo": tipo,
+        "bairro": bairro,
+        "quartos": inteiro("PRINCIPALES|QUARTO"),
+        "suites": inteiro("PRINCIPALES|SUITE"),
+        "vagas": inteiro("PRINCIPALES|VAGA"),
+        "area": inteiro("MEDIDAS|AREA_UTIL") or inteiro("MEDIDAS|AREA_TOTAL"),
+        "operacao": "locação" if operacao_de(bloco) == "ALUGUEL" else "venda",
+    }
+
+
+def montar_titulo(bloco, sucursal):
+    """Monta um titulo proprio da sucursal a partir dos atributos reais.
+
+    Sao tres construcoes diferentes para os MESMOS fatos. Se faltar dado para
+    montar um titulo decente, devolve None e o titulo original e mantido —
+    melhor repetir do que publicar titulo pela metade.
+    """
+    a = _atributos(bloco)
+    if not a["tipo"] or not a["bairro"] or not a["area"]:
+        return None
+
+    quartos = a["quartos"]
+    partes_extra = []
+    if a["suites"]:
+        partes_extra.append(f"{a['suites']} suíte" + ("s" if a["suites"] > 1 else ""))
+    if a["vagas"]:
+        partes_extra.append(f"{a['vagas']} vaga" + ("s" if a["vagas"] > 1 else ""))
+
+    pos = POSICAO_SUCURSAL.get(sucursal, 0)
+    if pos == 0:
+        t = f"{a['tipo']} para {a['operacao']} em {a['bairro']}"
+        if quartos:
+            t += f" com {quartos} quarto" + ("s" if quartos > 1 else "")
+        if partes_extra:
+            t += ", sendo " + " e ".join(partes_extra)
+        t += f", {a['area']}m²"
+    elif pos == 1:
+        t = f"{a['tipo']} de {a['area']}m² à {a['operacao']} no {a['bairro']}"
+        detalhe = []
+        if quartos:
+            detalhe.append(f"{quartos} quarto" + ("s" if quartos > 1 else ""))
+        detalhe += partes_extra
+        if detalhe:
+            t += " - " + ", ".join(detalhe)
+    else:
+        t = f"{a['bairro']}: {a['tipo']}"
+        if quartos:
+            t += f" de {quartos} quarto" + ("s" if quartos > 1 else "")
+        t += f" e {a['area']}m² para {a['operacao']}"
+        if partes_extra:
+            t += " (" + ", ".join(partes_extra) + ")"
+
+    t = re.sub(r"\s+", " ", t).strip()
+    return t[:120] if len(t) > 12 else None
+
+
+RE_TITULO = re.compile(r"(<titulo>)(.*?)(</titulo>)", re.S)
+
+
+def aplicar_titulo(bloco, novo_titulo):
+    if not novo_titulo:
+        return bloco
+    m = RE_TITULO.search(bloco)
+    if not m:
+        return bloco
+    corpo = m.group(2)
+    # preserva o CDATA quando a origem usa CDATA
+    corpo_novo = f"<![CDATA[{novo_titulo}]]>" if "CDATA" in corpo else novo_titulo
+    return bloco[:m.start(2)] + corpo_novo + bloco[m.end(2):]
 
 
 def decidir_marcacao(itens, escolhas, cota_home, cota_destacado):
@@ -312,6 +456,7 @@ def processar(nome, cfg, escolhas=None):
     tipos = {}
     total = 0
     catalogo = []
+    trocados = [0]   # quantos titulos foram reescritos
 
     def escrever(out, bloco, fonte):
         nonlocal total
@@ -327,12 +472,19 @@ def processar(nome, cfg, escolhas=None):
             f"<tipoPublicacao>{tipo}</tipoPublicacao>", bloco, count=1)
         if not trocas:
             tipo = "sem tipoPublicacao"
+        # diferenciacao entre sucursais: capa e titulo proprios
+        bloco = rotacionar_fotos(bloco, codigo, nome)
+        titulo_novo = montar_titulo(bloco, nome)
+        if titulo_novo:
+            bloco = aplicar_titulo(bloco, titulo_novo)
+            trocados[0] += 1
+
         out.write(bloco.rstrip() + "\n")
         total += 1
         tipos[tipo] = tipos.get(tipo, 0) + 1
         catalogo.append({
             "c": codigo,
-            "t": campo("titulo", bloco)[:110],
+            "t": campo("titulo", bloco)[:110],   # ja com o titulo da sucursal
             "e": campo("endereco", bloco).strip()[:70],
             "p": preco_de(bloco),
             "o": operacao_de(bloco),
@@ -358,6 +510,7 @@ def processar(nome, cfg, escolhas=None):
     mb = os.path.getsize(destino) / 1024 / 1024
     print(f"\n  SAIDA: {destino}  ({total} imoveis, {mb:.1f} MB)")
     print(f"  tipoPublicacao: " + " | ".join(f"{k}={v}" for k, v in sorted(tipos.items())))
+    print(f"  titulos proprios da sucursal: {trocados[0]} de {total}")
     print(f"  destaques: {tipos.get('HOME', 0)}/{cota_h} super "
           f"({manual_h} escolhidos na tela), "
           f"{tipos.get('DESTACADO', 0)}/{cota_d} destaque "
@@ -381,7 +534,8 @@ def processar(nome, cfg, escolhas=None):
             "catalogo": catalogo,
             "home": tipos.get("HOME", 0), "destacado": tipos.get("DESTACADO", 0),
             "home_manual": manual_h, "destacado_manual": manual_d,
-            "cota_home": cota_h, "cota_destacado": cota_d}
+            "cota_home": cota_h, "cota_destacado": cota_d,
+            "titulos_proprios": trocados[0]}
 
 
 def main():
