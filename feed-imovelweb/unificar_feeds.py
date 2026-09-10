@@ -3,8 +3,12 @@
 Unificacao de feeds para o ImovelWeb — Aliança Multi Offices
 Para cada sucursal: iList + Nonstop -> 1 XML de saida.
 
-Regra: se um imovel do Nonstop traz na descricao "Código NNNNNN-NN" e
-esse codigo existe no feed do iList, ele e descartado (fica a versao iList).
+Deduplicacao dentro da sucursal: o mesmo imovel que vem pelo iList e pelo
+Nonstop entra uma vez so (fica a versao do iList).
+
+Diferenciacao entre sucursais: imovel anunciado por mais de uma sucursal sai
+com um subconjunto proprio de fotos e um titulo proprio, para nao cair no
+criterio de duplicidade da ImovelWeb. Nenhum fato do imovel e alterado.
 
 Uso:
     python3 unificar_feeds.py                # processa todas as sucursais
@@ -113,12 +117,30 @@ def sem_cache(url):
     return url + ("&" if "?" in url else "?") + "_=" + str(int(time.time()))
 
 
+# Arquivos ja baixados NESTA execucao. Evita baixar o mesmo feed duas vezes
+# quando o levantamento de compartilhados e a geracao passam pelo mesmo XML.
+# E limpo por nova_execucao() no inicio de cada rodada — nunca entre rodadas,
+# senao voltariamos a publicar estoque velho (o problema de CDN de 07/09).
+_ARQUIVOS = {}
+
+
+def nova_execucao():
+    """Zera os caches de uma rodada. Chamar ANTES de gerar."""
+    _ARQUIVOS.clear()
+    _COMPARTILHADOS.clear()
+    _COMPARTILHADOS_PRONTO.clear()
+
+
 def obter(origem):
     """Le de arquivo local ou baixa de URL. Retorna caminho local."""
-    if origem.startswith("http"):
-        destino = f"/tmp/feed_{abs(hash(origem))}.xml"
-        return baixar(sem_cache(origem), destino)
-    return origem
+    if not origem.startswith("http"):
+        return origem
+    if origem in _ARQUIVOS:
+        return _ARQUIVOS[origem]
+    destino = f"/tmp/feed_{abs(hash(origem))}.xml"
+    caminho = baixar(sem_cache(origem), destino)
+    _ARQUIVOS[origem] = caminho
+    return caminho
 
 
 def blocos_imovel(caminho, tam=1 << 20):
@@ -179,17 +201,23 @@ def preco_de(bloco):
 
 # ------------------------------------------------- diferenciacao por sucursal
 #
-# O mesmo imovel pode ser anunciado por mais de uma sucursal — cada uma tem
-# a sua conta e o seu direito de anunciar. So que hoje os anuncios saem
-# IDENTICOS (titulo, descricao e fotos, nos 1.451 casos medidos em 10/09), e
-# o portal marca como duplicata.
+# O mesmo imovel pode ser anunciado por mais de uma sucursal — cada uma tem a
+# sua conta e o seu direito de anunciar. So que os anuncios saiam IDENTICOS
+# (mesmas fotos, mesmo titulo) e o portal marcava como duplicata.
 #
-# Aqui a gente diferencia o que e apresentacao, nunca o que e o imovel:
-# a ordem das fotos e a construcao do titulo mudam por sucursal; endereco,
-# valor, area e comodos ficam intactos.
+# Criterio da ImovelWeb (Playbook SAC RE - ImovelWeb - BR):
+#   - Fotos: 80% de similaridade nas imagens — A ORDEM NAO IMPORTA.
+#   - Caracteristicas: mesma operacao, tipo, bairro, preco, quartos,
+#     banheiros e metragem.
+#   - Categorias: mesmo modelo de anuncio.
 #
-# Tudo e deterministico (semente = codigo + sucursal): o mesmo imovel gera
-# sempre o mesmo resultado. Anuncio que muda de cara todo dia perde posicao.
+# Por isso a v1 (girar a ordem das fotos) nao servia para nada: mexia
+# exatamente no unico aspecto que o criterio declara ignorar. O que separa de
+# verdade e cada sucursal publicar um SUBCONJUNTO diferente das fotos.
+#
+# Nada aqui altera um fato do imovel: endereco, valor, area, comodos, IPTU e
+# condominio saem intactos. Muda so QUANTAS e QUAIS fotos vao ao ar e como o
+# titulo e redigido.
 
 RE_BLOCO_IMAGENS = re.compile(r"(<imagens>)(.*?)(</imagens>)", re.S)
 RE_UMA_IMAGEM = re.compile(r"<imagem>.*?</imagem>", re.S)
@@ -199,13 +227,25 @@ RE_CARACTERISTICA = re.compile(
 
 POSICAO_SUCURSAL = {"ville": 0, "homemark": 1, "alcance": 2}
 
+# Quantas fotos cada sucursal descarta: 1 a cada PASSO_RECORTE.
+#   3 -> descarta 33%, sobreposicao entre duas sucursais ~50%  (margem larga)
+#   4 -> descarta 25%, sobreposicao ~67%                       (margem de 13 pontos)
+#   5 -> descarta 20%, sobreposicao ~75%                       (perto demais dos 80%)
+# Medido nos XMLs de 10/09 sobre os 1.501 imoveis compartilhados.
+PASSO_RECORTE = int(os.environ.get("PASSO_RECORTE", "3"))
+
+# Abaixo disso o anuncio sai inteiro: cortar foto de anuncio pobre custa mais
+# do que a duplicidade. Sao 9 imoveis dos 1.501.
+MIN_FOTOS_RECORTE = 9
+
+# Piso de seguranca: nunca deixar um anuncio com menos que isto depois do corte.
+MIN_FOTOS_PUBLICADAS = 6
+
 
 def chave_compartilhada(codigo):
     """O que identifica o IMOVEL entre sucursais: o sufixo depois do '#'.
 
     remaxville#1A57L, homemark#1A57L e alcance#1A57L sao o mesmo imovel.
-    A semente tem que sair daqui — se sair do codigo inteiro, cada sucursal
-    sorteia por conta propria e as capas podem coincidir.
     """
     return (codigo.split("#", 1)[1] if "#" in codigo else codigo).strip().upper()
 
@@ -215,26 +255,101 @@ def _semente(codigo):
     return int(hashlib.md5(chave.encode("utf-8")).hexdigest()[:8], 16)
 
 
-def rotacionar_fotos(bloco, codigo, sucursal):
-    """Gira a lista de fotos para que cada sucursal tenha uma capa diferente.
+# ------------------------------------------------- quem e compartilhado
 
-    Nenhuma foto e removida nem alterada — muda so a ordem. Os deslocamentos
-    das tres sucursais ficam a um terco de distancia um do outro, entao a capa
-    nunca coincide (a mediana e de 41 fotos por anuncio).
+_COMPARTILHADOS = set()
+_COMPARTILHADOS_PRONTO = []
+
+
+def _chaves_da_sucursal(cfg):
+    chaves = set()
+    for url in (cfg["ilist"], cfg["nonstop"]):
+        for bloco in blocos_imovel(obter(url)):
+            m = RE_COD.search(bloco)
+            if m:
+                chaves.add(chave_compartilhada(m.group(1).strip()))
+    return chaves
+
+
+def levantar_compartilhados():
+    """Chaves de imovel que aparecem em duas ou mais sucursais.
+
+    So esses recebem o recorte de fotos. Cortar foto de imovel exclusivo seria
+    perda pura: nao existe duplicata para desfazer.
+
+    Varre SEMPRE as tres sucursais, mesmo quando so uma vai ser gerada — nao da
+    para saber se um imovel e compartilhado olhando so para o feed de uma. Como
+    obter() guarda o que ja baixou nesta execucao, numa rodada completa isso nao
+    custa download nenhum a mais.
+    """
+    if _COMPARTILHADOS_PRONTO:
+        return _COMPARTILHADOS
+    vistos = {}
+    for nome, cfg in SUCURSAIS.items():
+        for chave in _chaves_da_sucursal(cfg):
+            vistos[chave] = vistos.get(chave, 0) + 1
+    _COMPARTILHADOS.update(c for c, n in vistos.items() if n >= 2)
+    _COMPARTILHADOS_PRONTO.append(True)
+    print(f"  compartilhados . {len(_COMPARTILHADOS)} imoveis em 2+ sucursais")
+    return _COMPARTILHADOS
+
+
+# ------------------------------------------------- recorte das fotos
+
+def _url_da_imagem(item):
+    achados = RE_URL_IMG.findall(item)
+    url = achados[0].strip() if achados else ""
+    return url if url.startswith("http") else ""
+
+
+def recortar_fotos(bloco, sucursal):
+    """Publica um subconjunto proprio da sucursal, preservando a ordem.
+
+    Como funciona: as fotos sao ordenadas por hash da URL — uma ordem estavel,
+    identica nas tres sucursais porque a lista de URLs e a mesma. Cada sucursal
+    descarta uma posicao diferente dessa ordem (1 a cada PASSO_RECORTE). Duas
+    sucursais quaisquer ficam entao com (PASSO-2)/(PASSO-1) de fotos em comum,
+    abaixo dos 80% do criterio.
+
+    O descarte e sobre o hash, nao sobre a posicao no anuncio: as fotos que
+    ficam mantem a sequencia original (fachada, sala, cozinha, quartos) e o que
+    sai fica espalhado — some um angulo redundante aqui e outro ali, nunca um
+    comodo inteiro de uma vez.
+
+    Devolve (bloco, quantas_sairam).
     """
     m = RE_BLOCO_IMAGENS.search(bloco)
     if not m:
-        return bloco
+        return bloco, 0
     itens = RE_UMA_IMAGEM.findall(m.group(2))
-    n = len(itens)
-    if n < 3:
-        return bloco
-    passo = max(1, n // 3)
-    giro = (_semente(codigo) + POSICAO_SUCURSAL.get(sucursal, 0) * passo) % n
-    if giro == 0:
-        return bloco
-    ordenadas = itens[giro:] + itens[:giro]
-    return bloco[:m.start(2)] + "\n" + "\n".join(ordenadas) + "\n" + bloco[m.end(2):]
+    if not itens:
+        return bloco, 0
+
+    urls = [_url_da_imagem(it) for it in itens]
+    validas = [u for u in urls if u]
+    if len(validas) < MIN_FOTOS_RECORTE:
+        return bloco, 0
+
+    pos = POSICAO_SUCURSAL.get(sucursal, 0) % PASSO_RECORTE
+    ordem = sorted(set(validas), key=lambda u: hashlib.md5(u.encode("utf-8")).hexdigest())
+    fora = {u for i, u in enumerate(ordem) if i % PASSO_RECORTE == pos}
+
+    mantidos = [it for it, u in zip(itens, urls) if not (u and u in fora)]
+    if sum(1 for it in mantidos if _url_da_imagem(it)) < MIN_FOTOS_PUBLICADAS:
+        return bloco, 0
+
+    # Capa propria da sucursal: promove a n-esima foto valida que sobrou, onde n
+    # e a posicao da sucursal. O resto da sequencia fica como estava. Custa uma
+    # foto de deslocamento e faz os tres anuncios pararem de abrir com a mesma
+    # imagem, o que ajuda quem olha (o criterio de fotos ja foi resolvido acima).
+    indices_validos = [i for i, it in enumerate(mantidos) if _url_da_imagem(it)]
+    alvo = POSICAO_SUCURSAL.get(sucursal, 0)
+    if alvo and len(indices_validos) > alvo:
+        i = indices_validos[alvo]
+        mantidos = [mantidos[i]] + mantidos[:i] + mantidos[i + 1:]
+
+    novo = bloco[:m.start(2)] + "\n" + "\n".join(mantidos) + "\n" + bloco[m.end(2):]
+    return novo, len(itens) - len(mantidos)
 
 
 def _atributos(bloco):
@@ -362,7 +477,9 @@ def decidir_marcacao(itens, escolhas, cota_home, cota_destacado):
     return mapa, manuais
 
 
-def processar(nome, cfg, escolhas=None):
+def processar(nome, cfg, escolhas=None, compartilhados=None):
+    if compartilhados is None:
+        compartilhados = levantar_compartilhados()
     print(f"\n{'='*58}\n{nome.upper()}\n{'='*58}")
 
     # 1. codigos de referencia do iList
@@ -456,7 +573,9 @@ def processar(nome, cfg, escolhas=None):
     tipos = {}
     total = 0
     catalogo = []
-    trocados = [0]   # quantos titulos foram reescritos
+    trocados = [0]      # quantos titulos foram reescritos
+    recortados = [0]    # quantos anuncios tiveram fotos recortadas
+    fotos_fora = [0]    # quantas fotos sairam no total
 
     def escrever(out, bloco, fonte):
         nonlocal total
@@ -472,8 +591,13 @@ def processar(nome, cfg, escolhas=None):
             f"<tipoPublicacao>{tipo}</tipoPublicacao>", bloco, count=1)
         if not trocas:
             tipo = "sem tipoPublicacao"
-        # diferenciacao entre sucursais: capa e titulo proprios
-        bloco = rotacionar_fotos(bloco, codigo, nome)
+        # Diferenciacao entre sucursais. O recorte de fotos so vale a pena onde
+        # existe duplicata: em imovel exclusivo seria perder foto de graca.
+        if codigo and chave_compartilhada(codigo) in compartilhados:
+            bloco, saiu = recortar_fotos(bloco, nome)
+            if saiu:
+                recortados[0] += 1
+                fotos_fora[0] += saiu
         titulo_novo = montar_titulo(bloco, nome)
         if titulo_novo:
             bloco = aplicar_titulo(bloco, titulo_novo)
@@ -511,6 +635,13 @@ def processar(nome, cfg, escolhas=None):
     print(f"\n  SAIDA: {destino}  ({total} imoveis, {mb:.1f} MB)")
     print(f"  tipoPublicacao: " + " | ".join(f"{k}={v}" for k, v in sorted(tipos.items())))
     print(f"  titulos proprios da sucursal: {trocados[0]} de {total}")
+    if recortados[0]:
+        media = fotos_fora[0] / recortados[0]
+        print(f"  fotos recortadas: {recortados[0]} anuncios compartilhados "
+              f"(-{fotos_fora[0]} fotos, media {media:.1f} por anuncio, "
+              f"passo {PASSO_RECORTE})")
+    else:
+        print(f"  fotos recortadas: nenhum anuncio (passo {PASSO_RECORTE})")
     print(f"  destaques: {tipos.get('HOME', 0)}/{cota_h} super "
           f"({manual_h} escolhidos na tela), "
           f"{tipos.get('DESTACADO', 0)}/{cota_d} destaque "
@@ -535,13 +666,19 @@ def processar(nome, cfg, escolhas=None):
             "home": tipos.get("HOME", 0), "destacado": tipos.get("DESTACADO", 0),
             "home_manual": manual_h, "destacado_manual": manual_d,
             "cota_home": cota_h, "cota_destacado": cota_d,
-            "titulos_proprios": trocados[0]}
+            "titulos_proprios": trocados[0],
+            "anuncios_recortados": recortados[0],
+            "fotos_removidas": fotos_fora[0],
+            "passo_recorte": PASSO_RECORTE}
 
 
 def main():
     alvos = sys.argv[1:] or list(SUCURSAIS)
     print(f"Unificacao de feeds — {datetime.now():%d/%m/%Y %H:%M}")
-    rel = [processar(n, SUCURSAIS[n]) for n in alvos if n in SUCURSAIS]
+    nova_execucao()
+    compart = levantar_compartilhados()
+    rel = [processar(n, SUCURSAIS[n], compartilhados=compart)
+           for n in alvos if n in SUCURSAIS]
 
     print(f"\n{'='*58}\nRESUMO\n{'='*58}")
     print(f"{'unidade':<12}{'imoveis':>9}{'vagas':>8}{'livres':>9}{'dedup':>8}")
