@@ -25,6 +25,8 @@ export function getNav(): ItemNav[] {
   return [
     item('diligencias', 'Diligências', 'Auditoria de certidões e acompanhamento das diligências.', 'PAINEL_URL_DILIGENCIAS', '/admin', 'diligencias', 'blue', 'pode_diligencias'),
     item('cobrancas', 'Cobranças', 'Boletos, faturas e situação de pagamentos.', 'PAINEL_URL_COBRANCAS', '/cobrancas', 'cobrancas', 'amber', 'pode_cobrancas'),
+    // Tela servida pelo n8n (WF-A4). Não depende de contrato nem de diligência.
+    item('cobranca-avulsa', 'Cobrança avulsa', 'Boleto no Asaas com split, sem contrato nem diligência.', 'PAINEL_URL_COBRANCA_AVULSA', 'https://villejds.app.n8n.cloud/webhook/cobranca-avulsa', 'cobrancas', 'amber', 'pode_cobrancas'),
     item('repasse', 'Repasse', 'Repasses aos locadores e conciliação de valores.', 'PAINEL_URL_REPASSE', '/repasses', 'repasse', 'emerald', 'pode_repasse'),
     item('notas', 'Notas', 'Emissão e conciliação de NFS-e da administração.', 'PAINEL_URL_NOTAS', '/notas', 'notas', 'violet', 'pode_notas'),
     item('notas-comissao', 'Notas de comissão', 'NFS-e de corretagem sobre os recebimentos do Asaas e notas avulsas.', 'PAINEL_URL_NOTAS_COMISSAO', '/notas-comissao', 'notas', 'violet', 'pode_notas'),
