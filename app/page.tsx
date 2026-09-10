@@ -70,7 +70,18 @@ function CardTela({ item }: { item: ItemNav }) {
     return <div style={{ backgroundColor: '#ffffff' }} className={`${BASE} cursor-default opacity-70`} title="Defina a URL desta tela nas variáveis de ambiente">{conteudo}</div>;
   }
   if (item.externo) {
-    return <a href={item.href} style={{ backgroundColor: '#ffffff' }} className={`${BASE} ${HOVER}`}>{conteudo}</a>;
+    // Sai do painel: abre em aba nova para não perder a sessão de quem estava trabalhando.
+    return (
+      <a
+        href={item.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ backgroundColor: '#ffffff' }}
+        className={`${BASE} ${HOVER}`}
+      >
+        {conteudo}
+      </a>
+    );
   }
   return <Link href={item.href} style={{ backgroundColor: '#ffffff' }} className={`${BASE} ${HOVER}`}>{conteudo}</Link>;
 }
