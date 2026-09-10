@@ -340,6 +340,7 @@ def rodar(job_id, alvos):
                 item.update(
                     estado="ok",
                     home=rel["home"],
+                    titulos_proprios=rel.get("titulos_proprios"),
                     home_manual=rel["home_manual"],
                     destacado=rel["destacado"],
                     destacado_manual=rel["destacado_manual"],
