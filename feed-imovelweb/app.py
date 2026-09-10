@@ -317,6 +317,10 @@ def rodar(job_id, alvos):
     job["estado"] = "rodando"
     try:
         os.makedirs(uf.DIR_SAIDA, exist_ok=True)
+        # Zera os caches da rodada e levanta, uma unica vez, quais imoveis
+        # aparecem em mais de uma sucursal — so esses recebem o recorte de fotos.
+        uf.nova_execucao()
+        compartilhados = uf.levantar_compartilhados()
         for nome in alvos:
             cfg = uf.SUCURSAIS[nome]
             item = {"sucursal": nome, "estado": "rodando"}
@@ -324,7 +328,8 @@ def rodar(job_id, alvos):
             try:
                 escolhas = ler_config(f"destaques_{nome}.json",
                                       {"HOME": [], "DESTACADO": [], "SIMPLE": []})
-                rel = uf.processar(nome, cfg, escolhas=escolhas)
+                rel = uf.processar(nome, cfg, escolhas=escolhas,
+                                   compartilhados=compartilhados)
                 caminho = os.path.join(uf.DIR_SAIDA, cfg["saida"])
                 bytes_xml = subir(caminho, cfg["saida"], "application/xml; charset=utf-8")
 
@@ -341,6 +346,8 @@ def rodar(job_id, alvos):
                     estado="ok",
                     home=rel["home"],
                     titulos_proprios=rel.get("titulos_proprios"),
+                    anuncios_recortados=rel.get("anuncios_recortados"),
+                    fotos_removidas=rel.get("fotos_removidas"),
                     home_manual=rel["home_manual"],
                     destacado=rel["destacado"],
                     destacado_manual=rel["destacado_manual"],
