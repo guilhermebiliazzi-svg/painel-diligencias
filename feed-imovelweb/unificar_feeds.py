@@ -17,6 +17,7 @@ Uso:
 
 import hashlib
 import re
+import unicodedata
 import shutil
 import sys
 import os
@@ -44,7 +45,7 @@ SUCURSAIS = {
         "ilist":   "https://feeds.goiconnect.com/RemaxBrazil_Imovelweb/6EA466C8-B177-4712-9626-DC8315C4EE5B/Remax_60226.xml",
         "nonstop": "https://www.usenonstop.com/integracoes/imovelweb/remaxalcance",
         "saida":   "remax_alcance.xml",
-        "vagas":   2742, "cota_home": 67, "cota_destacado": 175,
+        "vagas":   2742, "cota_home": 66, "cota_destacado": 175,
     },
 }
 
@@ -672,9 +673,300 @@ def processar(nome, cfg, escolhas=None, compartilhados=None):
             "passo_recorte": PASSO_RECORTE}
 
 
+# ================================================================ XML UNIFICADO
+#
+# Fase 2 (11/09/2026): pacote renegociado para 6.000 anuncios e UM arquivo so,
+# com os leads dos imoveis sem dono distribuidos pela roleta.
+#
+# Regras, na ordem (definidas pelo Guilherme):
+#   1. O iList das tres sucursais e a CARTEIRA PROPRIA. Tem prioridade.
+#   2. O mesmo imovel vindo do Nonstop de qualquer sucursal e derrubado.
+#   3. O que sobra do Nonstop entra uma vez so e vai para a ROLETA.
+#
+# Sem duplicata entre sucursais, some a razao de existir do recorte de fotos e
+# do titulo por sucursal: aqui o anuncio sai inteiro, com todas as fotos.
+
+DONO_ROLETA = "ROLETA"
+PREFIXO = {"ville": "VIL", "homemark": "HMK", "alcance": "ALC", DONO_ROLETA: "PAR"}
+
+SAIDA_UNIFICADA = os.environ.get("SAIDA_UNIFICADA", "remax_aliança.xml".replace("ç", "c"))
+VAGAS_UNIFICADAS = int(os.environ.get("VAGAS_UNIFICADAS", "6000"))
+COTA_HOME_UNIFICADA = int(os.environ.get("COTA_HOME_UNIFICADA", "200"))
+COTA_DESTACADO_UNIFICADA = int(os.environ.get("COTA_DESTACADO_UNIFICADA", "525"))
+
+
+def _so_digitos(texto):
+    d = re.sub(r"[^\d]", "", texto or "")
+    return d or ""
+
+
+def _normalizar(texto):
+    """Minuscula, sem acento, so letras e numeros separados por espaco."""
+    t = unicodedata.normalize("NFD", texto or "").encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", " ", t.lower()).strip()
+
+
+def chave_de_fato(bloco):
+    """Identidade do IMOVEL por fatos, para cruzar iList com Nonstop.
+
+    Por que existe: os codigos do iList estao todos no formato antigo
+    (601241038-128) e nunca trazem o sufixo depois do '#'. O Nonstop so usa
+    'corretor#CODIGO'. As duas familias nao tem nenhum caractere em comum — a
+    chave por codigo e CEGA entre os dois sistemas, e a regra "o iList derruba
+    o Nonstop" acharia zero casos por motivo errado. Medido em 11/09: existem
+    127 imoveis do iList publicados tambem pelo Nonstop.
+
+    A chave usa endereco + area + quartos + banheiros + preco. Endereco sozinho
+    nao serve: nao traz numero de apartamento, e dois apartamentos iguais no
+    mesmo predio casariam por engano. Com area, comodos e preco juntos, isso
+    fica improvavel.
+
+    Devolve None quando falta dado — sem chave completa, nao se derruba nada.
+    """
+    endereco = _normalizar(campo("endereco", bloco))
+    if not endereco:
+        return None
+    c = {k.strip().upper(): v.strip() for k, v in RE_CARACTERISTICA.findall(bloco)}
+    area = _so_digitos(c.get("MEDIDAS|AREA_UTIL")) or _so_digitos(c.get("MEDIDAS|AREA_TOTAL"))
+    if not area:
+        return None
+    quartos = _so_digitos(c.get("PRINCIPALES|QUARTO"))
+    banheiros = _so_digitos(c.get("PRINCIPALES|BANHEIRO"))
+    preco = int(preco_de(bloco) or 0)
+    return (endereco, area, quartos, banheiros, preco)
+
+
+RE_BLOCO_REF = re.compile(r"(<codigoReferencia>)(.*?)(</codigoReferencia>)", re.S)
+
+
+def marcar_dono(bloco, dono):
+    """Escreve o prefixo do dono no codigoReferencia: VIL-, HMK-, ALC- ou PAR-.
+
+    O codigoReferencia hoje e copia do codigoAnuncio e nao e chave de nada no
+    portal — o portal se guia pelo codigoAnuncio, que fica intacto. E por isso
+    que da para usar este campo para carregar o dono ate o motor de leads, que
+    e o que o modelo do projeto (secao 3, Componente B) pede.
+    """
+    prefixo = PREFIXO.get(dono, "PAR")
+    m = RE_BLOCO_REF.search(bloco)
+    if not m:
+        return bloco
+    corpo = m.group(2)
+    atual = re.sub(r"^\s*(?:<!\[CDATA\[)?|(?:\]\]>)?\s*$", "", corpo)
+    if atual.startswith(prefixo + "-"):
+        return bloco
+    novo = f"{prefixo}-{atual}"
+    corpo_novo = f"<![CDATA[{novo}]]>" if "CDATA" in corpo else novo
+    return bloco[:m.start(2)] + corpo_novo + bloco[m.end(2):]
+
+
+def unir_escolhas(por_sucursal, traducao):
+    """Junta as escolhas das tres telas num mapa unico para a conta unificada.
+
+    Duas coisas precisam acontecer aqui, e nenhuma e obvia:
+
+    1. TRADUZIR O CODIGO. A Homemark marcou 'homemark#40450'; no arquivo unico
+       sobrou 'remaxville#40450'. E um imovel do iList pode ter engolido o
+       anuncio do Nonstop sobre o qual a escolha foi feita. Sem a traducao, a
+       escolha nao casa com nada e some sem aviso — que e exatamente o ponto
+       cego ja registrado no handoff dos destaques.
+
+    2. RESOLVER O CONFLITO. Duas sucursais podem ter marcado o mesmo imovel em
+       niveis diferentes. Vale o maior: HOME > DESTACADO > SIMPLE.
+
+    Quando as escolhas somadas passam da cota, a perda e distribuida em rodizio
+    (Ville, Homemark, Alcance, Ville...) em vez de truncar a lista de uma so.
+    """
+    ordem = [n for n in SUCURSAIS if n in (por_sucursal or {})]
+    nivel = {}       # codigo final -> nivel escolhido
+    de_quem = {}     # codigo final -> sucursal que escolheu primeiro
+    perdidas, conflitos = 0, 0
+    forca = {"HOME": 3, "DESTACADO": 2, "SIMPLE": 1}
+
+    fila = {n: {"HOME": [], "DESTACADO": [], "SIMPLE": []} for n in ordem}
+    for nome in ordem:
+        escolhas = por_sucursal.get(nome) or {}
+        for rotulo in ("HOME", "DESTACADO", "SIMPLE"):
+            for codigo in (escolhas.get(rotulo) or []):
+                final = traducao.get(chave_compartilhada(str(codigo).strip()))
+                if not final:
+                    perdidas += 1          # imovel saiu do feed
+                    continue
+                atual = nivel.get(final)
+                if atual and atual != rotulo:
+                    conflitos += 1
+                    if forca[rotulo] <= forca[atual]:
+                        continue
+                    fila[de_quem[final]][atual].remove(final)
+                elif atual:
+                    continue
+                nivel[final] = rotulo
+                de_quem[final] = nome
+                fila[nome][rotulo].append(final)
+
+    juntas = {"HOME": [], "DESTACADO": [], "SIMPLE": []}
+    for rotulo in juntas:
+        i, restam = 0, True
+        while restam:
+            restam = False
+            for nome in ordem:
+                lista = fila[nome][rotulo]
+                if i < len(lista):
+                    juntas[rotulo].append(lista[i])
+                    restam = True
+            i += 1
+
+    return juntas, {"perdidas": perdidas, "conflitos": conflitos,
+                    "por_sucursal": {n: {r: len(fila[n][r]) for r in fila[n]}
+                                     for n in ordem}}
+
+
+def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
+    """Gera UM XML com os imoveis das tres sucursais, sem repetir imovel."""
+    print(f"\n{'='*58}\nXML UNIFICADO — ALIANCA\n{'='*58}")
+    nova_execucao()
+
+    # ---- 1. carteira propria: tudo que vem do iList das tres
+    carteira = {}          # chave de codigo -> (sucursal, bloco)
+    fatos_carteira = {}    # chave de fato   -> (sucursal, codigo)
+    traducao = {}          # chave de codigo de QUALQUER copia -> codigo final
+    sem_chave_fato = 0
+    for nome, cfg in SUCURSAIS.items():
+        n = 0
+        for bloco in blocos_imovel(obter(cfg["ilist"])):
+            m = RE_COD.search(bloco)
+            if not m:
+                continue
+            codigo = m.group(1).strip()
+            chave = chave_compartilhada(codigo)
+            if chave in carteira:
+                print(f"  AVISO: {codigo} ja estava na carteira de "
+                      f"{carteira[chave][0]}; mantida a primeira.")
+                continue
+            carteira[chave] = (nome, bloco)
+            traducao[chave] = codigo
+            cf = chave_de_fato(bloco)
+            if cf:
+                fatos_carteira.setdefault(cf, (nome, codigo))
+            else:
+                sem_chave_fato += 1
+            n += 1
+        print(f"  iList {nome:<9} {n} imoveis")
+    print(f"  carteira propria ... {len(carteira)} imoveis "
+          f"({sem_chave_fato} sem dado suficiente para cruzar com o Nonstop)")
+
+    # ---- 2. Nonstop: derruba o que ja esta na carteira, e nao repete imovel
+    roleta = {}
+    derrubados_codigo = 0
+    derrubados_fato = 0
+    repetidos = 0
+    for nome, cfg in SUCURSAIS.items():
+        for bloco in blocos_imovel(obter(cfg["nonstop"])):
+            m = RE_COD.search(bloco)
+            if not m:
+                continue
+            codigo = m.group(1).strip()
+            chave = chave_compartilhada(codigo)
+            if chave in carteira:
+                derrubados_codigo += 1
+                continue
+            cf = chave_de_fato(bloco)
+            if cf and cf in fatos_carteira:
+                # o anuncio some, mas a escolha de destaque feita sobre ele nao
+                # pode sumir junto: aponta para o codigo do iList que ficou.
+                traducao[chave] = fatos_carteira[cf][1]
+                derrubados_fato += 1
+                continue
+            if chave in roleta:
+                repetidos += 1     # mesmo imovel no Nonstop de outra sucursal
+                continue
+            roleta[chave] = (DONO_ROLETA, bloco)
+            traducao[chave] = codigo
+    print(f"  Nonstop derrubado pelo codigo ... {derrubados_codigo}")
+    print(f"  Nonstop derrubado pelo endereco . {derrubados_fato}")
+    print(f"  Nonstop repetido entre sucursais  {repetidos}")
+    print(f"  roleta ............ {len(roleta)} imoveis")
+
+    # ---- 3. destaques, agora sobre a conta unica
+    tudo = list(carteira.items()) + list(roleta.items())
+    itens = []
+    for _, (_, bloco) in tudo:
+        m = RE_COD.search(bloco)
+        if m:
+            itens.append((m.group(1).strip(), preco_de(bloco)))
+    if escolhas_por_sucursal:
+        escolhas, diag = unir_escolhas(escolhas_por_sucursal, traducao)
+        print(f"  escolhas das telas: HOME={len(escolhas['HOME'])} "
+              f"DESTACADO={len(escolhas['DESTACADO'])} SIMPLE={len(escolhas['SIMPLE'])}"
+              f" | conflitos={diag['conflitos']} | orfas={diag['perdidas']}")
+        for n, c in diag["por_sucursal"].items():
+            print(f"     {n:<9} HOME={c['HOME']:<4} DESTACADO={c['DESTACADO']}")
+    else:
+        diag = {}
+    marcacao, (manual_h, manual_d) = decidir_marcacao(
+        itens, escolhas, COTA_HOME_UNIFICADA, COTA_DESTACADO_UNIFICADA)
+
+    # ---- 4. escreve
+    os.makedirs(DIR_SAIDA, exist_ok=True)
+    destino = os.path.join(DIR_SAIDA, SAIDA_UNIFICADA)
+    tipos, por_dono, catalogo, total = {}, {}, [], 0
+    with open(destino, "w", encoding="utf-8") as out:
+        out.write('<?xml version="1.0" encoding="UTF-8"?>\n<OpenNavent>\n<Imoveis>\n')
+        for _, (dono, bloco) in tudo:
+            m = RE_COD.search(bloco)
+            codigo = m.group(1).strip() if m else ""
+            tipo = marcacao.get(codigo, "SIMPLE")
+            bloco, trocas = RE_BLOCO_PUB.subn(
+                f"<tipoPublicacao>{tipo}</tipoPublicacao>", bloco, count=1)
+            if not trocas:
+                tipo = "sem tipoPublicacao"
+            bloco = marcar_dono(bloco, dono)
+            out.write(bloco.rstrip() + "\n")
+            total += 1
+            tipos[tipo] = tipos.get(tipo, 0) + 1
+            por_dono[dono] = por_dono.get(dono, 0) + 1
+            catalogo.append({
+                "c": codigo,
+                "d": dono,
+                "t": campo("titulo", bloco)[:110],
+                "e": campo("endereco", bloco).strip()[:70],
+                "p": preco_de(bloco),
+                "o": operacao_de(bloco),
+                "u": foto_de(bloco),
+                "f": "i" if dono != DONO_ROLETA else "n",
+            })
+        out.write("</Imoveis>\n</OpenNavent>\n")
+
+    mb = os.path.getsize(destino) / 1024 / 1024
+    print(f"\n  SAIDA: {destino}  ({total} imoveis, {mb:.1f} MB)")
+    print("  por dono: " + " | ".join(f"{k}={v}" for k, v in sorted(por_dono.items())))
+    print("  tipoPublicacao: " + " | ".join(f"{k}={v}" for k, v in sorted(tipos.items())))
+    print(f"  destaques: {tipos.get('HOME',0)}/{COTA_HOME_UNIFICADA} super "
+          f"({manual_h} na tela), {tipos.get('DESTACADO',0)}/{COTA_DESTACADO_UNIFICADA} "
+          f"destaque ({manual_d} na tela)")
+    livres = VAGAS_UNIFICADAS - total
+    if livres >= 0:
+        print(f"  vagas: {total}/{VAGAS_UNIFICADAS}  ->  {livres} livres")
+    else:
+        print(f"  ATENCAO: excede a cota em {-livres} anuncios")
+
+    return {"unidade": "alianca", "total": total, "arquivo": SAIDA_UNIFICADA,
+            "vagas": VAGAS_UNIFICADAS, "tipos": tipos, "catalogo": catalogo,
+            "por_dono": por_dono, "carteira": len(carteira), "roleta": len(roleta),
+            "derrubados_codigo": derrubados_codigo, "derrubados_fato": derrubados_fato,
+            "repetidos": repetidos,
+            "home": tipos.get("HOME", 0), "destacado": tipos.get("DESTACADO", 0),
+            "home_manual": manual_h, "destacado_manual": manual_d,
+            "escolhas": diag,
+            "cota_home": COTA_HOME_UNIFICADA, "cota_destacado": COTA_DESTACADO_UNIFICADA}
+
+
 def main():
     alvos = sys.argv[1:] or list(SUCURSAIS)
     print(f"Unificacao de feeds — {datetime.now():%d/%m/%Y %H:%M}")
+    if alvos and alvos[0] == "unificado":
+        processar_unificado()
+        return
     nova_execucao()
     compart = levantar_compartilhados()
     rel = [processar(n, SUCURSAIS[n], compartilhados=compart)
