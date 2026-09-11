@@ -76,6 +76,9 @@
   .acoes button.on.super{background:var(--ouro);border-color:var(--ouro);color:#fff}
   .acoes button.on.dest{background:var(--azul);border-color:var(--azul);color:#fff}
   .acoes button.on.simp{background:var(--cinza);border-color:var(--cinza);color:#fff}
+  .cota.orfas{background:#fff7ed;color:#9a3412;border-color:#fed7aa}
+  .cota.orfas button{margin-left:8px;font:inherit;color:#9a3412;background:none;
+    border:1px solid #fed7aa;border-radius:6px;padding:1px 8px;cursor:pointer}
   .tag.autosuper{background:var(--ouroclaro);color:var(--ouro);border-color:#fed7aa}
   .tag.autodest{background:var(--azulclaro);color:var(--azul);border-color:#c7d7fe}
   .rodape{position:fixed;left:0;right:0;bottom:0;background:var(--papel);
@@ -138,6 +141,7 @@
     <div class="cota super" id="cotaSuper">Superdestaque <b>0</b> / 0</div>
     <div class="cota dest" id="cotaDest">Destaque <b>0</b> / 0</div>
     <div class="cota simp" id="cotaSimp">Simples <b>0</b></div>
+    <div class="cota orfas" id="orfas" style="display:none"></div>
   </div>
   <div class="barra">
     <input type="search" id="busca" placeholder="Buscar por título, endereço ou código…">
@@ -327,6 +331,25 @@
     $('cotaSimp').innerHTML  = 'Simples <b>' + num(totais.SIMPLE) + '</b>' +
       (totais.escolhaS ? ' <span class="auto">' + totais.escolhaS +
                          ' fixado' + (totais.escolhaS > 1 ? 's' : '') + '</span>' : '');
+    // Escolha gravada sobre imovel que saiu do feed: nao aparece em lugar
+    // nenhum e, ate agora, ainda ocupava vaga na conta do limite.
+    var vivas = totais.escolhaH + totais.escolhaD + totais.escolhaS;
+    var orfas = -vivas;
+    for (var k in manual) orfas++;
+    var elo = $('orfas');
+    if (elo) {
+      elo.style.display = orfas > 0 ? '' : 'none';
+      elo.innerHTML = orfas > 0
+        ? orfas + ' escolha' + (orfas > 1 ? 's' : '') + ' de imóvel que saiu do feed'
+          + ' <button type="button" id="limparOrfas">descartar</button>'
+        : '';
+      if (orfas > 0) $('limparOrfas').onclick = function(){
+        var vistos = {};
+        for (var j = 0; j < itens.length; j++) vistos[itens[j].c] = 1;
+        for (var c2 in manual) if (!vistos[c2]) delete manual[c2];
+        sujo = true; recado(''); calcular(); contar();
+      };
+    }
     $('cotaSuper').classList.toggle('cheia', totais.escolhaH >= cotaH);
     $('cotaDest').classList.toggle('cheia', totais.escolhaD >= cotaD);
     $('salvar').disabled = !sujo;
@@ -337,8 +360,12 @@
       delete manual[codigo];
     } else {
       if (tipo !== 'SIMPLE') {
-        var quantos = 0, limite = tipo === 'HOME' ? cotaH : cotaD;
-        for (var c in manual) if (manual[c] === tipo) quantos++;
+        // Conta o mesmo que o contador mostra: so as escolhas cujo imovel
+        // ainda esta no catalogo. Contar as chaves de `manual` incluia as
+        // escolhas orfas — imoveis que sairam do feed — e a tela travava
+        // dizendo "voce ja escolheu 175" com 168 na tela.
+        var limite = tipo === 'HOME' ? cotaH : cotaD;
+        var quantos = tipo === 'HOME' ? totais.escolhaH : totais.escolhaD;
         if (quantos >= limite) {
           recado('Você já escolheu ' + limite + ' ' +
                  (tipo === 'HOME' ? 'superdestaques' : 'destaques') +
