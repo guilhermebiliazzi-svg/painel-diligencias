@@ -312,6 +312,83 @@ def comprimir(caminho):
     return destino
 
 
+def rodar_unificado(job_id):
+    """Fase 2: um XML so, com a carteira propria e o pool da roleta.
+
+    Roda em paralelo ao caminho por sucursal enquanto a transicao nao fecha —
+    o antigo continua intacto, entao publicar este nao desliga nada.
+    """
+    job = JOBS[job_id]
+    job["estado"] = "rodando"
+    item = {"sucursal": "alianca", "estado": "rodando"}
+    job["sucursais"].append(item)
+    try:
+        os.makedirs(uf.DIR_SAIDA, exist_ok=True)
+        # As tres telas por sucursal continuam sendo a origem das escolhas.
+        # O gerador traduz cada codigo para o que sobrou no arquivo unico.
+        por_sucursal = {
+            nome: ler_config(f"destaques_{nome}.json",
+                             {"HOME": [], "DESTACADO": [], "SIMPLE": []})
+            for nome in uf.SUCURSAIS
+        }
+        rel = uf.processar_unificado(escolhas_por_sucursal=por_sucursal)
+        arquivo = rel["arquivo"]
+        caminho = os.path.join(uf.DIR_SAIDA, arquivo)
+        bytes_xml = subir(caminho, arquivo, "application/xml; charset=utf-8")
+
+        gravar_config("catalogo_alianca.json", {
+            "sucursal": "alianca",
+            "gerado_em": agora(),
+            "cota_home": rel["cota_home"],
+            "cota_destacado": rel["cota_destacado"],
+            "itens": rel["catalogo"],
+        })
+
+        item.update(
+            estado="ok",
+            total=rel["total"],
+            vagas=rel["vagas"],
+            livres=rel["vagas"] - rel["total"],
+            carteira=rel["carteira"],
+            roleta=rel["roleta"],
+            por_dono=rel["por_dono"],
+            derrubados_codigo=rel["derrubados_codigo"],
+            derrubados_fato=rel["derrubados_fato"],
+            repetidos=rel["repetidos"],
+            home=rel["home"],
+            home_manual=rel["home_manual"],
+            destacado=rel["destacado"],
+            destacado_manual=rel["destacado_manual"],
+            escolhas=rel.get("escolhas"),
+            tipos=rel["tipos"],
+            mb=round(bytes_xml / 1024 / 1024, 1),
+            url=url_publica(arquivo),
+        )
+
+        if USAR_GZIP:
+            gz = comprimir(caminho)
+            bytes_gz = subir(gz, arquivo + ".gz", "application/gzip")
+            item["url_gz"] = url_publica(arquivo + ".gz")
+            item["mb_gz"] = round(bytes_gz / 1024 / 1024, 1)
+            os.remove(gz)
+
+        os.remove(caminho)
+        job["estado"] = "concluido"
+    except Exception as e:
+        item.update(estado="erro", erro=f"{type(e).__name__}: {e}")
+        job["erros"] += 1
+        job["estado"] = "concluido_com_erro"
+        traceback.print_exc()
+    finally:
+        job["fim"] = agora()
+        for f in os.listdir("/tmp"):
+            if f.startswith("feed_") and f.endswith(".xml"):
+                try:
+                    os.remove(os.path.join("/tmp", f))
+                except OSError:
+                    pass
+
+
 def rodar(job_id, alvos):
     job = JOBS[job_id]
     job["estado"] = "rodando"
@@ -412,7 +489,8 @@ def gerar(
     confere_token(x_feed_token)
 
     alvos = [sucursal] if sucursal else list(uf.SUCURSAIS)
-    desconhecidas = [a for a in alvos if a not in uf.SUCURSAIS]
+    unificado = (alvos == ["unificado"] or alvos == ["alianca"])
+    desconhecidas = [] if unificado else [a for a in alvos if a not in uf.SUCURSAIS]
     if desconhecidas:
         raise HTTPException(400, f"sucursal desconhecida: {', '.join(desconhecidas)}")
 
@@ -438,7 +516,10 @@ def gerar(
         }
         JOBS["ultimo"] = JOBS[job_id]
 
-    tarefas.add_task(rodar, job_id, alvos)
+    if unificado:
+        tarefas.add_task(rodar_unificado, job_id)
+    else:
+        tarefas.add_task(rodar, job_id, alvos)
     return JSONResponse(status_code=202, content={"job_id": job_id, "estado": "na fila"})
 
 
