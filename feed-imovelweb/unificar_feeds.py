@@ -689,10 +689,10 @@ def processar(nome, cfg, escolhas=None, compartilhados=None):
 DONO_ROLETA = "ROLETA"
 PREFIXO = {"ville": "VIL", "homemark": "HMK", "alcance": "ALC", DONO_ROLETA: "PAR"}
 
-SAIDA_UNIFICADA = os.environ.get("SAIDA_UNIFICADA", "remax_aliança.xml".replace("ç", "c"))
+SAIDA_UNIFICADA = os.environ.get("SAIDA_UNIFICADA", "remax_alianca.xml")
 VAGAS_UNIFICADAS = int(os.environ.get("VAGAS_UNIFICADAS", "6000"))
-COTA_HOME_UNIFICADA = int(os.environ.get("COTA_HOME_UNIFICADA", "200"))
-COTA_DESTACADO_UNIFICADA = int(os.environ.get("COTA_DESTACADO_UNIFICADA", "525"))
+# Os totais da conta unica sao a soma das cotas por sucursal (COTAS_SUCURSAL,
+# mais abaixo) — assim nao da para mexer numa e esquecer da outra.
 
 
 def _so_digitos(texto):
@@ -760,65 +760,127 @@ def marcar_dono(bloco, dono):
     return bloco[:m.start(2)] + corpo_novo + bloco[m.end(2):]
 
 
-def unir_escolhas(por_sucursal, traducao):
-    """Junta as escolhas das tres telas num mapa unico para a conta unificada.
+COTAS_SUCURSAL = {
+    # Contrato de 07/09: 67 + 67 + 66 = 200 super, 175 x 3 = 525 destaque.
+    "ville":    {"HOME": 67, "DESTACADO": 175},
+    "homemark": {"HOME": 67, "DESTACADO": 175},
+    "alcance":  {"HOME": 66, "DESTACADO": 175},
+}
 
-    Duas coisas precisam acontecer aqui, e nenhuma e obvia:
 
-    1. TRADUZIR O CODIGO. A Homemark marcou 'homemark#40450'; no arquivo unico
-       sobrou 'remaxville#40450'. E um imovel do iList pode ter engolido o
-       anuncio do Nonstop sobre o qual a escolha foi feita. Sem a traducao, a
-       escolha nao casa com nada e some sem aviso — que e exatamente o ponto
-       cego ja registrado no handoff dos destaques.
+COTA_HOME_UNIFICADA = sum(c["HOME"] for c in COTAS_SUCURSAL.values())
+COTA_DESTACADO_UNIFICADA = sum(c["DESTACADO"] for c in COTAS_SUCURSAL.values())
 
-    2. RESOLVER O CONFLITO. Duas sucursais podem ter marcado o mesmo imovel em
-       niveis diferentes. Vale o maior: HOME > DESTACADO > SIMPLE.
 
-    Quando as escolhas somadas passam da cota, a perda e distribuida em rodizio
-    (Ville, Homemark, Alcance, Ville...) em vez de truncar a lista de uma so.
+def decidir_marcacao_unificada(itens, dono_de, por_sucursal, traducao):
+    """Decide o tipoPublicacao de cada anuncio na conta unica.
+
+    Antes da conta unica, cada sucursal tinha as suas 67 e 175 num arquivo
+    proprio. Ao juntar tudo, o preenchimento automatico global passou a ir pelo
+    imovel mais caro — e a Ville, que tem a carteira mais cara, ficou com 87 dos
+    200 superdestaques enquanto a Homemark ficou com 4. Cada uma paga a sua
+    parte; a cota tem que ser de cada uma.
+
+    Ordem de decisao:
+
+      1. ESCOLHA DA TELA. Cada sucursal gasta a propria cota. HOME antes de
+         DESTACADO, para que o nivel maior prevaleca quando duas sucursais
+         marcarem o mesmo imovel.
+      2. AUTOMATICO NA PROPRIA CARTEIRA. O que a sucursal nao escolheu e
+         completado com os imoveis dela no iList, do mais caro para o mais
+         barato.
+      3. AUTOMATICO NO POOL DA ROLETA. Carteira pequena nao preenche a cota
+         (a Homemark tem 109 imoveis no iList para 242 vagas), entao o que
+         sobra vem do pool sem dono — em rodizio entre as sucursais que ainda
+         tem cota, para nenhuma varrer o pool sozinha.
+
+    Traducao de codigo: a escolha da Homemark esta gravada em 'homemark#40450'
+    e no arquivo unico sobrou 'remaxville#40450'. Sem traduzir, some calada.
     """
-    ordem = [n for n in SUCURSAIS if n in (por_sucursal or {})]
-    nivel = {}       # codigo final -> nivel escolhido
-    de_quem = {}     # codigo final -> sucursal que escolheu primeiro
-    perdidas, conflitos = 0, 0
-    forca = {"HOME": 3, "DESTACADO": 2, "SIMPLE": 1}
+    presentes = {c for c, _ in itens}
+    preco = {c: p for c, p in itens}
+    marcacao, travados = {}, set()
+    usado = {n: {"HOME": 0, "DESTACADO": 0} for n in COTAS_SUCURSAL}
+    manual = {n: {"HOME": 0, "DESTACADO": 0} for n in COTAS_SUCURSAL}
+    orfas, conflitos = 0, 0
 
-    fila = {n: {"HOME": [], "DESTACADO": [], "SIMPLE": []} for n in ordem}
+    def traduzir(codigo):
+        return traducao.get(chave_compartilhada(str(codigo).strip()))
+
+    ordem = [n for n in COTAS_SUCURSAL if n in (por_sucursal or {})]
+
+    # --- 1. escolhas da tela
     for nome in ordem:
-        escolhas = por_sucursal.get(nome) or {}
-        for rotulo in ("HOME", "DESTACADO", "SIMPLE"):
-            for codigo in (escolhas.get(rotulo) or []):
-                final = traducao.get(chave_compartilhada(str(codigo).strip()))
-                if not final:
-                    perdidas += 1          # imovel saiu do feed
-                    continue
-                atual = nivel.get(final)
-                if atual and atual != rotulo:
-                    conflitos += 1
-                    if forca[rotulo] <= forca[atual]:
-                        continue
-                    fila[de_quem[final]][atual].remove(final)
-                elif atual:
-                    continue
-                nivel[final] = rotulo
-                de_quem[final] = nome
-                fila[nome][rotulo].append(final)
+        for codigo in ((por_sucursal[nome] or {}).get("SIMPLE") or []):
+            final = traduzir(codigo)
+            if final in presentes:
+                travados.add(final)
 
-    juntas = {"HOME": [], "DESTACADO": [], "SIMPLE": []}
-    for rotulo in juntas:
-        i, restam = 0, True
-        while restam:
-            restam = False
-            for nome in ordem:
-                lista = fila[nome][rotulo]
-                if i < len(lista):
-                    juntas[rotulo].append(lista[i])
-                    restam = True
-            i += 1
+    for rotulo in ("HOME", "DESTACADO"):
+        for nome in ordem:
+            cota = COTAS_SUCURSAL[nome][rotulo]
+            for codigo in ((por_sucursal[nome] or {}).get(rotulo) or []):
+                final = traduzir(codigo)
+                if not final or final not in presentes:
+                    orfas += 1
+                    continue
+                if final in marcacao:
+                    conflitos += 1        # ja levado por outra sucursal
+                    continue
+                if final in travados or usado[nome][rotulo] >= cota:
+                    continue
+                marcacao[final] = rotulo
+                usado[nome][rotulo] += 1
+                manual[nome][rotulo] += 1
 
-    return juntas, {"perdidas": perdidas, "conflitos": conflitos,
-                    "por_sucursal": {n: {r: len(fila[n][r]) for r in fila[n]}
-                                     for n in ordem}}
+    # --- 2. automatico dentro da carteira propria (iList da sucursal)
+    for nome in COTAS_SUCURSAL:
+        meus = sorted([c for c, _ in itens if dono_de.get(c) == nome],
+                      key=lambda c: -preco.get(c, 0))
+        for rotulo in ("HOME", "DESTACADO"):
+            cota = COTAS_SUCURSAL[nome][rotulo]
+            for c in meus:
+                if usado[nome][rotulo] >= cota:
+                    break
+                if c in marcacao or c in travados:
+                    continue
+                marcacao[c] = rotulo
+                usado[nome][rotulo] += 1
+
+    # --- 3. o que sobrou vem do pool da roleta, em rodizio
+    pool = sorted([c for c, _ in itens if dono_de.get(c) == DONO_ROLETA],
+                  key=lambda c: -preco.get(c, 0))
+    do_pool = {"HOME": 0, "DESTACADO": 0}
+    for rotulo in ("HOME", "DESTACADO"):
+        i = 0
+        faltam = True
+        while faltam and i < len(pool):
+            faltam = False
+            for nome in COTAS_SUCURSAL:
+                if usado[nome][rotulo] >= COTAS_SUCURSAL[nome][rotulo]:
+                    continue
+                faltam = True
+                while i < len(pool) and (pool[i] in marcacao or pool[i] in travados):
+                    i += 1
+                if i >= len(pool):
+                    break
+                marcacao[pool[i]] = rotulo
+                usado[nome][rotulo] += 1
+                do_pool[rotulo] += 1
+                i += 1
+
+    diag = {
+        "orfas": orfas,
+        "conflitos": conflitos,
+        "do_pool": do_pool,
+        "por_sucursal": {
+            n: {"HOME": usado[n]["HOME"], "HOME_tela": manual[n]["HOME"],
+                "DESTACADO": usado[n]["DESTACADO"], "DESTACADO_tela": manual[n]["DESTACADO"]}
+            for n in COTAS_SUCURSAL},
+    }
+    total_manual = (sum(manual[n]["HOME"] for n in manual),
+                    sum(manual[n]["DESTACADO"] for n in manual))
+    return marcacao, total_manual, diag
 
 
 def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
@@ -889,22 +951,23 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
 
     # ---- 3. destaques, agora sobre a conta unica
     tudo = list(carteira.items()) + list(roleta.items())
-    itens = []
-    for _, (_, bloco) in tudo:
+    itens, dono_de = [], {}
+    for _, (dono, bloco) in tudo:
         m = RE_COD.search(bloco)
         if m:
-            itens.append((m.group(1).strip(), preco_de(bloco)))
-    if escolhas_por_sucursal:
-        escolhas, diag = unir_escolhas(escolhas_por_sucursal, traducao)
-        print(f"  escolhas das telas: HOME={len(escolhas['HOME'])} "
-              f"DESTACADO={len(escolhas['DESTACADO'])} SIMPLE={len(escolhas['SIMPLE'])}"
-              f" | conflitos={diag['conflitos']} | orfas={diag['perdidas']}")
-        for n, c in diag["por_sucursal"].items():
-            print(f"     {n:<9} HOME={c['HOME']:<4} DESTACADO={c['DESTACADO']}")
-    else:
-        diag = {}
-    marcacao, (manual_h, manual_d) = decidir_marcacao(
-        itens, escolhas, COTA_HOME_UNIFICADA, COTA_DESTACADO_UNIFICADA)
+            codigo = m.group(1).strip()
+            itens.append((codigo, preco_de(bloco)))
+            dono_de[codigo] = dono
+    marcacao, (manual_h, manual_d), diag = decidir_marcacao_unificada(
+        itens, dono_de, escolhas_por_sucursal, traducao)
+    print(f"  destaques: {manual_h} super e {manual_d} destaque escolhidos nas telas"
+          f" | conflitos={diag['conflitos']} | orfas={diag['orfas']}")
+    for n, c in diag["por_sucursal"].items():
+        print(f"     {n:<9} super {c['HOME']}/{COTAS_SUCURSAL[n]['HOME']}"
+              f" ({c['HOME_tela']} na tela)   destaque {c['DESTACADO']}"
+              f"/{COTAS_SUCURSAL[n]['DESTACADO']} ({c['DESTACADO_tela']} na tela)")
+    print(f"     do pool da roleta: {diag['do_pool']['HOME']} super, "
+          f"{diag['do_pool']['DESTACADO']} destaque")
 
     # ---- 4. escreve
     os.makedirs(DIR_SAIDA, exist_ok=True)
@@ -957,7 +1020,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
             "repetidos": repetidos,
             "home": tipos.get("HOME", 0), "destacado": tipos.get("DESTACADO", 0),
             "home_manual": manual_h, "destacado_manual": manual_d,
-            "escolhas": diag,
+            "escolhas": diag, "cotas_sucursal": COTAS_SUCURSAL,
             "cota_home": COTA_HOME_UNIFICADA, "cota_destacado": COTA_DESTACADO_UNIFICADA}
 
 
