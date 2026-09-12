@@ -407,16 +407,21 @@ def rodar_unificado(job_id):
         rel = uf.processar_unificado(escolhas_por_sucursal=por_sucursal)
         arquivo = rel["arquivo"]
         caminho = os.path.join(uf.DIR_SAIDA, arquivo)
-        bytes_xml = subir(caminho, arquivo, "application/xml; charset=utf-8")
 
-        # o catálogo vai para o banco (o motor de leads consulta de lá) e
-        # continua indo para o Storage (é o que a tela de destaques lê)
+        # O catálogo vai PRIMEIRO, antes do upload do XML.
+        #
+        # Motivo: em 12/09 o Storage recusou o arquivo unificado por tamanho
+        # (413) e, como a gravação vinha depois, o catálogo ficou vazio — e
+        # sem catálogo o motor de leads manda todo lead para
+        # 'nao_classificado'. São dois problemas independentes e não faz
+        # sentido um derrubar o outro.
         try:
             item["catalogo_no_banco"] = gravar_catalogo_no_banco(rel["catalogo"])
         except Exception as e:
-            # não derruba a publicação do XML por causa do catálogo
             item["catalogo_erro"] = f"{type(e).__name__}: {e}"
             traceback.print_exc()
+
+        bytes_xml = subir(caminho, arquivo, "application/xml; charset=utf-8")
 
         gravar_config("catalogo_alianca.json", {
             "sucursal": "alianca",
