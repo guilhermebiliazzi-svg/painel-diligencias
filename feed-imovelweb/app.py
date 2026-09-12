@@ -692,7 +692,39 @@ def api_destaques(sucursal: str, authorization: str = Header(default="")):
         "cota_destacado": cfg.get("cota_destacado", 0),
         "catalogo": catalogo,
         "escolha": escolha,
+        "tomados": destaques_de_outras(sucursal),
     }
+
+
+def destaques_de_outras(sucursal):
+    """Imóveis que as OUTRAS sucursais já marcaram como destaque.
+
+    No arquivo único existe um anúncio por imóvel, logo um tipoPublicacao só.
+    Se duas sucursais marcarem o mesmo imóvel, uma delas gasta cota à toa — a
+    geração resolve o conflito, mas quem escolheu não fica sabendo. Mostrar
+    isso na tela evita o desperdício antes de acontecer.
+
+    A chave de comparação é o sufixo depois do '#', que é o que identifica o
+    imóvel entre sucursais (remaxville#40450 e homemark#40450 são o mesmo).
+    Código do iList não tem '#' e portanto não cruza — mas imóvel do iList
+    quase nunca está em duas sucursais (1 caso hoje), então o que importa,
+    que é o pool compartilhado, fica coberto.
+    """
+    tomados = {}
+    for outra in uf.SUCURSAIS:
+        if outra == sucursal:
+            continue
+        esc = ler_config(f"destaques_{outra}.json", None)
+        if not esc:
+            continue
+        for nivel in ("HOME", "DESTACADO"):
+            for codigo in (esc.get(nivel) or []):
+                chave = uf.chave_compartilhada(str(codigo).strip())
+                # HOME tem precedência: é o que a geração também faz
+                if chave in tomados and tomados[chave]["nivel"] == "HOME":
+                    continue
+                tomados[chave] = {"sucursal": outra, "nivel": nivel}
+    return tomados
 
 
 @app.post("/api/destaques/{sucursal}")
