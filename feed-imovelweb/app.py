@@ -588,6 +588,21 @@ def rodar(job_id, alvos):
 
 @app.get("/saude")
 def saude():
+    """Aberta de propósito: é por aqui que se confere se a geração rodou.
+
+    As telas de destaque leem catalogo_{sucursal}.json. Quando o cron passou a
+    chamar só a geração unificada, esses arquivos pararam de ser reescritos e a
+    tela ficou mostrando a data da última rodada manual, sem nada indicar que
+    estava velha. Agora a data de cada catálogo aparece aqui, sem login.
+    """
+    catalogos = {}
+    for nome in list(uf.SUCURSAIS) + ["alianca"]:
+        cfg = ler_config(f"catalogo_{nome}.json", None) or {}
+        catalogos[nome] = {
+            "gerado_em": cfg.get("gerado_em"),
+            "origem": cfg.get("origem", "por sucursal"),
+            "itens": len(cfg.get("itens") or []),
+        }
     return {
         "ok": True,
         "sucursais": list(uf.SUCURSAIS),
@@ -595,6 +610,7 @@ def saude():
         "prefixo": PREFIXO,
         "gzip": USAR_GZIP,
         "agora": agora(),
+        "catalogos": catalogos,
     }
 
 
