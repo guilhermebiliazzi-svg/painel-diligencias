@@ -305,6 +305,79 @@ def gravar_config(nome_arquivo, dados):
     return len(corpo)
 
 
+LOTE_CATALOGO = 500
+
+
+def gravar_catalogo_no_banco(itens):
+    """Espelha o catálogo do XML unificado na tabela alianca_catalogo.
+
+    Por que existe: o webhook de lead do ImovelWeb manda quem procurou e qual
+    anúncio, mas NÃO manda preço. E o preço define a faixa de VGV, que escolhe
+    a fila da roleta. O motor consulta esta tabela pelo internalReference.
+
+    Anúncio que saiu do feed vira inativo em vez de sumir: lead atrasado de
+    imóvel recém-retirado ainda precisa encontrar o dono.
+    """
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise RuntimeError("faltam SUPABASE_URL/SUPABASE_SERVICE_KEY")
+
+    base = f"{SUPABASE_URL}/rest/v1/alianca_catalogo"
+    cabecalho = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    # 1. tudo inativo; o upsert a seguir reativa o que continua no feed
+    r = requests.patch(base + "?ativo=eq.true", headers=cabecalho,
+                       json={"ativo": False}, timeout=120)
+    if r.status_code >= 400:
+        raise RuntimeError(f"catalogo: falha ao inativar "
+                           f"HTTP {r.status_code} {r.text[:200]}")
+
+    def nivel_vgv(preco):
+        if not preco:
+            return None
+        if preco <= 500000:
+            return 1
+        if preco <= 1000000:
+            return 2
+        if preco <= 2000000:
+            return 3
+        if preco <= 5000000:
+            return 4
+        return 5
+
+    agora_iso = agora()
+    linhas = [{
+        "referencia": it.get("r"),
+        "codigo_anuncio": it.get("c"),
+        "dono": it.get("d"),
+        "preco": it.get("p") or None,
+        "nivel_vgv": nivel_vgv(it.get("p")),
+        "operacao": it.get("o"),
+        "titulo": it.get("t"),
+        "endereco": it.get("e"),
+        "foto": it.get("u"),
+        "tipo_publicacao": it.get("tp"),
+        "ativo": True,
+        "gerado_em": agora_iso,
+        "visto_em": agora_iso,
+    } for it in itens if it.get("r")]
+
+    enviados = 0
+    upsert = dict(cabecalho)
+    upsert["Prefer"] = "resolution=merge-duplicates,return=minimal"
+    for i in range(0, len(linhas), LOTE_CATALOGO):
+        lote = linhas[i:i + LOTE_CATALOGO]
+        r = requests.post(base, headers=upsert, json=lote, timeout=180)
+        if r.status_code >= 400:
+            raise RuntimeError(f"catalogo: falha no lote {i // LOTE_CATALOGO + 1} "
+                               f"HTTP {r.status_code} {r.text[:200]}")
+        enviados += len(lote)
+    return enviados
+
+
 def comprimir(caminho):
     destino = caminho + ".gz"
     with open(caminho, "rb") as e, gzip.open(destino, "wb", compresslevel=6) as s:
@@ -335,6 +408,15 @@ def rodar_unificado(job_id):
         arquivo = rel["arquivo"]
         caminho = os.path.join(uf.DIR_SAIDA, arquivo)
         bytes_xml = subir(caminho, arquivo, "application/xml; charset=utf-8")
+
+        # o catálogo vai para o banco (o motor de leads consulta de lá) e
+        # continua indo para o Storage (é o que a tela de destaques lê)
+        try:
+            item["catalogo_no_banco"] = gravar_catalogo_no_banco(rel["catalogo"])
+        except Exception as e:
+            # não derruba a publicação do XML por causa do catálogo
+            item["catalogo_erro"] = f"{type(e).__name__}: {e}"
+            traceback.print_exc()
 
         gravar_config("catalogo_alianca.json", {
             "sucursal": "alianca",
