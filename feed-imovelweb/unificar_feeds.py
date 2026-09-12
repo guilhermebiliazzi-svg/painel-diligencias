@@ -990,6 +990,10 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
             por_dono[dono] = por_dono.get(dono, 0) + 1
             catalogo.append({
                 "c": codigo,
+                # referencia com prefixo: e por ela que o portal identifica o
+                # anuncio no webhook de lead (campo internalReference)
+                "r": f"{PREFIXO.get(dono, 'PAR')}-{codigo}",
+                "tp": tipo,
                 "d": dono,
                 "t": campo("titulo", bloco)[:110],
                 "e": campo("endereco", bloco).strip()[:70],
