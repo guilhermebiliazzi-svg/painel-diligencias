@@ -706,6 +706,28 @@ def _normalizar(texto):
     return re.sub(r"[^a-z0-9]+", " ", t.lower()).strip()
 
 
+RE_COD_IMOBILIARIA = re.compile(
+    r"<codigoImobiliaria>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</codigoImobiliaria>", re.S)
+
+# Codigo RE/MAX de cada sucursal, como vem no bloco <publicador> do iList.
+IMOBILIARIA_SUCURSAL = {"60124": "ville", "60227": "homemark", "60226": "alcance"}
+
+
+def dono_declarado(bloco):
+    """Sucursal que o proprio anuncio diz ser a dona, ou None.
+
+    O feed do iList de uma sucursal carrega tambem anuncios captados por
+    outras unidades RE/MAX — na Ville sao algumas dezenas. Para a publicacao
+    isso nao importa (o handoff de 07/09 decidiu que tudo no feed da sucursal
+    conta como dela). Mas quando o MESMO imovel aparece no iList de duas, este
+    campo e quem desempata sem chute.
+    """
+    m = RE_COD_IMOBILIARIA.search(bloco)
+    if not m:
+        return None
+    return IMOBILIARIA_SUCURSAL.get(m.group(1).strip())
+
+
 def chave_de_fato(bloco):
     """Identidade do IMOVEL por fatos, para cruzar iList com Nonstop.
 
@@ -889,10 +911,19 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
     nova_execucao()
 
     # ---- 1. carteira propria: tudo que vem do iList das tres
+    #
+    # Um mesmo imovel pode estar no iList de duas sucursais, com codigos
+    # diferentes (601241003-... e 602271004-...). Codigo nao cruza, entao a
+    # deteccao e pela chave de fato, igual ao cruzamento com o Nonstop.
+    # O desempate sai do proprio anuncio: <codigoImobiliaria> diz de quem e.
     carteira = {}          # chave de codigo -> (sucursal, bloco)
     fatos_carteira = {}    # chave de fato   -> (sucursal, codigo)
     traducao = {}          # chave de codigo de QUALQUER copia -> codigo final
+    por_fato = {}          # chave de fato   -> (sucursal, codigo, chave)
     sem_chave_fato = 0
+    conflitos_ilist = 0
+    conflitos_terceiro = 0
+
     for nome, cfg in SUCURSAIS.items():
         n = 0
         for bloco in blocos_imovel(obter(cfg["ilist"])):
@@ -901,21 +932,78 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                 continue
             codigo = m.group(1).strip()
             chave = chave_compartilhada(codigo)
+            n += 1
+
             if chave in carteira:
                 print(f"  AVISO: {codigo} ja estava na carteira de "
                       f"{carteira[chave][0]}; mantida a primeira.")
                 continue
+
+            cf = chave_de_fato(bloco)
+            # So e conflito quando as sucursais sao DIFERENTES. Dentro da mesma,
+            # dois anuncios com o mesmo endereco, area, comodos e preco sao dois
+            # apartamentos iguais no mesmo predio — o CRM deu codigos distintos
+            # porque sao unidades distintas, e sao 17 casos hoje. Fundir isso
+            # seria apagar imovel de verdade.
+            if cf and cf in por_fato and por_fato[cf][0] != nome:
+                conflitos_ilist += 1
+                antigo_nome, antigo_codigo, antigo_chave = por_fato[cf]
+                declarado = (dono_declarado(bloco)
+                             or dono_declarado(carteira[antigo_chave][1]))
+
+                if declarado == nome:
+                    # o anuncio diz que e desta sucursal: troca o que estava
+                    del carteira[antigo_chave]
+                    traducao[antigo_chave] = codigo
+                    carteira[chave] = (nome, bloco)
+                    traducao[chave] = codigo
+                    por_fato[cf] = (nome, codigo, chave)
+                    fatos_carteira[cf] = (nome, codigo)
+                    print(f"  iList x iList: {antigo_codigo} ({antigo_nome}) cede para "
+                          f"{codigo} ({nome}) — codigoImobiliaria aponta {declarado}")
+
+                elif declarado == antigo_nome:
+                    traducao[chave] = antigo_codigo
+                    print(f"  iList x iList: {codigo} ({nome}) cede para "
+                          f"{antigo_codigo} ({antigo_nome}) — codigoImobiliaria "
+                          f"aponta {declarado}")
+
+                else:
+                    # Ninguem entre as duas captou: e imovel de terceiro ou de
+                    # uma quarta unidade RE/MAX, que as duas pegaram por
+                    # parceria. Sem dono entre elas, vai para a roleta — e a
+                    # Secao 3 do escopo diz exatamente isso sobre imovel de
+                    # terceiro. Manter a primeira seria decidir por ordem do
+                    # dicionario, que nao e regra, e acidente.
+                    conflitos_terceiro += 1
+                    carteira[antigo_chave] = (DONO_ROLETA, carteira[antigo_chave][1])
+                    traducao[chave] = antigo_codigo
+                    fatos_carteira[cf] = (DONO_ROLETA, antigo_codigo)
+                    por_fato[cf] = (DONO_ROLETA, antigo_codigo, antigo_chave)
+                    quem = declarado or "imobiliaria de fora"
+                    print(f"  iList x iList: {codigo} ({nome}) e {antigo_codigo} "
+                          f"({antigo_nome}) — nenhuma das duas e a dona "
+                          f"({quem}); vai para a ROLETA")
+                continue
+
             carteira[chave] = (nome, bloco)
             traducao[chave] = codigo
-            cf = chave_de_fato(bloco)
             if cf:
+                # setdefault: apartamentos iguais na mesma sucursal nao
+                # sobrescrevem o primeiro, que e quem representa o predio no
+                # cruzamento com o Nonstop.
+                por_fato.setdefault(cf, (nome, codigo, chave))
                 fatos_carteira.setdefault(cf, (nome, codigo))
             else:
                 sem_chave_fato += 1
-            n += 1
         print(f"  iList {nome:<9} {n} imoveis")
+
     print(f"  carteira propria ... {len(carteira)} imoveis "
           f"({sem_chave_fato} sem dado suficiente para cruzar com o Nonstop)")
+    if conflitos_ilist:
+        print(f"  mesmo imovel no iList de 2 sucursais: {conflitos_ilist} "
+              f"({conflitos_ilist - conflitos_terceiro} pelo codigoImobiliaria, "
+              f"{conflitos_terceiro} para a roleta por nao ter dono entre elas)")
 
     # ---- 2. Nonstop: derruba o que ja esta na carteira, e nao repete imovel
     roleta = {}
@@ -933,11 +1021,32 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                 derrubados_codigo += 1
                 continue
             cf = chave_de_fato(bloco)
-            if cf and cf in fatos_carteira:
-                # o anuncio some, mas a escolha de destaque feita sobre ele nao
-                # pode sumir junto: aponta para o codigo do iList que ficou.
-                traducao[chave] = fatos_carteira[cf][1]
+            if cf and cf in por_fato:
+                # O imovel ja esta na carteira via iList. Tres situacoes:
+                #
+                #  a) MESMA sucursal publicando pelos dois sistemas: o iList
+                #     prevalece e a copia do Nonstop cai. E o caso comum.
+                #  b) OUTRA sucursal publicando o mesmo imovel, e a dona
+                #     declarada e quem esta no iList: fica com ela.
+                #  c) OUTRA sucursal, e nenhuma das duas e a dona (imovel de
+                #     terceiro ou de uma quarta unidade RE/MAX): ninguem
+                #     captou, entao vai para a ROLETA.
+                dono_ilist, codigo_ilist, chave_ilist = por_fato[cf]
+                traducao[chave] = codigo_ilist
                 derrubados_fato += 1
+
+                if dono_ilist != DONO_ROLETA and nome != dono_ilist:
+                    declarado = dono_declarado(carteira[chave_ilist][1])
+                    if declarado != dono_ilist:
+                        conflitos_terceiro += 1
+                        carteira[chave_ilist] = (DONO_ROLETA,
+                                                 carteira[chave_ilist][1])
+                        fatos_carteira[cf] = (DONO_ROLETA, codigo_ilist)
+                        por_fato[cf] = (DONO_ROLETA, codigo_ilist, chave_ilist)
+                        quem = declarado or "imobiliaria de fora"
+                        print(f"  iList x Nonstop: {codigo_ilist} ({dono_ilist}) "
+                              f"tambem publicado por {nome} — nenhuma das duas e "
+                              f"a dona ({quem}); vai para a ROLETA")
                 continue
             if chave in roleta:
                 repetidos += 1     # mesmo imovel no Nonstop de outra sucursal
@@ -1021,6 +1130,8 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
             "vagas": VAGAS_UNIFICADAS, "tipos": tipos, "catalogo": catalogo,
             "por_dono": por_dono, "carteira": len(carteira), "roleta": len(roleta),
             "derrubados_codigo": derrubados_codigo, "derrubados_fato": derrubados_fato,
+            "conflitos_ilist": conflitos_ilist,
+            "conflitos_terceiro": conflitos_terceiro,
             "repetidos": repetidos,
             "home": tipos.get("HOME", 0), "destacado": tipos.get("DESTACADO", 0),
             "home_manual": manual_h, "destacado_manual": manual_d,
