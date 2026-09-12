@@ -76,6 +76,8 @@
   .acoes button.on.super{background:var(--ouro);border-color:var(--ouro);color:#fff}
   .acoes button.on.dest{background:var(--azul);border-color:var(--azul);color:#fff}
   .acoes button.on.simp{background:var(--cinza);border-color:var(--cinza);color:#fff}
+  .tag.tomado{background:#f1f5f9;color:#475569;border-color:#cbd5e1}
+  .acoes button[disabled]{opacity:.35;cursor:not-allowed}
   .cota.orfas{background:#fff7ed;color:#9a3412;border-color:#fed7aa}
   .cota.orfas button{margin-left:8px;font:inherit;color:#9a3412;background:none;
     border:1px solid #fed7aa;border-radius:6px;padding:1px 8px;cursor:pointer}
@@ -355,7 +357,31 @@
     $('salvar').disabled = !sujo;
   }
 
+  // Destaques que as OUTRAS sucursais já marcaram. No arquivo único existe um
+  // anúncio por imóvel, logo um tipoPublicacao só — marcar o que outra já
+  // marcou gastaria cota à toa, e a geração descartaria em silêncio.
+  var tomados = {};
+
+  function chaveImovel(codigo){
+    var i = String(codigo).indexOf('#');
+    return (i >= 0 ? String(codigo).slice(i + 1) : String(codigo)).trim().toUpperCase();
+  }
+
+  function tomadoPor(codigo){
+    return tomados[chaveImovel(codigo)] || null;
+  }
+
+  var NOME_SUC = {ville: 'Ville', homemark: 'Homemark', alcance: 'Alcance'};
+
   function alternar(codigo, tipo){
+    var t = tipo !== 'SIMPLE' ? tomadoPor(codigo) : null;
+    if (t && manual[codigo] !== tipo) {
+      recado('Esse imóvel já está como ' +
+             (t.nivel === 'HOME' ? 'superdestaque' : 'destaque') +
+             ' na ' + (NOME_SUC[t.sucursal] || t.sucursal) +
+             '. No arquivo único cabe um só — escolha outro.', 'err');
+      return;
+    }
     if (manual[codigo] === tipo) {
       delete manual[codigo];
     } else {
@@ -441,6 +467,13 @@
         : '<div class="vazia">sem foto</div>';
       var tags = '<span class="tag ' + (it.f === 'i' ? 'ilist">iList' : 'nonstop">Nonstop') + '</span>';
       if (it.o === 'ALUGUEL') tags += '<span class="tag aluguel">Aluguel</span>';
+      var tom = m ? null : tomadoPor(it.c);
+      if (tom) {
+        tags += '<span class="tag tomado">' +
+                (tom.nivel === 'HOME' ? 'Super' : 'Destaque') + ' na ' +
+                (NOME_SUC[tom.sucursal] || tom.sucursal) + '</span>';
+      }
+      var trava = tom ? ' disabled title="Já marcado por outra sucursal"' : '';
 
 
       html += '<tr data-c="' + cod + '">' +
@@ -451,8 +484,8 @@
         '<td class="preco">' + (it.p ? moeda.format(it.p) : '—') +
           (it.o === 'ALUGUEL' ? '<small>por mês</small>' : '') + '</td>' +
         '<td class="acoes">' +
-          '<button class="' + cls('HOME','super') + '" data-c="' + cod + '" data-t="HOME">Super</button>' +
-          '<button class="' + cls('DESTACADO','dest') + '" data-c="' + cod + '" data-t="DESTACADO">Destaque</button>' +
+          '<button class="' + cls('HOME','super') + '" data-c="' + cod + '" data-t="HOME"' + trava + '>Super</button>' +
+          '<button class="' + cls('DESTACADO','dest') + '" data-c="' + cod + '" data-t="DESTACADO"' + trava + '>Destaque</button>' +
           '<button class="' + cls('SIMPLE','simp') + '" data-c="' + cod + '" data-t="SIMPLE">Simples</button>' +
         '</td></tr>';
     });
@@ -552,6 +585,7 @@
         $('titulo').textContent = 'Destaques — RE/MAX ' +
           sucursal.charAt(0).toUpperCase() + sucursal.slice(1);
 
+        tomados = d.tomados || {};
         var esc0 = d.escolha || {};
         (esc0.HOME || []).forEach(function(c){ manual[c] = 'HOME'; });
         (esc0.DESTACADO || []).forEach(function(c){ manual[c] = 'DESTACADO'; });
