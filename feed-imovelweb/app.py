@@ -423,13 +423,44 @@ def rodar_unificado(job_id):
 
         bytes_xml = subir(caminho, arquivo, "application/xml; charset=utf-8")
 
+        agora_cat = agora()
         gravar_config("catalogo_alianca.json", {
             "sucursal": "alianca",
-            "gerado_em": agora(),
+            "gerado_em": agora_cat,
             "cota_home": rel["cota_home"],
             "cota_destacado": rel["cota_destacado"],
             "itens": rel["catalogo"],
         })
+
+        # As tres telas de destaque tambem se alimentam daqui.
+        #
+        # Antes cada tela lia o catalogo_{sucursal}.json que a geracao POR
+        # SUCURSAL escrevia. Quando o cron passou a chamar so
+        # /gerar?sucursal=unificado, aquela geracao parou de rodar e as telas
+        # congelaram na ultima rodada manual — em 12/09 a Ville ainda mostrava
+        # a lista de 11/09 18:45. Pior que a data: a tela oferecia imoveis que
+        # o arquivo unico ja nao publica, e as escolhas viravam orfas.
+        #
+        # Cada sucursal ve a propria carteira mais o pool da roleta, que e
+        # exatamente o conjunto de onde ela pode marcar. As cotas continuam
+        # sendo as dela (67/67/66 super, 175 destaque), nao as somadas.
+        for nome in uf.SUCURSAIS:
+            meus = [it for it in rel["catalogo"]
+                    if it.get("d") == nome or it.get("d") == uf.DONO_ROLETA]
+            cotas = uf.COTAS_SUCURSAL.get(nome, {})
+            gravar_config(f"catalogo_{nome}.json", {
+                "sucursal": nome,
+                "gerado_em": agora_cat,
+                "origem": "unificado",
+                "cota_home": cotas.get("HOME", 0),
+                "cota_destacado": cotas.get("DESTACADO", 0),
+                "itens": meus,
+            })
+        item["telas_atualizadas"] = {
+            nome: sum(1 for it in rel["catalogo"]
+                      if it.get("d") == nome or it.get("d") == uf.DONO_ROLETA)
+            for nome in uf.SUCURSAIS
+        }
 
         item.update(
             estado="ok",
