@@ -825,6 +825,110 @@ def salvar_destaques(
             "simples": len(simples), "atualizado_em": dados["atualizado_em"]}
 
 
+# ============================================================================
+# PAINEL DE LEADS — /leads/{sucursal}
+#
+# Mesmo login das telas de destaque: conta Google + tabela feed_acessos. O que
+# muda é o que se vê: por decisão de 13/09, as três sucursais enxergam os leads
+# umas das outras. O que NUNCA sai daqui é a chave do C2S — a API devolve só se
+# existe e os quatro últimos dígitos.
+# ============================================================================
+
+def _rpc(funcao, params=None):
+    """Chama uma função do banco pelo PostgREST."""
+    r = requests.post(
+        f"{SUPABASE_URL}/rest/v1/rpc/{funcao}",
+        headers={**_cabecalhos(), "Content-Type": "application/json"},
+        data=json.dumps(params or {}),
+        timeout=60,
+    )
+    if r.status_code >= 400:
+        raise HTTPException(502, f"{funcao}: HTTP {r.status_code} {r.text[:300]}")
+    return r.json()
+
+
+@app.get("/leads/{sucursal}", response_class=HTMLResponse)
+def tela_leads(sucursal: str):
+    """A página é pública; ela não mostra nada sem login."""
+    if sucursal not in uf.SUCURSAIS:
+        raise HTTPException(404, "sucursal desconhecida")
+    caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "leads.html")
+    with open(caminho, encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/api/leads/{sucursal}")
+def api_leads(sucursal: str, dias: int = 30, authorization: str = Header(default="")):
+    if sucursal not in uf.SUCURSAIS:
+        raise HTTPException(404, "sucursal desconhecida")
+    email = exige_acesso(authorization, sucursal)
+    dias = max(1, min(int(dias or 30), 180))
+
+    # A situação das chaves vem da função que mascara: nunca o token.
+    chaves = _rpc("alianca_c2s_situacao")
+
+    return {
+        "sucursal": sucursal,
+        "email": email,
+        "minhas_sucursais": sorted(sucursais_de(email)),
+        "dias": dias,
+        "gerado_em": agora(),
+        "resumo": _rpc("alianca_painel_resumo", {"p_dias": dias}),
+        "roleta": _rpc("alianca_painel_roleta"),
+        "leads": _rpc("alianca_painel_leads",
+                      {"p_sucursal": None, "p_dias": dias, "p_limite": 500}),
+        "sem_destino": _rpc("alianca_painel_sem_destino", {"p_dias": dias}),
+        "chaves": chaves,
+    }
+
+
+@app.post("/api/leads/{sucursal}/reenviar")
+def api_reenviar(sucursal: str, corpo: dict = Body(...),
+                 authorization: str = Header(default="")):
+    """Devolve um lead para a fila. Quem entrega continua sendo o workflow."""
+    if sucursal not in uf.SUCURSAIS:
+        raise HTTPException(404, "sucursal desconhecida")
+    email = exige_acesso(authorization, sucursal)
+
+    lead_id = corpo.get("lead_id")
+    if not isinstance(lead_id, int):
+        raise HTTPException(400, "lead_id obrigatório")
+
+    try:
+        r = _rpc("alianca_reenfileirar", {"p_lead_id": lead_id, "p_por": email})
+    except HTTPException as e:
+        # a função levanta exceção com motivo legível; repassa como 400
+        raise HTTPException(400, str(e.detail))
+    return (r or [{}])[0]
+
+
+@app.post("/api/leads/{sucursal}/token")
+def api_token(sucursal: str, corpo: dict = Body(...),
+              authorization: str = Header(default="")):
+    """Grava a chave do C2S de UMA sucursal.
+
+    Ver os leads é aberto entre as três; mexer na chave, não. Cada uma só
+    grava a própria — quem tem acesso a duas não passa a poder trocar a chave
+    da outra por engano. Token vazio limpa, que é o jeito de revogar.
+    """
+    if sucursal not in uf.SUCURSAIS:
+        raise HTTPException(404, "sucursal desconhecida")
+    email = exige_acesso(authorization, sucursal)
+
+    alvo = str(corpo.get("sucursal") or sucursal).strip().lower()
+    if alvo != sucursal:
+        raise HTTPException(403, "a chave de cada sucursal só pode ser alterada "
+                                 "na tela dela mesma")
+
+    token = str(corpo.get("token") or "").strip()
+    if token and len(token) < 20:
+        raise HTTPException(400, "essa chave parece curta demais — confira antes de salvar")
+
+    r = _rpc("alianca_definir_token",
+             {"p_sucursal": alvo, "p_token": token, "p_por": email})
+    return (r or [{}])[0]
+
+
 @app.get("/status")
 def status_ultimo(x_feed_token: str = Header(default=""), token: str = ""):
     confere_token(x_feed_token or token)
