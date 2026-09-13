@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leads — Aliança RE/MAX</title>
+<style>
+  :root{
+    --tinta:#16202c; --fraca:#69788a; --linha:#e2e8f0; --fundo:#f6f8fa;
+    --papel:#fff; --azul:#1f6feb; --verde:#12805c; --ambar:#a1670a;
+    --vermelho:#b42318; --ville:#1f6feb; --homemark:#7c3aed; --alcance:#0d9488;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--fundo);color:var(--tinta);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  a{color:var(--azul)}
+  .env{max-width:1240px;margin:0 auto;padding:20px 16px 60px}
+  header{display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;justify-content:space-between;margin-bottom:6px}
+  h1{font-size:24px;margin:0}
+  .sub{color:var(--fraca);font-size:13px;margin:2px 0 20px}
+  .quem{font-size:13px;color:var(--fraca)}
+  .quem a{margin-left:10px}
+
+  .abas{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 16px}
+  .aba{border:1px solid var(--linha);background:var(--papel);border-radius:999px;
+    padding:7px 15px;cursor:pointer;font:inherit;font-size:14px;color:var(--fraca)}
+  .aba.on{background:var(--tinta);color:#fff;border-color:var(--tinta)}
+
+  .cartoes{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));margin-bottom:22px}
+  .cartao{background:var(--papel);border:1px solid var(--linha);border-radius:12px;padding:14px 16px}
+  .cartao h3{margin:0 0 2px;font-size:14px;display:flex;align-items:center;gap:7px}
+  .ponto{width:9px;height:9px;border-radius:50%;flex:none}
+  .grande{font-size:29px;font-weight:600;line-height:1.15;margin:6px 0 2px}
+  .mini{font-size:12.5px;color:var(--fraca)}
+  .alerta{color:var(--vermelho);font-weight:600}
+  .selo{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;
+    border:1px solid var(--linha);color:var(--fraca);white-space:nowrap}
+  .selo.ok{border-color:#a7e8cf;background:#eafaf3;color:var(--verde)}
+  .selo.falta{border-color:#f3c9c4;background:#fdeeec;color:var(--vermelho)}
+
+  section{background:var(--papel);border:1px solid var(--linha);border-radius:12px;
+    padding:16px 18px;margin-bottom:18px}
+  section h2{font-size:16px;margin:0 0 4px}
+  section .porque{font-size:13px;color:var(--fraca);margin:0 0 14px}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--linha);vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--fraca);
+    font-weight:600;border-bottom:2px solid var(--linha)}
+  tbody tr:last-child td{border-bottom:none}
+  .rola{overflow-x:auto}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+
+  .barra{height:7px;border-radius:4px;background:#eef2f6;overflow:hidden;min-width:90px}
+  .barra span{display:block;height:100%}
+  .proxima{font-weight:600}
+
+  .tag{font-size:11.5px;padding:2px 8px;border-radius:5px;white-space:nowrap;
+    border:1px solid var(--linha);color:var(--fraca)}
+  .tag.dono{background:#eef4ff;border-color:#c7dbff;color:#1a4fb4}
+  .tag.roleta{background:#fdf3e6;border-color:#f2dcbb;color:var(--ambar)}
+  .tag.aderencia{background:#f2edff;border-color:#ddd0fb;color:#5b32c4}
+  .tag.nao{background:#fdeeec;border-color:#f3c9c4;color:var(--vermelho)}
+
+  button.acao{border:1px solid var(--linha);background:var(--papel);border-radius:7px;
+    padding:5px 11px;cursor:pointer;font:inherit;font-size:12.5px}
+  button.acao:hover{border-color:var(--azul);color:var(--azul)}
+  button.acao[disabled]{opacity:.45;cursor:default}
+  button.primario{background:var(--tinta);color:#fff;border-color:var(--tinta);padding:8px 16px;font-size:14px}
+  button.primario[disabled]{opacity:.5}
+
+  input[type=password],input[type=text]{border:1px solid var(--linha);border-radius:7px;
+    padding:8px 11px;font:inherit;font-size:14px;width:100%;max-width:430px}
+  .chaveLinha{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px}
+
+  #entrada{display:none;min-height:72vh;align-items:center;justify-content:center}
+  .porta{background:var(--papel);border:1px solid var(--linha);border-radius:14px;
+    padding:34px 30px;text-align:center;max-width:400px}
+  #conteudo{display:none}
+  .vazio{color:var(--fraca);font-size:13.5px;padding:14px 2px}
+  .oculto{display:none!important}
+  @media(max-width:640px){ .env{padding:14px 10px 50px} h1{font-size:20px} .grande{font-size:25px} }
+</style>
+</head>
+<body>
+<div class="env">
+
+  <div id="entrada">
+    <div class="porta">
+      <h1 style="font-size:20px">Leads da Aliança</h1>
+      <p class="sub" style="margin:8px 0 20px">Entre com a conta Google autorizada.</p>
+      <button class="primario" id="btGoogle">Entrar com Google</button>
+      <p id="erroEntrada" class="sub" style="color:var(--vermelho);margin-top:16px"></p>
+    </div>
+  </div>
+
+  <div id="conteudo">
+    <header>
+      <div>
+        <h1 id="titulo">Leads</h1>
+        <p class="sub" id="subtitulo">carregando…</p>
+      </div>
+      <div class="quem">
+        <span id="quemSou"></span>
+        <select id="periodo" style="margin-left:10px;padding:5px 8px;border-radius:7px;border:1px solid var(--linha);font:inherit;font-size:13px">
+          <option value="1">hoje</option>
+          <option value="7">7 dias</option>
+          <option value="30" selected>30 dias</option>
+          <option value="90">90 dias</option>
+        </select>
+        <a href="#" id="sair">sair</a>
+      </div>
+    </header>
+
+    <div class="cartoes" id="cartoes"></div>
+
+    <section>
+      <h2>Placar do rodízio</h2>
+      <p class="porque">Por faixa de VGV, quanto cada uma já recebeu em relação à própria cota.
+        A marcada como <b>próxima</b> é quem o motor escolhe no próximo lead sem dono daquela faixa —
+        calculado pela mesma ordenação que ele usa, não por uma conta paralela.</p>
+      <div class="rola"><table id="tbRoleta"><thead><tr>
+        <th>Faixa</th><th>Sucursal</th><th class="num">Recebidos</th>
+        <th class="num">Cota</th><th style="width:170px">Proporção</th><th></th>
+      </tr></thead><tbody></tbody></table></div>
+    </section>
+
+    <section id="secSemDestino" class="oculto">
+      <h2>Sem destino <span class="selo falta" id="qtdSemDestino"></span></h2>
+      <p class="porque">Leads que chegaram mas não deu para dizer de quem são — quase sempre
+        referência que não está no catálogo. Não somem e não são distribuídos: precisam de olho humano.</p>
+      <div class="rola"><table id="tbSemDestino"><thead><tr>
+        <th>Quando</th><th>Referência</th><th>Motivo</th><th>Contato</th>
+      </tr></thead><tbody></tbody></table></div>
+    </section>
+
+    <section>
+      <h2>Leads</h2>
+      <p class="porque" id="porqueLeads"></p>
+      <div class="abas" id="filtros"></div>
+      <div class="rola"><table id="tbLeads"><thead><tr>
+        <th>Quando</th><th>Destino</th><th>Regra</th><th>Imóvel</th>
+        <th>Cliente</th><th>Entrega</th><th></th>
+      </tr></thead><tbody></tbody></table></div>
+      <p class="vazio oculto" id="semLeads">Nenhum lead neste período.</p>
+    </section>
+
+    <section>
+      <h2>Chave do C2S</h2>
+      <p class="porque">É por ela que o lead entra no CRM desta sucursal. Fica guardada no banco,
+        não dentro do workflow — trocar aqui vale para a entrega e para a fila de reenvio ao mesmo tempo.
+        A chave nunca é exibida de volta: só os quatro últimos dígitos, para conferência.
+        Campo vazio remove a chave.</p>
+      <div class="rola"><table id="tbChaves"><thead><tr>
+        <th>Sucursal</th><th>Situação</th><th>Atualizada</th><th>Por</th>
+      </tr></thead><tbody></tbody></table></div>
+      <div class="chaveLinha">
+        <input type="password" id="campoChave" placeholder="colar a chave desta sucursal" autocomplete="off">
+        <button class="acao" id="btVerChave" type="button">mostrar</button>
+        <button class="primario" id="btSalvarChave">Salvar chave</button>
+        <span class="mini" id="avisoChave"></span>
+      </div>
+    </section>
+
+    <p class="mini" id="rodape"></p>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var sb = null, sessao = null, dados = null, filtro = 'todas';
+  var SUCURSAL = (location.pathname.split('/').filter(Boolean)[1] || '').toLowerCase();
+  var NOMES = {ville:'RE/MAX Ville', homemark:'RE/MAX Homemark', alcance:'RE/MAX Alcance'};
+  var COR   = {ville:'var(--ville)', homemark:'var(--homemark)', alcance:'var(--alcance)'};
+
+  function esc(t){
+    return String(t == null ? '' : t)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function num(n){ return (n == null ? 0 : n).toLocaleString('pt-BR'); }
+  function dt(s){
+    if (!s) return '—';
+    var d = new Date(s);
+    return d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}) + ' ' +
+           d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  }
+  function brl(v){
+    if (v == null || v === '') return '';
+    return 'R$ ' + Number(v).toLocaleString('pt-BR',{maximumFractionDigits:0});
+  }
+  function fone(f){
+    var d = String(f||'').replace(/\D/g,'');
+    if (d.length === 13) return '(' + d.slice(2,4) + ') ' + d.slice(4,9) + '-' + d.slice(9);
+    if (d.length === 11) return '(' + d.slice(0,2) + ') ' + d.slice(2,7) + '-' + d.slice(7);
+    return f || '';
+  }
+
+  // ------------------------------------------------------------------ login
+  function mostrarEntrada(erro){
+    $('entrada').style.display = 'flex';
+    $('conteudo').style.display = 'none';
+    $('erroEntrada').textContent = erro || '';
+  }
+  function iniciar(){
+    if (!NOMES[SUCURSAL]) return mostrarEntrada('Endereço inválido. Use /leads/ville, /leads/homemark ou /leads/alcance.');
+    fetch('/api/config').then(function(r){ return r.json(); }).then(function(cfg){
+      if (!cfg.supabase_url || !cfg.supabase_anon_key) {
+        return mostrarEntrada('O serviço está sem a chave pública do Supabase.');
+      }
+      sb = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
+      return sb.auth.getSession().then(function(r){
+        sessao = r.data && r.data.session;
+        if (!sessao) return mostrarEntrada('');
+        $('entrada').style.display = 'none';
+        $('conteudo').style.display = 'block';
+        $('quemSou').textContent = sessao.user.email;
+        carregar();
+      });
+    }).catch(function(e){ mostrarEntrada('Não consegui falar com o serviço: ' + e.message); });
+  }
+  $('btGoogle').onclick = function(){
+    if (!sb) return;
+    $('btGoogle').disabled = true;
+    sb.auth.signInWithOAuth({provider:'google',
+      options:{redirectTo: location.origin + location.pathname}}).then(function(r){
+      if (r.error){ $('btGoogle').disabled = false; $('erroEntrada').textContent = r.error.message; }
+    });
+  };
+  $('sair').onclick = function(e){ e.preventDefault(); sb.auth.signOut().then(function(){ location.reload(); }); };
+
+  function pedir(caminho, opcoes){
+    opcoes = opcoes || {};
+    opcoes.headers = Object.assign({'Content-Type':'application/json'}, opcoes.headers,
+      {'Authorization':'Bearer ' + sessao.access_token});
+    return fetch(caminho, opcoes);
+  }
+
+  // ----------------------------------------------------------------- dados
+  function carregar(){
+    var dias = $('periodo').value;
+    $('subtitulo').textContent = 'carregando…';
+    pedir('/api/leads/' + SUCURSAL + '?dias=' + dias).then(function(r){
+      if (r.status === 403) throw new Error('Sua conta não tem acesso a esta sucursal.');
+      if (!r.ok) return r.text().then(function(t){ throw new Error(t.slice(0,200)); });
+      return r.json();
+    }).then(function(d){ dados = d; desenhar(); })
+      .catch(function(e){ $('subtitulo').innerHTML = '<span class="alerta">' + esc(e.message) + '</span>'; });
+  }
+  $('periodo').onchange = carregar;
+
+  function desenhar(){
+    $('titulo').textContent = 'Leads — ' + NOMES[SUCURSAL];
+    var meus = dados.resumo.filter(function(r){ return r.sucursal === SUCURSAL; })[0] || {};
+    var totalGeral = dados.resumo.reduce(function(a,r){ return a + Number(r.total||0); }, 0);
+    $('subtitulo').textContent =
+      num(meus.total||0) + ' leads seus · ' + num(totalGeral) + ' na Aliança · ' +
+      'últimos ' + dados.dias + ' dia(s)';
+    $('porqueLeads').textContent =
+      'As três sucursais veem os leads umas das outras — é o que permite conferir a distribuição. ' +
+      'A coluna Regra diz por que o lead foi parar onde foi parar.';
+
+    cartoes(); roleta(); semDestino(); filtros(); leads(); chaves();
+    $('rodape').textContent = 'Atualizado em ' + dt(dados.gerado_em) +
+      ' · você tem acesso a: ' + dados.minhas_sucursais.map(function(s){ return NOMES[s]; }).join(', ');
+  }
+
+  function cartoes(){
+    $('cartoes').innerHTML = dados.resumo.map(function(r){
+      var eu = r.sucursal === SUCURSAL;
+      var pend = Number(r.pendentes || 0);
+      return '<div class="cartao" style="' + (eu ? 'border-color:' + COR[r.sucursal] : '') + '">' +
+        '<h3><span class="ponto" style="background:' + COR[r.sucursal] + '"></span>' +
+          esc(r.nome) + (eu ? ' <span class="mini">(você)</span>' : '') + '</h3>' +
+        '<div class="grande">' + num(r.total) + '</div>' +
+        '<div class="mini">' + num(r.por_dono) + ' representação · ' +
+          num(r.por_roleta) + ' roleta · ' + num(r.por_aderencia) + ' aderência</div>' +
+        '<div class="mini" style="margin-top:7px">' +
+          (pend ? '<span class="alerta">' + num(pend) + ' sem entrar no C2S</span>'
+                : num(r.entregues) + ' entregues') +
+          ' · ' + (r.tem_chave ? '<span class="selo ok">com chave</span>'
+                               : '<span class="selo falta">sem chave</span>') +
+        '</div></div>';
+    }).join('');
+  }
+
+  function roleta(){
+    var c = {}; dados.roleta.forEach(function(r){ (c[r.nivel] = c[r.nivel] || []).push(r); });
+    var html = '';
+    Object.keys(c).sort(function(a,b){ return a-b; }).forEach(function(n){
+      c[n].forEach(function(r, i){
+        var p = Math.min(1, Number(r.proporcao || 0));
+        html += '<tr>' +
+          '<td>' + (i === 0 ? esc(r.faixa) : '') + '</td>' +
+          '<td><span class="ponto" style="display:inline-block;background:' + COR[r.sucursal] + '"></span> ' +
+            esc(NOMES[r.sucursal] || r.sucursal) + '</td>' +
+          '<td class="num">' + num(r.recebidos) + '</td>' +
+          '<td class="num mini">' + num(r.cotas) + '</td>' +
+          '<td><div class="barra"><span style="width:' + (p*100).toFixed(0) + '%;background:' + COR[r.sucursal] + '"></span></div></td>' +
+          '<td>' + (r.e_a_proxima ? '<span class="selo ok proxima">próxima</span>' : '') + '</td>' +
+        '</tr>';
+      });
+    });
+    $('tbRoleta').querySelector('tbody').innerHTML = html ||
+      '<tr><td colspan="6" class="vazio">Rodízio ainda sem movimento.</td></tr>';
+  }
+
+  function semDestino(){
+    var l = dados.sem_destino || [];
+    $('secSemDestino').classList.toggle('oculto', l.length === 0);
+    $('qtdSemDestino').textContent = l.length;
+    $('tbSemDestino').querySelector('tbody').innerHTML = l.map(function(r){
+      return '<tr><td>' + dt(r.recebido_em) + '</td>' +
+        '<td>' + esc(r.referencia || '—') + '</td>' +
+        '<td class="mini">' + esc(r.motivo) + '</td>' +
+        '<td>' + esc(r.lead_nome || '—') + '<br><span class="mini">' +
+          esc(fone(r.lead_fone)) + ' ' + esc(r.lead_email || '') + '</span></td></tr>';
+    }).join('');
+  }
+
+  function filtros(){
+    var op = [['todas','Todas as sucursais'],['ville','Ville'],['homemark','Homemark'],
+              ['alcance','Alcance'],['pendentes','Só os que não entraram']];
+    $('filtros').innerHTML = op.map(function(o){
+      return '<button class="aba' + (filtro === o[0] ? ' on' : '') + '" data-f="' + o[0] + '">' +
+             esc(o[1]) + '</button>';
+    }).join('');
+    Array.prototype.forEach.call($('filtros').children, function(b){
+      b.onclick = function(){ filtro = b.dataset.f; filtros(); leads(); };
+    });
+  }
+
+  function leads(){
+    var l = (dados.leads || []).filter(function(r){
+      if (filtro === 'todas') return true;
+      if (filtro === 'pendentes') return !r.entregue && r.destino;
+      return r.destino === filtro;
+    });
+    $('semLeads').classList.toggle('oculto', l.length > 0);
+    $('tbLeads').querySelector('tbody').innerHTML = l.map(function(r){
+      var imovel = r.cod_anuncio
+        ? (r.link_anuncio ? '<a href="' + esc(r.link_anuncio) + '" target="_blank" rel="noopener">' + esc(r.cod_anuncio) + '</a>' : esc(r.cod_anuncio))
+        : '—';
+      var entrega = r.entregue
+        ? '<span class="selo ok">entregue</span><br><span class="mini">' + dt(r.entregue_em) + '</span>'
+        : (r.tem_chave
+            ? '<span class="selo falta">na fila</span><br><span class="mini">' + esc((r.entrega_erro||'').slice(0,70)) + '</span>'
+            : '<span class="selo falta">sem chave</span><br><span class="mini">a ' + esc(r.destino) + ' ainda não configurou</span>');
+      var podeReenviar = !r.entregue && r.destino;
+      return '<tr>' +
+        '<td class="mini">' + dt(r.recebido_em) + '</td>' +
+        '<td>' + (r.destino
+            ? '<span class="ponto" style="display:inline-block;background:' + COR[r.destino] + '"></span> ' + esc(NOMES[r.destino] || r.destino)
+            : '<span class="tag nao">sem destino</span>') + '</td>' +
+        '<td><span class="tag ' + esc(r.regra) + '">' + esc(r.regra) + '</span>' +
+          '<div class="mini" style="max-width:220px">' + esc(r.motivo || '') + '</div></td>' +
+        '<td>' + imovel + '<div class="mini">' + esc(r.endereco || r.titulo || '') +
+          (r.preco ? ' · ' + brl(r.preco) : '') + '</div></td>' +
+        '<td>' + esc(r.lead_nome || '—') + '<div class="mini">' + esc(fone(r.lead_fone)) +
+          (r.lead_email ? '<br>' + esc(r.lead_email) : '') + '</div></td>' +
+        '<td>' + entrega + '</td>' +
+        '<td>' + (podeReenviar
+            ? '<button class="acao" data-reenviar="' + r.lead_id + '">reenviar</button>' : '') + '</td>' +
+      '</tr>';
+    }).join('');
+
+    Array.prototype.forEach.call($('tbLeads').querySelectorAll('[data-reenviar]'), function(b){
+      b.onclick = function(){ reenviar(Number(b.dataset.reenviar), b); };
+    });
+  }
+
+  function reenviar(id, botao){
+    botao.disabled = true; botao.textContent = 'enviando…';
+    pedir('/api/leads/' + SUCURSAL + '/reenviar', {
+      method:'POST', body: JSON.stringify({lead_id:id})
+    }).then(function(r){
+      return r.json().then(function(j){ if (!r.ok) throw new Error(j.detail || 'falhou'); return j; });
+    }).then(function(j){
+      botao.textContent = 'na fila';
+      if (j.aviso) alert(j.aviso);
+      setTimeout(carregar, 800);
+    }).catch(function(e){
+      botao.disabled = false; botao.textContent = 'reenviar';
+      alert('Não deu: ' + e.message);
+    });
+  }
+
+  function chaves(){
+    $('tbChaves').querySelector('tbody').innerHTML = (dados.chaves || []).map(function(c){
+      return '<tr>' +
+        '<td><span class="ponto" style="display:inline-block;background:' + COR[c.sucursal] + '"></span> ' +
+          esc(c.nome) + (c.sucursal === SUCURSAL ? ' <span class="mini">(esta tela)</span>' : '') + '</td>' +
+        '<td>' + (c.tem_chave
+            ? '<span class="selo ok">configurada</span> <span class="mini">' + esc(c.final_da_chave) + '</span>'
+            : '<span class="selo falta">sem chave</span>') + '</td>' +
+        '<td class="mini">' + dt(c.atualizado_em) + '</td>' +
+        '<td class="mini">' + esc(c.atualizado_por || '—') + '</td></tr>';
+    }).join('');
+    $('avisoChave').textContent = 'Só a chave da ' + NOMES[SUCURSAL] + ' pode ser alterada aqui.';
+  }
+
+  $('btVerChave').onclick = function(){
+    var c = $('campoChave');
+    var vendo = c.type === 'text';
+    c.type = vendo ? 'password' : 'text';
+    this.textContent = vendo ? 'mostrar' : 'esconder';
+  };
+
+  $('btSalvarChave').onclick = function(){
+    var campo = $('campoChave'), bt = this;
+    var token = campo.value.trim();
+    var msg = token
+      ? 'Gravar esta chave para ' + NOMES[SUCURSAL] + '? Os leads parados dela entram no C2S na próxima rodada.'
+      : 'Campo vazio REMOVE a chave da ' + NOMES[SUCURSAL] + ' e a entrega para de funcionar. Confirma?';
+    if (!confirm(msg)) return;
+    bt.disabled = true; bt.textContent = 'salvando…';
+    pedir('/api/leads/' + SUCURSAL + '/token', {
+      method:'POST', body: JSON.stringify({sucursal:SUCURSAL, token:token})
+    }).then(function(r){
+      return r.json().then(function(j){ if (!r.ok) throw new Error(j.detail || 'falhou'); return j; });
+    }).then(function(){
+      campo.value = ''; campo.type = 'password'; $('btVerChave').textContent = 'mostrar';
+      bt.disabled = false; bt.textContent = 'Salvar chave';
+      carregar();
+    }).catch(function(e){
+      bt.disabled = false; bt.textContent = 'Salvar chave';
+      alert('Não deu: ' + e.message);
+    });
+  };
+
+  setInterval(function(){ if (sessao && !document.hidden) carregar(); }, 120000);
+  iniciar();
+})();
+</script>
+</body>
+</html>
