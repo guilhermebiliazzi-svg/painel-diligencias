@@ -847,6 +847,59 @@ def _rpc(funcao, params=None):
     return r.json()
 
 
+@app.get("/", response_class=HTMLResponse)
+@app.get("/inicio", response_class=HTMLResponse)
+def tela_inicio():
+    """Porta de entrada única.
+
+    Antes cada tela tinha o próprio endereço e era preciso saber qual digitar —
+    /destaques/ville, /leads/homemark. Quem tem acesso a uma sucursal só não
+    tinha como descobrir o endereço dela. Aqui entra-se sempre pelo mesmo
+    lugar e o login decide o que aparece.
+    """
+    caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inicio.html")
+    with open(caminho, encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/api/inicio")
+def api_inicio(authorization: str = Header(default="")):
+    """O que esta conta pode abrir, e um número em cada card.
+
+    Não usa exige_acesso: aqui ninguém está pedindo uma sucursal específica,
+    está perguntando 'o que eu posso ver?'. Sem acesso a nada, a resposta é
+    uma lista vazia — e a tela diz isso com todas as letras, em vez de dar
+    403 numa página que a pessoa nem escolheu.
+    """
+    email = email_do_pedido(authorization)
+    minhas = sorted(sucursais_de(email))
+
+    cartoes = []
+    if minhas:
+        try:
+            resumo = {r["sucursal"]: r for r in _rpc("alianca_painel_resumo", {"p_dias": 7})}
+        except Exception:
+            resumo = {}
+        for nome in minhas:
+            cfg = uf.SUCURSAIS.get(nome, {})
+            catalogo = ler_config(f"catalogo_{nome}.json", None) or {}
+            r = resumo.get(nome, {})
+            cartoes.append({
+                "sucursal": nome,
+                "nome": cfg.get("nome") or f"RE/MAX {nome.title()}",
+                "imoveis": len(catalogo.get("itens") or []),
+                "catalogo_em": catalogo.get("gerado_em"),
+                "cota_home": cfg.get("cota_home", 0),
+                "cota_destacado": cfg.get("cota_destacado", 0),
+                "leads_7d": r.get("total", 0),
+                "leads_pendentes": r.get("pendentes", 0),
+                "tem_chave": r.get("tem_chave"),
+            })
+
+    return {"email": email, "minhas_sucursais": minhas,
+            "cartoes": cartoes, "agora": agora()}
+
+
 @app.get("/leads/{sucursal}", response_class=HTMLResponse)
 def tela_leads(sucursal: str):
     """A página é pública; ela não mostra nada sem login."""
