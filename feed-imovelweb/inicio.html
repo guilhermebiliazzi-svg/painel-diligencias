@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aliança RE/MAX</title>
+<style>
+  :root{
+    --tinta:#16202c; --fraca:#69788a; --linha:#e2e8f0; --fundo:#f6f8fa;
+    --papel:#fff; --azul:#1f6feb; --verde:#12805c; --vermelho:#b42318;
+    --ville:#1f6feb; --homemark:#7c3aed; --alcance:#0d9488;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--fundo);color:var(--tinta);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .env{max-width:960px;margin:0 auto;padding:34px 16px 70px}
+  header{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;justify-content:space-between}
+  h1{font-size:25px;margin:0}
+  .sub{color:var(--fraca);font-size:13.5px;margin:4px 0 26px}
+  .quem{font-size:13px;color:var(--fraca)}
+  .quem a{margin-left:10px;color:var(--azul)}
+
+  .lista{display:grid;gap:16px}
+  .bloco{background:var(--papel);border:1px solid var(--linha);border-radius:14px;overflow:hidden}
+  .topo{display:flex;align-items:center;gap:10px;padding:15px 18px 13px;border-bottom:1px solid var(--linha)}
+  .ponto{width:11px;height:11px;border-radius:50%;flex:none}
+  .topo h2{font-size:17px;margin:0;flex:1}
+  .selo{font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid var(--linha);color:var(--fraca);white-space:nowrap}
+  .selo.ok{border-color:#a7e8cf;background:#eafaf3;color:var(--verde)}
+  .selo.falta{border-color:#f3c9c4;background:#fdeeec;color:var(--vermelho)}
+
+  .portas{display:grid;grid-template-columns:1fr 1fr}
+  .porta{display:block;padding:17px 18px;text-decoration:none;color:inherit;border-right:1px solid var(--linha)}
+  .porta:last-child{border-right:none}
+  .porta:hover{background:#f9fbfd}
+  .porta .rotulo{font-weight:600;font-size:14.5px;display:flex;align-items:center;gap:7px}
+  .porta .rotulo .seta{color:var(--azul);font-weight:400}
+  .porta .numero{font-size:24px;font-weight:600;margin:7px 0 1px;line-height:1.15}
+  .porta .mini{font-size:12.5px;color:var(--fraca)}
+  .porta .mini.alerta{color:var(--vermelho);font-weight:600}
+
+  #entrada{display:none;min-height:70vh;align-items:center;justify-content:center}
+  .cartaoEntrada{background:var(--papel);border:1px solid var(--linha);border-radius:14px;
+    padding:36px 32px;text-align:center;max-width:410px}
+  button.primario{background:var(--tinta);color:#fff;border:1px solid var(--tinta);
+    border-radius:8px;padding:10px 20px;font:inherit;font-size:15px;cursor:pointer}
+  button.primario[disabled]{opacity:.5}
+  #conteudo{display:none}
+  .nada{background:var(--papel);border:1px solid var(--linha);border-radius:14px;
+    padding:28px;color:var(--fraca);font-size:14px}
+  @media(max-width:560px){ .portas{grid-template-columns:1fr} .porta{border-right:none;border-bottom:1px solid var(--linha)} .porta:last-child{border-bottom:none} }
+</style>
+</head>
+<body>
+<div class="env">
+
+  <div id="entrada">
+    <div class="cartaoEntrada">
+      <h1 style="font-size:21px">Aliança RE/MAX</h1>
+      <p class="sub" style="margin:10px 0 22px">Entre com a conta Google autorizada.<br>
+        O que aparece depois depende do seu acesso.</p>
+      <button class="primario" id="btGoogle">Entrar com Google</button>
+      <p id="erroEntrada" class="sub" style="color:var(--vermelho);margin-top:18px"></p>
+    </div>
+  </div>
+
+  <div id="conteudo">
+    <header>
+      <div>
+        <h1>Aliança RE/MAX</h1>
+        <p class="sub" id="subtitulo">carregando…</p>
+      </div>
+      <div class="quem"><span id="quemSou"></span><a href="#" id="sair">sair</a></div>
+    </header>
+    <div class="lista" id="lista"></div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var sb = null, sessao = null;
+  var COR = {ville:'var(--ville)', homemark:'var(--homemark)', alcance:'var(--alcance)'};
+
+  function esc(t){
+    return String(t == null ? '' : t)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function num(n){ return (n == null ? 0 : Number(n)).toLocaleString('pt-BR'); }
+  function dt(s){
+    if (!s) return 'nunca';
+    var d = new Date(s);
+    return d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}) + ' ' +
+           d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  }
+  function velho(s){
+    if (!s) return true;
+    return (Date.now() - new Date(s).getTime()) > 36*3600*1000;
+  }
+
+  function mostrarEntrada(erro){
+    $('entrada').style.display = 'flex';
+    $('conteudo').style.display = 'none';
+    $('erroEntrada').textContent = erro || '';
+  }
+
+  function iniciar(){
+    fetch('/api/config').then(function(r){ return r.json(); }).then(function(cfg){
+      if (!cfg.supabase_url || !cfg.supabase_anon_key) {
+        return mostrarEntrada('O serviço está sem a chave pública do Supabase.');
+      }
+      sb = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
+      return sb.auth.getSession().then(function(r){
+        sessao = r.data && r.data.session;
+        if (!sessao) return mostrarEntrada('');
+        $('entrada').style.display = 'none';
+        $('conteudo').style.display = 'block';
+        $('quemSou').textContent = sessao.user.email;
+        carregar();
+      });
+    }).catch(function(e){ mostrarEntrada('Não consegui falar com o serviço: ' + e.message); });
+  }
+
+  $('btGoogle').onclick = function(){
+    if (!sb) return;
+    $('btGoogle').disabled = true;
+    sb.auth.signInWithOAuth({provider:'google',
+      options:{redirectTo: location.origin + '/'}}).then(function(r){
+      if (r.error){ $('btGoogle').disabled = false; $('erroEntrada').textContent = r.error.message; }
+    });
+  };
+  $('sair').onclick = function(e){ e.preventDefault(); sb.auth.signOut().then(function(){ location.reload(); }); };
+
+  function carregar(){
+    fetch('/api/inicio', {headers:{'Authorization':'Bearer ' + sessao.access_token}})
+      .then(function(r){
+        if (!r.ok) return r.text().then(function(t){ throw new Error(t.slice(0,180)); });
+        return r.json();
+      })
+      .then(desenhar)
+      .catch(function(e){ $('subtitulo').textContent = e.message; });
+  }
+
+  function desenhar(d){
+    if (!d.cartoes.length) {
+      $('subtitulo').textContent = '';
+      $('lista').innerHTML = '<div class="nada"><b>Sua conta ainda não tem acesso a nenhuma sucursal.</b><br><br>' +
+        'Peça para liberarem o e-mail <b>' + esc(d.email) + '</b>. ' +
+        'Se você acabou de ser liberado, saia e entre de novo.</div>';
+      return;
+    }
+    $('subtitulo').textContent = d.cartoes.length === 1
+      ? 'Você tem acesso a uma sucursal.'
+      : 'Você tem acesso a ' + d.cartoes.length + ' sucursais.';
+
+    $('lista').innerHTML = d.cartoes.map(function(c){
+      var listaVelha = velho(c.catalogo_em);
+      var pend = Number(c.leads_pendentes || 0);
+      return '<div class="bloco">' +
+        '<div class="topo">' +
+          '<span class="ponto" style="background:' + COR[c.sucursal] + '"></span>' +
+          '<h2>' + esc(c.nome) + '</h2>' +
+          (c.tem_chave === false ? '<span class="selo falta">sem chave do C2S</span>' : '') +
+        '</div>' +
+        '<div class="portas">' +
+          '<a class="porta" href="/destaques/' + c.sucursal + '">' +
+            '<div class="rotulo">Destaques <span class="seta">→</span></div>' +
+            '<div class="numero">' + num(c.imoveis) + '</div>' +
+            '<div class="mini">imóveis na lista · ' + num(c.cota_home) + ' super, ' +
+              num(c.cota_destacado) + ' destaque</div>' +
+            '<div class="mini' + (listaVelha ? ' alerta' : '') + '">lista de ' + dt(c.catalogo_em) + '</div>' +
+          '</a>' +
+          '<a class="porta" href="/leads/' + c.sucursal + '">' +
+            '<div class="rotulo">Leads <span class="seta">→</span></div>' +
+            '<div class="numero">' + num(c.leads_7d) + '</div>' +
+            '<div class="mini">nos últimos 7 dias</div>' +
+            '<div class="mini' + (pend ? ' alerta' : '') + '">' +
+              (pend ? num(pend) + ' sem entrar no C2S' : 'tudo entregue') + '</div>' +
+          '</a>' +
+        '</div></div>';
+    }).join('');
+  }
+
+  iniciar();
+})();
+</script>
+</body>
+</html>
