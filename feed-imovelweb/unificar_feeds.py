@@ -226,6 +226,77 @@ RE_CARACTERISTICA = re.compile(
     r"<caracteristica>\s*(?:<id>.*?</id>\s*)?<nome>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</nome>"
     r"\s*<valor>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</valor>", re.S)
 
+# ------------------------------------------- complemento (numero da unidade)
+#
+# A Navent le o complemento como uma CARACTERISTICA, nao como parte do
+# <endereco>. O formato que eles pedem (chamado de 14/09):
+#
+#   <caracteristica>
+#     <id><![CDATA[ 2000199 ]]></id>
+#     <nome><![CDATA[ COMPLEMENTO ]]></nome>
+#     <valor><![CDATA[ 102 ]]></valor>
+#   </caracteristica>
+#
+# O Nonstop MANDA o bloco, com o id certo, mas escreve o nome em minusculas
+# ("complemento") — fora do padrao das outras, que vem como
+# "PRINCIPALES|QUARTO", "MEDIDAS|AREA_UTIL". O portal casa pelo nome e
+# descarta. Nada se perdia na unificacao: saia com o nome que o portal nao
+# reconhece.
+#
+# Aqui so o <nome> e reescrito. O id e o valor saem intactos, e onde nao ha
+# bloco nenhum nao se inventa nada.
+
+ID_COMPLEMENTO = "2000199"
+
+RE_CARACTERISTICA_BLOCO = re.compile(r"<caracteristica>.*?</caracteristica>", re.S)
+RE_LER_ID = re.compile(r"<id>\s*(?:<!\[CDATA\[)?\s*(.*?)\s*(?:\]\]>)?\s*</id>", re.S)
+RE_LER_NOME = re.compile(r"<nome>\s*(?:<!\[CDATA\[)?\s*(.*?)\s*(?:\]\]>)?\s*</nome>", re.S)
+RE_LER_VALOR = re.compile(r"<valor>\s*(?:<!\[CDATA\[)?\s*(.*?)\s*(?:\]\]>)?\s*</valor>", re.S)
+RE_CORPO_NOME = re.compile(r"(<nome>)(.*?)(</nome>)", re.S)
+
+
+def normalizar_complemento(bloco):
+    """Reescreve o <nome> da caracteristica de complemento para COMPLEMENTO.
+
+    Reconhece pelo id (2000199) ou pelo proprio nome em qualquer caixa — assim
+    funciona mesmo que uma origem mande so um dos dois no padrao.
+
+    Preserva CDATA quando a origem usa CDATA: o iList envolve tudo, o Nonstop
+    nao. E a mesma regra de aplicar_titulo() e marcar_dono().
+
+    Devolve (bloco, tem_complemento_preenchido). Bloco com valor vazio conta
+    como ausente — serve para o relatorio nao mentir cobertura.
+    """
+    preenchido = [False]
+
+    def trocar(trecho):
+        texto = trecho.group(0)
+        m_nome = RE_LER_NOME.search(texto)
+        if not m_nome:
+            return texto
+
+        m_id = RE_LER_ID.search(texto)
+        ident = m_id.group(1).strip() if m_id else ""
+        nome = m_nome.group(1).strip()
+        if ident != ID_COMPLEMENTO and nome.lower() != "complemento":
+            return texto
+
+        m_valor = RE_LER_VALOR.search(texto)
+        if m_valor and m_valor.group(1).strip():
+            preenchido[0] = True
+
+        if nome == "COMPLEMENTO":
+            return texto
+
+        m_corpo = RE_CORPO_NOME.search(texto)
+        if not m_corpo:
+            return texto
+        corpo = m_corpo.group(2)
+        corpo_novo = "<![CDATA[COMPLEMENTO]]>" if "CDATA" in corpo else "COMPLEMENTO"
+        return texto[:m_corpo.start(2)] + corpo_novo + texto[m_corpo.end(2):]
+
+    return RE_CARACTERISTICA_BLOCO.sub(trocar, bloco), preenchido[0]
+
 POSICAO_SUCURSAL = {"ville": 0, "homemark": 1, "alcance": 2}
 
 # Quantas fotos cada sucursal descarta: 1 a cada PASSO_RECORTE.
@@ -575,6 +646,7 @@ def processar(nome, cfg, escolhas=None, compartilhados=None):
     total = 0
     catalogo = []
     trocados = [0]      # quantos titulos foram reescritos
+    complementos = [0]  # quantos sairam com o complemento preenchido
     recortados = [0]    # quantos anuncios tiveram fotos recortadas
     fotos_fora = [0]    # quantas fotos sairam no total
 
@@ -592,6 +664,9 @@ def processar(nome, cfg, escolhas=None, compartilhados=None):
             f"<tipoPublicacao>{tipo}</tipoPublicacao>", bloco, count=1)
         if not trocas:
             tipo = "sem tipoPublicacao"
+        bloco, tem_complemento = normalizar_complemento(bloco)
+        if tem_complemento:
+            complementos[0] += 1
         # Diferenciacao entre sucursais. O recorte de fotos so vale a pena onde
         # existe duplicata: em imovel exclusivo seria perder foto de graca.
         if codigo and chave_compartilhada(codigo) in compartilhados:
@@ -636,6 +711,8 @@ def processar(nome, cfg, escolhas=None, compartilhados=None):
     print(f"\n  SAIDA: {destino}  ({total} imoveis, {mb:.1f} MB)")
     print(f"  tipoPublicacao: " + " | ".join(f"{k}={v}" for k, v in sorted(tipos.items())))
     print(f"  titulos proprios da sucursal: {trocados[0]} de {total}")
+    print(f"  complemento (caracteristica {ID_COMPLEMENTO}): "
+          f"{complementos[0]} de {total}")
     if recortados[0]:
         media = fotos_fora[0] / recortados[0]
         print(f"  fotos recortadas: {recortados[0]} anuncios compartilhados "
@@ -668,6 +745,7 @@ def processar(nome, cfg, escolhas=None, compartilhados=None):
             "home_manual": manual_h, "destacado_manual": manual_d,
             "cota_home": cota_h, "cota_destacado": cota_d,
             "titulos_proprios": trocados[0],
+            "complementos": complementos[0],
             "anuncios_recortados": recortados[0],
             "fotos_removidas": fotos_fora[0],
             "passo_recorte": PASSO_RECORTE}
@@ -1082,6 +1160,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
     os.makedirs(DIR_SAIDA, exist_ok=True)
     destino = os.path.join(DIR_SAIDA, SAIDA_UNIFICADA)
     tipos, por_dono, catalogo, total = {}, {}, [], 0
+    complementos = 0
     with open(destino, "w", encoding="utf-8") as out:
         out.write('<?xml version="1.0" encoding="UTF-8"?>\n<OpenNavent>\n<Imoveis>\n')
         for _, (dono, bloco) in tudo:
@@ -1092,6 +1171,9 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                 f"<tipoPublicacao>{tipo}</tipoPublicacao>", bloco, count=1)
             if not trocas:
                 tipo = "sem tipoPublicacao"
+            bloco, tem_complemento = normalizar_complemento(bloco)
+            if tem_complemento:
+                complementos += 1
             bloco = marcar_dono(bloco, dono)
             out.write(bloco.rstrip() + "\n")
             total += 1
@@ -1117,6 +1199,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
     print(f"\n  SAIDA: {destino}  ({total} imoveis, {mb:.1f} MB)")
     print("  por dono: " + " | ".join(f"{k}={v}" for k, v in sorted(por_dono.items())))
     print("  tipoPublicacao: " + " | ".join(f"{k}={v}" for k, v in sorted(tipos.items())))
+    print(f"  complemento (caracteristica {ID_COMPLEMENTO}): {complementos} de {total}")
     print(f"  destaques: {tipos.get('HOME',0)}/{COTA_HOME_UNIFICADA} super "
           f"({manual_h} na tela), {tipos.get('DESTACADO',0)}/{COTA_DESTACADO_UNIFICADA} "
           f"destaque ({manual_d} na tela)")
@@ -1133,6 +1216,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
             "conflitos_ilist": conflitos_ilist,
             "conflitos_terceiro": conflitos_terceiro,
             "repetidos": repetidos,
+            "complementos": complementos,
             "home": tipos.get("HOME", 0), "destacado": tipos.get("DESTACADO", 0),
             "home_manual": manual_h, "destacado_manual": manual_d,
             "escolhas": diag, "cotas_sucursal": COTAS_SUCURSAL,
