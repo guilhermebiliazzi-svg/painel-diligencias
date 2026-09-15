@@ -1,1022 +1,1289 @@
 #!/usr/bin/env python3
 """
-Serviço do feed unificado ImovelWeb — Aliança Multi Offices
-(RE/MAX Ville, Homemark, Alcance)
+Unificacao de feeds para o ImovelWeb — Aliança Multi Offices
+Para cada sucursal: iList + Nonstop -> 1 XML de saida.
 
-Roda no Render. O n8n só agenda e confere; o trabalho pesado mora aqui,
-porque montar 52 MB de XML dentro de um Code node derruba a instância do
-n8n Cloud (ver incidente_oom_agendamentos_23ago.md).
+Deduplicacao dentro da sucursal: o mesmo imovel que vem pelo iList e pelo
+Nonstop entra uma vez so (fica a versao do iList).
 
-Endpoints
-    GET  /saude              — vivo?
-    POST /gerar              — começa a geração (assíncrona). Devolve job_id.
-    GET  /status             — estado do último job
-    GET  /status/{job_id}    — estado de um job específico
-    GET  /testar             — confere se as 6 URLs de origem respondem
-    GET  /destaques/{sucursal}      — tela de escolha dos destaques
-    GET  /api/destaques/{sucursal}  — catalogo + escolha atual (JSON)
-    POST /api/destaques/{sucursal}  — grava a escolha
+Diferenciacao entre sucursais: imovel anunciado por mais de uma sucursal sai
+com um subconjunto proprio de fotos e um titulo proprio, para nao cair no
+criterio de duplicidade da ImovelWeb. Nenhum fato do imovel e alterado.
 
-Autenticação: header  x-feed-token  igual à variável de ambiente FEED_TOKEN.
-(GET /saude é aberto, para o health check do Render.)
-
-Variáveis de ambiente
-    FEED_TOKEN            obrigatório — segredo do endpoint
-    SUPABASE_URL          ex.: https://xxxx.supabase.co
-    SUPABASE_SERVICE_KEY  service role (grava no Storage)
-    SUPABASE_BUCKET       padrão: criativos-imoveis
-    FEED_PREFIXO          padrão: feeds       (pasta dentro do bucket)
-    DIR_SAIDA             padrão: /tmp/feeds
-    GZIP                  "1" para subir também o .xml.gz
-    SUPABASE_ANON_KEY     chave publicavel (a mesma do painel) — o login usa ela
-    ACESSOS               acesso de emergencia a tela, fora do banco:
-                          fulano@x.com:ville,homemark;beltrano@x.com:*
-
-Quem entra na tela sai da tabela public.feed_acessos (ver sql_feed_acessos.sql).
-Estar nela nao da acesso nenhum ao painel — sao listas separadas de proposito.
+Uso:
+    python3 unificar_feeds.py                # processa todas as sucursais
+    python3 unificar_feeds.py ville          # processa uma
 """
 
-import gzip
-import json
-import os
+import hashlib
+import re
+import unicodedata
 import shutil
-import threading
+import sys
+import os
 import time
-import traceback
-import uuid
-from datetime import datetime, timezone
+import urllib.error
+import urllib.request
+from datetime import datetime
 
-import requests
-from fastapi import BackgroundTasks, Body, FastAPI, Header, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+# ---------------------------------------------------------------- config
 
-import unificar_feeds as uf
+SUCURSAIS = {
+    "ville": {
+        "ilist":   "https://feeds.goiconnect.com/RemaxBrazil_Imovelweb/94EEE515-2BC3-459C-A1A3-5F717DFF984B/Remax_60124.xml",
+        "nonstop": "https://www.usenonstop.com/integracoes/imovelweb/remaxville",
+        "saida":   "remax_ville.xml",
+        "vagas":   2742, "cota_home": 67, "cota_destacado": 175,
+    },
+    "homemark": {
+        "ilist":   "https://feeds.goiconnect.com/RemaxBrazil_Imovelweb/1C94D1D6-CA17-45CE-AEB0-BBAC413D5683/Remax_60227.xml",
+        "nonstop": "https://www.usenonstop.com/integracoes/imovelweb/homemark",
+        "saida":   "remax_homemark.xml",
+        "vagas":   2742, "cota_home": 67, "cota_destacado": 175,
+    },
+    "alcance": {
+        "ilist":   "https://feeds.goiconnect.com/RemaxBrazil_Imovelweb/6EA466C8-B177-4712-9626-DC8315C4EE5B/Remax_60226.xml",
+        "nonstop": "https://www.usenonstop.com/integracoes/imovelweb/remaxalcance",
+        "saida":   "remax_alcance.xml",
+        "vagas":   2742, "cota_home": 66, "cota_destacado": 175,
+    },
+}
 
-FEED_TOKEN = os.environ.get("FEED_TOKEN", "")
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
-BUCKET = os.environ.get("SUPABASE_BUCKET", "criativos-imoveis")
-PREFIXO = os.environ.get("FEED_PREFIXO", "feeds").strip("/")
-USAR_GZIP = os.environ.get("GZIP", "") == "1"
-SUPABASE_ANON = os.environ.get("SUPABASE_ANON_KEY", "")
+DIR_SAIDA = os.environ.get("DIR_SAIDA", "./saida")
+
+# Padrao do codigo RE/MAX inserido na descricao do Nonstop.
+# Aceita "Codigo"/"Código", com ou sem dois-pontos, no fim ou no meio do texto.
+PADRAO_CODIGO = re.compile(r"C[óo]digo\s*:?\s*(\d{6,}-\d{1,3})")
+
+# Codigo de anuncio do iList (sempre vem em CDATA)
+RE_COD_ILIST = re.compile(r"<codigoAnuncio><!\[CDATA\[(.*?)\]\]></codigoAnuncio>")
+
+# Codigo de anuncio generico (com ou sem CDATA)
+RE_COD = re.compile(r"<codigoAnuncio>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</codigoAnuncio>")
+RE_DESC = re.compile(r"<descricao>(.*?)</descricao>", re.S)
+RE_TIPO_PUB = re.compile(r"<tipoPublicacao>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</tipoPublicacao>", re.S)
+
+# Bloco de fotos do anuncio. Fica dentro de <multimidia>, ao lado de <plantas>
+# e <videos> — por isso a busca e no bloco <imagens>, e nao no <urlImagem> solto:
+# a primeira planta tambem tem urlImagem e nao serve de capa.
+RE_IMAGENS = re.compile(r"<imagens>(.*?)</imagens>", re.S)
+RE_URL_IMG = re.compile(r"<urlImagem>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</urlImagem>", re.S)
 
 
-def _ler_acessos(texto):
-    """fulano@x.com:ville,homemark;beltrano@x.com:*  ->  {email: {sucursais}}"""
-    mapa = {}
-    for parte in (texto or "").replace("\n", ";").split(";"):
-        parte = parte.strip()
-        if not parte or ":" not in parte:
-            continue
-        email, alvos = parte.split(":", 1)
-        email = email.strip().lower()
-        if not email:
-            continue
-        mapa.setdefault(email, set()).update(
-            a.strip().lower() for a in alvos.split(",") if a.strip()
-        )
-    return mapa
+# ---------------------------------------------------------------- io
+
+# Alguns provedores (goiconnect/Akamai) recusam o User-Agent padrao do Python
+# com 403 ou 404. Pedimos como um navegador normal.
+CABECALHOS_HTTP = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/xml,text/xml,application/rss+xml,*/*;q=0.8",
+    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+    "Connection": "close",
+}
 
 
-ACESSOS = _ler_acessos(os.environ.get("ACESSOS", ""))
+def baixar(origem, destino, tentativas=3):
+    """Baixa a URL para destino, em streaming. Erro traz a URL e o codigo HTTP."""
+    ultimo = "sem detalhe"
+    for n in range(1, tentativas + 1):
+        pedido = urllib.request.Request(origem, headers=CABECALHOS_HTTP)
+        try:
+            with urllib.request.urlopen(pedido, timeout=300) as r:
+                with open(destino, "wb") as f:
+                    shutil.copyfileobj(r, f, 1 << 20)
+            return destino
+        except urllib.error.HTTPError as e:
+            ultimo = f"HTTP {e.code} {e.reason}"
+            if e.code in (401, 403, 404, 410):
+                break  # repetir nao resolve
+        except Exception as e:
+            ultimo = f"{type(e).__name__}: {e}"
+        if n < tentativas:
+            time.sleep(3 * n)
+    raise RuntimeError(f"nao consegui baixar {origem} -> {ultimo}")
 
-uf.DIR_SAIDA = os.environ.get("DIR_SAIDA", "/tmp/feeds")
 
+def sem_cache(url):
+    """Acrescenta um selo unico a URL.
 
-def cotas_de(sucursal):
-    """Cota de destaque da sucursal no contrato VIGENTE (conta unica).
-
-    A fonte e uf.COTAS_SUCURSAL. O uf.SUCURSAIS ainda carrega cota_home e
-    cota_destacado do contrato antigo, de quando cada sucursal tinha o proprio
-    arquivo — ler de la fazia a tela e a validacao do POST travarem em 67 mesmo
-    depois do aditivo de 15/09, que levou o superdestaque para 100 em cada uma.
-
-    O fallback para SUCURSAIS existe so para nao quebrar se alguem acrescentar
-    uma sucursal em um lugar e esquecer do outro.
-
-    Devolve (super, destaque).
+    As origens ficam atras de CDN. Cada ponto da rede guarda a sua copia, e
+    ja pegamos uma de 11 dias atras (07/09): o XML sairia perfeito, so com
+    estoque velho — falha silenciosa, sem erro e sem alarme. Um parametro
+    novo a cada execucao vira uma chave de cache inedita e obriga a CDN a
+    buscar na origem.
     """
-    c = uf.COTAS_SUCURSAL.get(sucursal) or {}
-    cfg = uf.SUCURSAIS.get(sucursal) or {}
-    return (int(c.get("HOME", cfg.get("cota_home", 0))),
-            int(c.get("DESTACADO", cfg.get("cota_destacado", 0))))
+    return url + ("&" if "?" in url else "?") + "_=" + str(int(time.time()))
 
 
-app = FastAPI(title="Feed unificado ImovelWeb")
-
-# job store em memória: o serviço roda uma instância e um job por vez
-JOBS = {}
-LOCK = threading.Lock()
-
-
-def agora():
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+# Arquivos ja baixados NESTA execucao. Evita baixar o mesmo feed duas vezes
+# quando o levantamento de compartilhados e a geracao passam pelo mesmo XML.
+# E limpo por nova_execucao() no inicio de cada rodada — nunca entre rodadas,
+# senao voltariamos a publicar estoque velho (o problema de CDN de 07/09).
+_ARQUIVOS = {}
 
 
-def confere_token(token):
-    if not FEED_TOKEN:
-        raise HTTPException(500, "FEED_TOKEN não configurado no serviço.")
-    if token != FEED_TOKEN:
-        raise HTTPException(401, "token inválido")
+def nova_execucao():
+    """Zera os caches de uma rodada. Chamar ANTES de gerar."""
+    _ARQUIVOS.clear()
+    _COMPARTILHADOS.clear()
+    _COMPARTILHADOS_PRONTO.clear()
 
 
-def url_publica(nome_arquivo):
-    return f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET}/{PREFIXO}/{nome_arquivo}"
+def obter(origem):
+    """Le de arquivo local ou baixa de URL. Retorna caminho local."""
+    if not origem.startswith("http"):
+        return origem
+    if origem in _ARQUIVOS:
+        return _ARQUIVOS[origem]
+    destino = f"/tmp/feed_{abs(hash(origem))}.xml"
+    caminho = baixar(sem_cache(origem), destino)
+    _ARQUIVOS[origem] = caminho
+    return caminho
 
 
-def subir(caminho, nome_arquivo, content_type):
-    """Envia o arquivo ao Storage do Supabase, em streaming (não carrega em RAM)."""
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        raise RuntimeError("SUPABASE_URL/SUPABASE_SERVICE_KEY não configurados.")
-    destino = f"{SUPABASE_URL}/storage/v1/object/{BUCKET}/{PREFIXO}/{nome_arquivo}"
-    tamanho = os.path.getsize(caminho)
-    with open(caminho, "rb") as f:
-        r = requests.post(
-            destino,
-            headers={
-                "Authorization": f"Bearer {SUPABASE_KEY}",
-                "apikey": SUPABASE_KEY,
-                "Content-Type": content_type,
-                "Content-Length": str(tamanho),
-                "x-upsert": "true",
-                # o padrao do Storage e 1 hora; com 5 min o portal nunca
-                # pega uma copia velha logo depois de uma regeracao
-                "cache-control": "max-age=300",
-            },
-            data=f,
-            timeout=600,
-        )
-    if r.status_code >= 400:
-        # o limite de tamanho do bucket aparece aqui, como 413
-        raise RuntimeError(
-            f"Storage recusou {nome_arquivo}: HTTP {r.status_code} {r.text[:300]}"
-        )
-    return tamanho
+def blocos_imovel(caminho, tam=1 << 20):
+    """Gera cada <Imovel>...</Imovel> lendo em blocos, sem depender de quebras de linha."""
+    resto = ""
+    with open(caminho, encoding="utf-8-sig", errors="replace") as f:
+        while True:
+            pedaco = f.read(tam)
+            if not pedaco:
+                break
+            resto += pedaco
+            while True:
+                i = resto.find("<Imovel>")
+                if i == -1:
+                    resto = resto[-16:] if len(resto) > 16 else resto
+                    break
+                j = resto.find("</Imovel>", i)
+                if j == -1:
+                    resto = resto[i:]
+                    break
+                yield resto[i:j + 9]
+                resto = resto[j + 9:]
 
 
-# Login da tela: o mesmo do painel — conta Google via Supabase Auth.
-# O navegador faz o login e manda o token; aqui so perguntamos ao Supabase
-# de quem e esse token. Guardamos a resposta por 5 minutos para nao
-# consultar a cada clique.
-_SESSOES = {}
-_VALIDADE = 300
+# ---------------------------------------------------------------- core
+
+def foto_de(bloco):
+    """URL da primeira foto util do anuncio. O iList costuma abrir a lista com
+    um <urlImagem /> vazio, entao nao basta pegar a primeira."""
+    m = RE_IMAGENS.search(bloco)
+    if not m:
+        return ""
+    for url in RE_URL_IMG.findall(m.group(1)):
+        url = url.strip()
+        if url.startswith("http"):
+            return url
+    return ""
 
 
-def email_do_pedido(authorization):
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(401, "faça login para continuar")
-    token = authorization[7:].strip()
+def operacao_de(bloco):
+    """Normaliza a operacao. As origens escrevem em espanhol e em caixas
+    diferentes: Venta, VENTA, Alquiler."""
+    o = campo("operacao", bloco).strip().upper()
+    if o.startswith("VEN"):
+        return "VENDA"
+    if o.startswith("ALQ") or o.startswith("ALUG") or o.startswith("LOC"):
+        return "ALUGUEL"
+    return o[:20]
 
-    agora_s = time.time()
-    guardado = _SESSOES.get(token)
-    if guardado and guardado[1] > agora_s:
-        return guardado[0]
 
-    if not SUPABASE_ANON:
-        raise HTTPException(500, "SUPABASE_ANON_KEY não configurada no serviço.")
+def preco_de(bloco):
+    """Primeiro valor de <precos><preco><quantidade>. 0 quando nao ha."""
     try:
-        r = requests.get(
-            f"{SUPABASE_URL}/auth/v1/user",
-            headers={"Authorization": f"Bearer {token}", "apikey": SUPABASE_ANON},
-            timeout=20,
-        )
-    except Exception:
-        traceback.print_exc()
-        raise HTTPException(503, "não consegui validar o login agora")
-    if r.status_code != 200:
-        raise HTTPException(401, "sessão expirada — entre de novo")
-
-    email = (r.json().get("email") or "").strip().lower()
-    if not email:
-        raise HTTPException(401, "conta sem e-mail")
-
-    if len(_SESSOES) > 500:
-        _SESSOES.clear()
-    _SESSOES[token] = (email, agora_s + _VALIDADE)
-    return email
+        return float(campo("quantidade", bloco) or 0)
+    except ValueError:
+        return 0.0
 
 
-_PERFIS = {}
+# ------------------------------------------------- diferenciacao por sucursal
+#
+# O mesmo imovel pode ser anunciado por mais de uma sucursal — cada uma tem a
+# sua conta e o seu direito de anunciar. So que os anuncios saiam IDENTICOS
+# (mesmas fotos, mesmo titulo) e o portal marcava como duplicata.
+#
+# Criterio da ImovelWeb (Playbook SAC RE - ImovelWeb - BR):
+#   - Fotos: 80% de similaridade nas imagens — A ORDEM NAO IMPORTA.
+#   - Caracteristicas: mesma operacao, tipo, bairro, preco, quartos,
+#     banheiros e metragem.
+#   - Categorias: mesmo modelo de anuncio.
+#
+# Por isso a v1 (girar a ordem das fotos) nao servia para nada: mexia
+# exatamente no unico aspecto que o criterio declara ignorar. O que separa de
+# verdade e cada sucursal publicar um SUBCONJUNTO diferente das fotos.
+#
+# Nada aqui altera um fato do imovel: endereco, valor, area, comodos, IPTU e
+# condominio saem intactos. Muda so QUANTAS e QUAIS fotos vao ao ar e como o
+# titulo e redigido.
+
+RE_BLOCO_IMAGENS = re.compile(r"(<imagens>)(.*?)(</imagens>)", re.S)
+RE_UMA_IMAGEM = re.compile(r"<imagem>.*?</imagem>", re.S)
+RE_CARACTERISTICA = re.compile(
+    r"<caracteristica>\s*(?:<id>.*?</id>\s*)?<nome>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</nome>"
+    r"\s*<valor>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</valor>", re.S)
+
+# ------------------------------------------- complemento (numero da unidade)
+#
+# A Navent le o complemento como uma CARACTERISTICA, nao como parte do
+# <endereco>. O formato que eles pedem (chamado de 14/09):
+#
+#   <caracteristica>
+#     <id><![CDATA[ 2000199 ]]></id>
+#     <nome><![CDATA[ COMPLEMENTO ]]></nome>
+#     <valor><![CDATA[ 102 ]]></valor>
+#   </caracteristica>
+#
+# O Nonstop MANDA o bloco, com o id certo, mas escreve o nome em minusculas
+# ("complemento") — fora do padrao das outras, que vem como
+# "PRINCIPALES|QUARTO", "MEDIDAS|AREA_UTIL". O portal casa pelo nome e
+# descarta. Nada se perdia na unificacao: saia com o nome que o portal nao
+# reconhece.
+#
+# Aqui so o <nome> e reescrito. O id e o valor saem intactos, e onde nao ha
+# bloco nenhum nao se inventa nada.
+
+ID_COMPLEMENTO = "2000199"
+
+RE_CARACTERISTICA_BLOCO = re.compile(r"<caracteristica>.*?</caracteristica>", re.S)
+RE_LER_ID = re.compile(r"<id>\s*(?:<!\[CDATA\[)?\s*(.*?)\s*(?:\]\]>)?\s*</id>", re.S)
+RE_LER_NOME = re.compile(r"<nome>\s*(?:<!\[CDATA\[)?\s*(.*?)\s*(?:\]\]>)?\s*</nome>", re.S)
+RE_LER_VALOR = re.compile(r"<valor>\s*(?:<!\[CDATA\[)?\s*(.*?)\s*(?:\]\]>)?\s*</valor>", re.S)
+RE_CORPO_NOME = re.compile(r"(<nome>)(.*?)(</nome>)", re.S)
 
 
-def _acesso_no_banco(email):
-    """Le public.feed_acessos — a lista de quem pode mexer nos destaques.
+def _e_complemento(nome):
+    """True quando o nome da caracteristica designa o complemento.
 
-    E uma tabela so desta tela: estar nela nao da acesso nenhum ao painel.
-    Devolve o conjunto de sucursais, ou None quando nao deu para consultar.
+    As origens escrevem o nome como GRUPO|CAMPO ("PRINCIPALES|QUARTO",
+    "MEDIDAS|AREA_UTIL"). O complemento aparece ora solto e minusculo, no
+    Nonstop, ora possivelmente com prefixo de grupo no iList. Comparar o nome
+    inteiro com "complemento" so pegava a primeira forma.
+
+    Compara o ULTIMO segmento, sem acento e em minusculas. Cobre COMPLEMENTO,
+    complemento, PRINCIPALES|COMPLEMENTO e "Complemento do endereco".
     """
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        return None
-    try:
-        r = requests.get(
-            f"{SUPABASE_URL}/rest/v1/feed_acessos",
-            headers={**_cabecalhos(), "Accept": "application/json"},
-            params={"select": "email,ativo,sucursais", "email": f"eq.{email}",
-                    "limit": "1"},
-            timeout=20,
-        )
-    except Exception:
-        traceback.print_exc()
-        return None
-    if r.status_code >= 400:
-        print(f"[acessos] feed_acessos respondeu HTTP {r.status_code}: {r.text[:200]}")
-        return None
-
-    linhas = r.json()
-    if not linhas:
-        return set()
-    linha = linhas[0]
-    if not linha.get("ativo", True):
-        return set()
-    alvos = {str(a).strip().lower() for a in (linha.get("sucursais") or [])}
-    if "*" in alvos:
-        return set(uf.SUCURSAIS)
-    return {a for a in alvos if a in uf.SUCURSAIS}
+    ultimo = (nome or "").split("|")[-1]
+    limpo = unicodedata.normalize("NFD", ultimo).encode("ascii", "ignore").decode()
+    return limpo.strip().lower().startswith("complemento")
 
 
-def _marcar_acesso(email):
-    """Carimba o ultimo acesso. Falhar aqui nao pode atrapalhar ninguem."""
-    try:
-        requests.patch(
-            f"{SUPABASE_URL}/rest/v1/feed_acessos",
-            headers={**_cabecalhos(), "Content-Type": "application/json",
-                     "Prefer": "return=minimal"},
-            params={"email": f"eq.{email}"},
-            data=json.dumps({"ultimo_acesso": agora()}),
-            timeout=10,
-        )
-    except Exception:
-        pass
+def normalizar_complemento(bloco):
+    """Reescreve o <nome> da caracteristica de complemento para COMPLEMENTO.
 
+    Reconhece pelo id (2000199) ou pelo proprio nome em qualquer caixa — assim
+    funciona mesmo que uma origem mande so um dos dois no padrao.
 
-def sucursais_de(email):
-    """Quem pode o que. A tabela manda; a variavel ACESSOS soma a ela.
+    Preserva CDATA quando a origem usa CDATA: o iList envolve tudo, o Nonstop
+    nao. E a mesma regra de aplicar_titulo() e marcar_dono().
 
-    A variavel existe como porta de emergencia: se o banco estiver fora do ar,
-    voce ainda entra.
+    Devolve (bloco, tem_complemento_preenchido). Bloco com valor vazio conta
+    como ausente — serve para o relatorio nao mentir cobertura.
     """
-    agora_s = time.time()
-    guardado = _PERFIS.get(email)
-    if guardado and guardado[1] > agora_s:
-        alvos = set(guardado[0])
-    else:
-        alvos = _acesso_no_banco(email)
-        if alvos is not None:
-            if len(_PERFIS) > 500:
-                _PERFIS.clear()
-            _PERFIS[email] = (set(alvos), agora_s + _VALIDADE)
-            if alvos:
-                _marcar_acesso(email)
-        else:
-            alvos = set()
+    preenchido = [False]
 
-    do_ambiente = ACESSOS.get(email, set())
-    if "*" in do_ambiente:
-        return set(uf.SUCURSAIS)
-    return alvos | {a for a in do_ambiente if a in uf.SUCURSAIS}
+    def trocar(trecho):
+        texto = trecho.group(0)
+        m_nome = RE_LER_NOME.search(texto)
+        if not m_nome:
+            return texto
 
+        m_id = RE_LER_ID.search(texto)
+        ident = m_id.group(1).strip() if m_id else ""
+        nome = m_nome.group(1).strip()
+        if ident != ID_COMPLEMENTO and not _e_complemento(nome):
+            return texto
 
-def exige_acesso(authorization, sucursal):
-    """Devolve o e-mail de quem pediu, ou barra."""
-    email = email_do_pedido(authorization)
-    if sucursal not in sucursais_de(email):
-        raise HTTPException(403, f"{email} não tem acesso a esta sucursal")
-    return email
+        m_valor = RE_LER_VALOR.search(texto)
+        if m_valor and m_valor.group(1).strip():
+            preenchido[0] = True
 
+        if nome == "COMPLEMENTO":
+            return texto
 
-def _url_config(nome_arquivo):
-    return f"{SUPABASE_URL}/storage/v1/object/{BUCKET}/{PREFIXO}/config/{nome_arquivo}"
+        m_corpo = RE_CORPO_NOME.search(texto)
+        if not m_corpo:
+            return texto
+        corpo = m_corpo.group(2)
+        corpo_novo = "<![CDATA[COMPLEMENTO]]>" if "CDATA" in corpo else "COMPLEMENTO"
+        return texto[:m_corpo.start(2)] + corpo_novo + texto[m_corpo.end(2):]
 
+    return RE_CARACTERISTICA_BLOCO.sub(trocar, bloco), preenchido[0]
 
-def _cabecalhos():
-    return {"Authorization": f"Bearer {SUPABASE_KEY}", "apikey": SUPABASE_KEY}
+POSICAO_SUCURSAL = {"ville": 0, "homemark": 1, "alcance": 2}
 
+# Quantas fotos cada sucursal descarta: 1 a cada PASSO_RECORTE.
+#   3 -> descarta 33%, sobreposicao entre duas sucursais ~50%  (margem larga)
+#   4 -> descarta 25%, sobreposicao ~67%                       (margem de 13 pontos)
+#   5 -> descarta 20%, sobreposicao ~75%                       (perto demais dos 80%)
+# Medido nos XMLs de 10/09 sobre os 1.501 imoveis compartilhados.
+PASSO_RECORTE = int(os.environ.get("PASSO_RECORTE", "3"))
 
-def ler_config(nome_arquivo, padrao):
-    """Le um JSON de configuracao do Storage. Ausente = valor padrao."""
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        return padrao
-    try:
-        r = requests.get(_url_config(nome_arquivo), headers=_cabecalhos(), timeout=60)
-        if r.status_code >= 400:
-            return padrao
-        return r.json()
-    except Exception:
-        traceback.print_exc()
-        return padrao
+# Abaixo disso o anuncio sai inteiro: cortar foto de anuncio pobre custa mais
+# do que a duplicidade. Sao 9 imoveis dos 1.501.
+MIN_FOTOS_RECORTE = 9
+
+# Piso de seguranca: nunca deixar um anuncio com menos que isto depois do corte.
+MIN_FOTOS_PUBLICADAS = 6
 
 
-def gravar_config(nome_arquivo, dados):
-    corpo = json.dumps(dados, ensure_ascii=False).encode("utf-8")
-    r = requests.post(
-        _url_config(nome_arquivo),
-        headers={
-            **_cabecalhos(),
-            "Content-Type": "application/json; charset=utf-8",
-            "x-upsert": "true",
-            "cache-control": "max-age=60",
-        },
-        data=corpo,
-        timeout=120,
-    )
-    if r.status_code >= 400:
-        raise RuntimeError(f"Storage recusou {nome_arquivo}: "
-                           f"HTTP {r.status_code} {r.text[:300]}")
-    return len(corpo)
+def chave_compartilhada(codigo):
+    """O que identifica o IMOVEL entre sucursais: o sufixo depois do '#'.
 
-
-LOTE_CATALOGO = 500
-
-
-def gravar_catalogo_no_banco(itens):
-    """Espelha o catálogo do XML unificado na tabela alianca_catalogo.
-
-    Por que existe: o webhook de lead do ImovelWeb manda quem procurou e qual
-    anúncio, mas NÃO manda preço. E o preço define a faixa de VGV, que escolhe
-    a fila da roleta. O motor consulta esta tabela pelo internalReference.
-
-    Anúncio que saiu do feed vira inativo em vez de sumir: lead atrasado de
-    imóvel recém-retirado ainda precisa encontrar o dono.
+    remaxville#1A57L, homemark#1A57L e alcance#1A57L sao o mesmo imovel.
     """
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        raise RuntimeError("faltam SUPABASE_URL/SUPABASE_SERVICE_KEY")
+    return (codigo.split("#", 1)[1] if "#" in codigo else codigo).strip().upper()
 
-    base = f"{SUPABASE_URL}/rest/v1/alianca_catalogo"
-    cabecalho = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
+
+def _semente(codigo):
+    chave = chave_compartilhada(codigo)
+    return int(hashlib.md5(chave.encode("utf-8")).hexdigest()[:8], 16)
+
+
+# ------------------------------------------------- quem e compartilhado
+
+_COMPARTILHADOS = set()
+_COMPARTILHADOS_PRONTO = []
+
+
+def _chaves_da_sucursal(cfg):
+    chaves = set()
+    for url in (cfg["ilist"], cfg["nonstop"]):
+        for bloco in blocos_imovel(obter(url)):
+            m = RE_COD.search(bloco)
+            if m:
+                chaves.add(chave_compartilhada(m.group(1).strip()))
+    return chaves
+
+
+def levantar_compartilhados():
+    """Chaves de imovel que aparecem em duas ou mais sucursais.
+
+    So esses recebem o recorte de fotos. Cortar foto de imovel exclusivo seria
+    perda pura: nao existe duplicata para desfazer.
+
+    Varre SEMPRE as tres sucursais, mesmo quando so uma vai ser gerada — nao da
+    para saber se um imovel e compartilhado olhando so para o feed de uma. Como
+    obter() guarda o que ja baixou nesta execucao, numa rodada completa isso nao
+    custa download nenhum a mais.
+    """
+    if _COMPARTILHADOS_PRONTO:
+        return _COMPARTILHADOS
+    vistos = {}
+    for nome, cfg in SUCURSAIS.items():
+        for chave in _chaves_da_sucursal(cfg):
+            vistos[chave] = vistos.get(chave, 0) + 1
+    _COMPARTILHADOS.update(c for c, n in vistos.items() if n >= 2)
+    _COMPARTILHADOS_PRONTO.append(True)
+    print(f"  compartilhados . {len(_COMPARTILHADOS)} imoveis em 2+ sucursais")
+    return _COMPARTILHADOS
+
+
+# ------------------------------------------------- recorte das fotos
+
+def _url_da_imagem(item):
+    achados = RE_URL_IMG.findall(item)
+    url = achados[0].strip() if achados else ""
+    return url if url.startswith("http") else ""
+
+
+def recortar_fotos(bloco, sucursal):
+    """Publica um subconjunto proprio da sucursal, preservando a ordem.
+
+    Como funciona: as fotos sao ordenadas por hash da URL — uma ordem estavel,
+    identica nas tres sucursais porque a lista de URLs e a mesma. Cada sucursal
+    descarta uma posicao diferente dessa ordem (1 a cada PASSO_RECORTE). Duas
+    sucursais quaisquer ficam entao com (PASSO-2)/(PASSO-1) de fotos em comum,
+    abaixo dos 80% do criterio.
+
+    O descarte e sobre o hash, nao sobre a posicao no anuncio: as fotos que
+    ficam mantem a sequencia original (fachada, sala, cozinha, quartos) e o que
+    sai fica espalhado — some um angulo redundante aqui e outro ali, nunca um
+    comodo inteiro de uma vez.
+
+    Devolve (bloco, quantas_sairam).
+    """
+    m = RE_BLOCO_IMAGENS.search(bloco)
+    if not m:
+        return bloco, 0
+    itens = RE_UMA_IMAGEM.findall(m.group(2))
+    if not itens:
+        return bloco, 0
+
+    urls = [_url_da_imagem(it) for it in itens]
+    validas = [u for u in urls if u]
+    if len(validas) < MIN_FOTOS_RECORTE:
+        return bloco, 0
+
+    pos = POSICAO_SUCURSAL.get(sucursal, 0) % PASSO_RECORTE
+    ordem = sorted(set(validas), key=lambda u: hashlib.md5(u.encode("utf-8")).hexdigest())
+    fora = {u for i, u in enumerate(ordem) if i % PASSO_RECORTE == pos}
+
+    mantidos = [it for it, u in zip(itens, urls) if not (u and u in fora)]
+    if sum(1 for it in mantidos if _url_da_imagem(it)) < MIN_FOTOS_PUBLICADAS:
+        return bloco, 0
+
+    # Capa propria da sucursal: promove a n-esima foto valida que sobrou, onde n
+    # e a posicao da sucursal. O resto da sequencia fica como estava. Custa uma
+    # foto de deslocamento e faz os tres anuncios pararem de abrir com a mesma
+    # imagem, o que ajuda quem olha (o criterio de fotos ja foi resolvido acima).
+    indices_validos = [i for i, it in enumerate(mantidos) if _url_da_imagem(it)]
+    alvo = POSICAO_SUCURSAL.get(sucursal, 0)
+    if alvo and len(indices_validos) > alvo:
+        i = indices_validos[alvo]
+        mantidos = [mantidos[i]] + mantidos[:i] + mantidos[i + 1:]
+
+    novo = bloco[:m.start(2)] + "\n" + "\n".join(mantidos) + "\n" + bloco[m.end(2):]
+    return novo, len(itens) - len(mantidos)
+
+
+def _atributos(bloco):
+    """Le os campos estruturados do anuncio. Nada e inventado nem estimado."""
+    c = {k.strip().upper(): v.strip() for k, v in RE_CARACTERISTICA.findall(bloco)}
+    def inteiro(chave):
+        v = re.sub(r"[^\d]", "", c.get(chave, ""))
+        return int(v) if v else None
+    bairro = campo("localidade", bloco).split(",")[0].strip()
+    tipo = campo("tipo", bloco).strip()
+    sub = campo("subTipo", bloco).strip()
+    if sub and sub.lower() not in ("padrão", "padrao", "", tipo.lower()):
+        tipo = f"{tipo} {sub.lower()}"
+    return {
+        "tipo": tipo,
+        "bairro": bairro,
+        "quartos": inteiro("PRINCIPALES|QUARTO"),
+        "suites": inteiro("PRINCIPALES|SUITE"),
+        "vagas": inteiro("PRINCIPALES|VAGA"),
+        "area": inteiro("MEDIDAS|AREA_UTIL") or inteiro("MEDIDAS|AREA_TOTAL"),
+        "operacao": "locação" if operacao_de(bloco) == "ALUGUEL" else "venda",
     }
 
-    # 1. tudo inativo; o upsert a seguir reativa o que continua no feed
-    r = requests.patch(base + "?ativo=eq.true", headers=cabecalho,
-                       json={"ativo": False}, timeout=120)
-    if r.status_code >= 400:
-        raise RuntimeError(f"catalogo: falha ao inativar "
-                           f"HTTP {r.status_code} {r.text[:200]}")
 
-    def nivel_vgv(preco):
-        if not preco:
-            return None
-        if preco <= 500000:
-            return 1
-        if preco <= 1000000:
-            return 2
-        if preco <= 2000000:
-            return 3
-        if preco <= 5000000:
-            return 4
-        return 5
+def montar_titulo(bloco, sucursal):
+    """Monta um titulo proprio da sucursal a partir dos atributos reais.
 
-    agora_iso = agora()
-    linhas = [{
-        "referencia": it.get("r"),
-        "codigo_anuncio": it.get("c"),
-        "dono": it.get("d"),
-        "preco": it.get("p") or None,
-        "nivel_vgv": nivel_vgv(it.get("p")),
-        "operacao": it.get("o"),
-        "titulo": it.get("t"),
-        "endereco": it.get("e"),
-        "foto": it.get("u"),
-        "tipo_publicacao": it.get("tp"),
-        "ativo": True,
-        "gerado_em": agora_iso,
-        "visto_em": agora_iso,
-    } for it in itens if it.get("r")]
-
-    enviados = 0
-    upsert = dict(cabecalho)
-    upsert["Prefer"] = "resolution=merge-duplicates,return=minimal"
-    for i in range(0, len(linhas), LOTE_CATALOGO):
-        lote = linhas[i:i + LOTE_CATALOGO]
-        r = requests.post(base, headers=upsert, json=lote, timeout=180)
-        if r.status_code >= 400:
-            raise RuntimeError(f"catalogo: falha no lote {i // LOTE_CATALOGO + 1} "
-                               f"HTTP {r.status_code} {r.text[:200]}")
-        enviados += len(lote)
-    return enviados
-
-
-def comprimir(caminho):
-    destino = caminho + ".gz"
-    with open(caminho, "rb") as e, gzip.open(destino, "wb", compresslevel=6) as s:
-        shutil.copyfileobj(e, s, length=1 << 20)
-    return destino
-
-
-def rodar_unificado(job_id):
-    """Fase 2: um XML so, com a carteira propria e o pool da roleta.
-
-    Roda em paralelo ao caminho por sucursal enquanto a transicao nao fecha —
-    o antigo continua intacto, entao publicar este nao desliga nada.
+    Sao tres construcoes diferentes para os MESMOS fatos. Se faltar dado para
+    montar um titulo decente, devolve None e o titulo original e mantido —
+    melhor repetir do que publicar titulo pela metade.
     """
-    job = JOBS[job_id]
-    job["estado"] = "rodando"
-    item = {"sucursal": "alianca", "estado": "rodando"}
-    job["sucursais"].append(item)
-    try:
-        os.makedirs(uf.DIR_SAIDA, exist_ok=True)
-        # As tres telas por sucursal continuam sendo a origem das escolhas.
-        # O gerador traduz cada codigo para o que sobrou no arquivo unico.
-        por_sucursal = {
-            nome: ler_config(f"destaques_{nome}.json",
-                             {"HOME": [], "DESTACADO": [], "SIMPLE": []})
-            for nome in uf.SUCURSAIS
-        }
-        rel = uf.processar_unificado(escolhas_por_sucursal=por_sucursal)
-        arquivo = rel["arquivo"]
-        caminho = os.path.join(uf.DIR_SAIDA, arquivo)
+    a = _atributos(bloco)
+    if not a["tipo"] or not a["bairro"] or not a["area"]:
+        return None
 
-        # O catálogo vai PRIMEIRO, antes do upload do XML.
-        #
-        # Motivo: em 12/09 o Storage recusou o arquivo unificado por tamanho
-        # (413) e, como a gravação vinha depois, o catálogo ficou vazio — e
-        # sem catálogo o motor de leads manda todo lead para
-        # 'nao_classificado'. São dois problemas independentes e não faz
-        # sentido um derrubar o outro.
-        try:
-            item["catalogo_no_banco"] = gravar_catalogo_no_banco(rel["catalogo"])
-        except Exception as e:
-            item["catalogo_erro"] = f"{type(e).__name__}: {e}"
-            traceback.print_exc()
+    quartos = a["quartos"]
+    partes_extra = []
+    if a["suites"]:
+        partes_extra.append(f"{a['suites']} suíte" + ("s" if a["suites"] > 1 else ""))
+    if a["vagas"]:
+        partes_extra.append(f"{a['vagas']} vaga" + ("s" if a["vagas"] > 1 else ""))
 
-        bytes_xml = subir(caminho, arquivo, "application/xml; charset=utf-8")
+    pos = POSICAO_SUCURSAL.get(sucursal, 0)
+    if pos == 0:
+        t = f"{a['tipo']} para {a['operacao']} em {a['bairro']}"
+        if quartos:
+            t += f" com {quartos} quarto" + ("s" if quartos > 1 else "")
+        if partes_extra:
+            t += ", sendo " + " e ".join(partes_extra)
+        t += f", {a['area']}m²"
+    elif pos == 1:
+        t = f"{a['tipo']} de {a['area']}m² à {a['operacao']} no {a['bairro']}"
+        detalhe = []
+        if quartos:
+            detalhe.append(f"{quartos} quarto" + ("s" if quartos > 1 else ""))
+        detalhe += partes_extra
+        if detalhe:
+            t += " - " + ", ".join(detalhe)
+    else:
+        t = f"{a['bairro']}: {a['tipo']}"
+        if quartos:
+            t += f" de {quartos} quarto" + ("s" if quartos > 1 else "")
+        t += f" e {a['area']}m² para {a['operacao']}"
+        if partes_extra:
+            t += " (" + ", ".join(partes_extra) + ")"
 
-        agora_cat = agora()
-        gravar_config("catalogo_alianca.json", {
-            "sucursal": "alianca",
-            "gerado_em": agora_cat,
-            "cota_home": rel["cota_home"],
-            "cota_destacado": rel["cota_destacado"],
-            "itens": rel["catalogo"],
+    t = re.sub(r"\s+", " ", t).strip()
+    return t[:120] if len(t) > 12 else None
+
+
+RE_TITULO = re.compile(r"(<titulo>)(.*?)(</titulo>)", re.S)
+
+
+def aplicar_titulo(bloco, novo_titulo):
+    if not novo_titulo:
+        return bloco
+    m = RE_TITULO.search(bloco)
+    if not m:
+        return bloco
+    corpo = m.group(2)
+    # preserva o CDATA quando a origem usa CDATA
+    corpo_novo = f"<![CDATA[{novo_titulo}]]>" if "CDATA" in corpo else novo_titulo
+    return bloco[:m.start(2)] + corpo_novo + bloco[m.end(2):]
+
+
+def decidir_marcacao(itens, escolhas, cota_home, cota_destacado):
+    """Monta o mapa codigo -> tipoPublicacao.
+
+    Primeiro entram as escolhas feitas na tela, na ordem em que foram salvas.
+    Depois, se sobrar cota, ela e completada pelos imoveis de maior valor —
+    assim nenhuma vaga de destaque fica ociosa se ninguem mexer na tela.
+    """
+    escolhas = escolhas or {}
+    presentes = {c for c, _ in itens}
+    home, destacado, vistos = [], [], set()
+
+    # Marcados como SIMPLE de proposito: ficam fora do preenchimento automatico.
+    travados = {str(c).strip() for c in (escolhas.get("SIMPLE") or [])}
+
+    for codigo in (escolhas.get("HOME") or []):
+        if codigo in presentes and codigo not in vistos and len(home) < cota_home:
+            home.append(codigo)
+            vistos.add(codigo)
+    for codigo in (escolhas.get("DESTACADO") or []):
+        if codigo in presentes and codigo not in vistos and len(destacado) < cota_destacado:
+            destacado.append(codigo)
+            vistos.add(codigo)
+
+    manuais = len(home), len(destacado)
+
+    if len(home) < cota_home or len(destacado) < cota_destacado:
+        for codigo, _ in sorted(itens, key=lambda x: -x[1]):
+            if codigo in vistos or codigo in travados:
+                continue
+            if len(home) < cota_home:
+                home.append(codigo)
+            elif len(destacado) < cota_destacado:
+                destacado.append(codigo)
+            else:
+                break
+            vistos.add(codigo)
+
+    mapa = {c: "HOME" for c in home}
+    mapa.update({c: "DESTACADO" for c in destacado})
+    return mapa, manuais
+
+
+def processar(nome, cfg, escolhas=None, compartilhados=None):
+    if compartilhados is None:
+        compartilhados = levantar_compartilhados()
+    print(f"\n{'='*58}\n{nome.upper()}\n{'='*58}")
+
+    # 1. codigos de referencia do iList
+    #
+    # Duas familias de codigo convivem no feed do iList:
+    #   601241001-24            formato antigo (vem em CDATA)
+    #   lucasaukar#NZ35X        formato novo, por corretor (vem sem CDATA)
+    # O que identifica o imovel no formato novo e o sufixo depois do "#":
+    # o mesmo anuncio aparece no Nonstop como remaxville#NZ35X.
+    p_ilist = obter(cfg["ilist"])
+    codigos_ilist, sufixos_ilist = set(), set()
+    for bloco in blocos_imovel(p_ilist):
+        m = RE_COD.search(bloco)
+        if not m:
+            continue
+        codigo = m.group(1).strip()
+        codigos_ilist.add(codigo)
+        if "#" in codigo:
+            sufixos_ilist.add(codigo.split("#", 1)[1].strip().upper())
+    print(f"  iList ......... {len(codigos_ilist)} imoveis "
+          f"({len(sufixos_ilist)} no formato corretor#CODIGO)")
+
+    # 2. varre o Nonstop, descartando o que ja existe no iList
+    #
+    # A varredura so CONTA e decide; a escrita faz outra passada pelo arquivo
+    # local. Guardar os blocos numa lista significaria o XML inteiro (52 MB na
+    # Ville) na memoria — foi assim que a v1 estourou.
+    p_nonstop = obter(cfg["nonstop"])
+
+    def descartar(bloco):
+        """True se este bloco do Nonstop duplica um imovel do iList.
+
+        Regra 1 (atual): o codigo do Nonstop e remaxville#NZ35X e o mesmo
+        sufixo NZ35X aparece no iList como lucasaukar#NZ35X.
+
+        Regra 2 (legado): a descricao do Nonstop trazia "Codigo 601241001-24".
+        O Nonstop parou de publicar isso, mas a regra fica: nao custa nada e
+        volta a funcionar sozinha se o texto reaparecer.
+        """
+        m = RE_COD.search(bloco)
+        if m and "#" in m.group(1):
+            sufixo = m.group(1).split("#", 1)[1].strip().upper()
+            if sufixo in sufixos_ilist:
+                return True, m.group(1).strip()
+
+        m_desc = RE_DESC.search(bloco)
+        if not m_desc:
+            return False, None
+        m = PADRAO_CODIGO.search(m_desc.group(1))
+        if not m:
+            return False, None
+        codigo = m.group(1)
+        return (codigo in codigos_ilist), codigo
+
+    descartados, marcados, mantidos_n = [], 0, 0
+    for bloco in blocos_imovel(p_nonstop):
+        fora, codigo = descartar(bloco)
+        if codigo:
+            marcados += 1  # blocos em que deu para identificar um codigo
+        if fora:
+            cod_ns = RE_COD.search(bloco)
+            descartados.append((cod_ns.group(1) if cod_ns else "?", codigo))
+        else:
+            mantidos_n += 1
+
+    total_ns = mantidos_n + len(descartados)
+    print(f"  Nonstop ....... {total_ns} imoveis ({marcados} com codigo reconhecido)")
+    print(f"  descartados ... {len(descartados)} (duplicados do iList)")
+
+    # 3. levanta codigo e preco de tudo que vai entrar, para decidir os destaques
+    itens = []
+    for bloco in blocos_imovel(p_ilist):
+        m = RE_COD.search(bloco)
+        if m:
+            itens.append((m.group(1).strip(), preco_de(bloco)))
+    for bloco in blocos_imovel(p_nonstop):
+        fora, _ = descartar(bloco)
+        if fora:
+            continue
+        m = RE_COD.search(bloco)
+        if m:
+            itens.append((m.group(1).strip(), preco_de(bloco)))
+
+    cota_h = cfg.get("cota_home", 0)
+    cota_d = cfg.get("cota_destacado", 0)
+    marcacao, (manual_h, manual_d) = decidir_marcacao(itens, escolhas, cota_h, cota_d)
+
+    # 4. monta o XML de saida, ja com o tipoPublicacao decidido
+    os.makedirs(DIR_SAIDA, exist_ok=True)
+    destino = os.path.join(DIR_SAIDA, cfg["saida"])
+    tipos = {}
+    total = 0
+    catalogo = []
+    trocados = [0]      # quantos titulos foram reescritos
+    complementos = {"i": 0, "n": 0}   # com complemento preenchido, por origem
+    recortados = [0]    # quantos anuncios tiveram fotos recortadas
+    fotos_fora = [0]    # quantas fotos sairam no total
+
+    def escrever(out, bloco, fonte):
+        nonlocal total
+        codigo = ""
+        m = RE_COD.search(bloco)
+        if m:
+            codigo = m.group(1).strip()
+        # O tipoPublicacao passa a ser SEMPRE nosso: o que nao foi escolhido
+        # vira SIMPLE. Sem isso, um HOME que ja viesse da origem se somaria
+        # aos nossos e a cota estouraria por um ou dois.
+        tipo = marcacao.get(codigo, "SIMPLE")
+        bloco, trocas = RE_BLOCO_PUB.subn(
+            f"<tipoPublicacao>{tipo}</tipoPublicacao>", bloco, count=1)
+        if not trocas:
+            tipo = "sem tipoPublicacao"
+        bloco, tem_complemento = normalizar_complemento(bloco)
+        if tem_complemento:
+            complementos[fonte] = complementos.get(fonte, 0) + 1
+        # Diferenciacao entre sucursais. O recorte de fotos so vale a pena onde
+        # existe duplicata: em imovel exclusivo seria perder foto de graca.
+        if codigo and chave_compartilhada(codigo) in compartilhados:
+            bloco, saiu = recortar_fotos(bloco, nome)
+            if saiu:
+                recortados[0] += 1
+                fotos_fora[0] += saiu
+        titulo_novo = montar_titulo(bloco, nome)
+        if titulo_novo:
+            bloco = aplicar_titulo(bloco, titulo_novo)
+            trocados[0] += 1
+
+        out.write(bloco.rstrip() + "\n")
+        total += 1
+        tipos[tipo] = tipos.get(tipo, 0) + 1
+        catalogo.append({
+            "c": codigo,
+            "t": campo("titulo", bloco)[:110],   # ja com o titulo da sucursal
+            "e": campo("endereco", bloco).strip()[:70],
+            "p": preco_de(bloco),
+            "o": operacao_de(bloco),
+            "u": foto_de(bloco),
+            "f": fonte,
         })
 
-        # As tres telas de destaque tambem se alimentam daqui.
-        #
-        # Antes cada tela lia o catalogo_{sucursal}.json que a geracao POR
-        # SUCURSAL escrevia. Quando o cron passou a chamar so
-        # /gerar?sucursal=unificado, aquela geracao parou de rodar e as telas
-        # congelaram na ultima rodada manual — em 12/09 a Ville ainda mostrava
-        # a lista de 11/09 18:45. Pior que a data: a tela oferecia imoveis que
-        # o arquivo unico ja nao publica, e as escolhas viravam orfas.
-        #
-        # Cada sucursal ve a propria carteira mais o pool da roleta, que e
-        # exatamente o conjunto de onde ela pode marcar. As cotas continuam
-        # sendo as DELA, nao as somadas — hoje 100 super e 175 destaque para
-        # cada uma (aditivo de 15/09). O numero sai de uf.COTAS_SUCURSAL.
-        for nome in uf.SUCURSAIS:
-            meus = [it for it in rel["catalogo"]
-                    if it.get("d") == nome or it.get("d") == uf.DONO_ROLETA]
-            cotas = uf.COTAS_SUCURSAL.get(nome, {})
-            gravar_config(f"catalogo_{nome}.json", {
-                "sucursal": nome,
-                "gerado_em": agora_cat,
-                "origem": "unificado",
-                "cota_home": cotas.get("HOME", 0),
-                "cota_destacado": cotas.get("DESTACADO", 0),
-                "itens": meus,
-            })
-        item["telas_atualizadas"] = {
-            nome: sum(1 for it in rel["catalogo"]
-                      if it.get("d") == nome or it.get("d") == uf.DONO_ROLETA)
-            for nome in uf.SUCURSAIS
-        }
+    with open(destino, "w", encoding="utf-8") as out:
+        out.write('<?xml version="1.0" encoding="UTF-8"?>\n<OpenNavent>\n<Imoveis>\n')
 
-        item.update(
-            estado="ok",
-            total=rel["total"],
-            vagas=rel["vagas"],
-            livres=rel["vagas"] - rel["total"],
-            carteira=rel["carteira"],
-            roleta=rel["roleta"],
-            por_dono=rel["por_dono"],
-            derrubados_codigo=rel["derrubados_codigo"],
-            derrubados_fato=rel["derrubados_fato"],
-            repetidos=rel["repetidos"],
-            home=rel["home"],
-            home_manual=rel["home_manual"],
-            destacado=rel["destacado"],
-            destacado_manual=rel["destacado_manual"],
-            escolhas=rel.get("escolhas"),
-            tipos=rel["tipos"],
-            mb=round(bytes_xml / 1024 / 1024, 1),
-            url=url_publica(arquivo),
-        )
+        for bloco in blocos_imovel(p_ilist):          # iList integral
+            escrever(out, bloco, "i")
 
-        if USAR_GZIP:
-            gz = comprimir(caminho)
-            bytes_gz = subir(gz, arquivo + ".gz", "application/gzip")
-            item["url_gz"] = url_publica(arquivo + ".gz")
-            item["mb_gz"] = round(bytes_gz / 1024 / 1024, 1)
-            os.remove(gz)
+        for bloco in blocos_imovel(p_nonstop):        # Nonstop filtrado
+            fora, _ = descartar(bloco)
+            if fora:
+                continue
+            escrever(out, bloco, "n")
 
-        os.remove(caminho)
-        job["estado"] = "concluido"
-    except Exception as e:
-        item.update(estado="erro", erro=f"{type(e).__name__}: {e}")
-        job["erros"] += 1
-        job["estado"] = "concluido_com_erro"
-        traceback.print_exc()
-    finally:
-        job["fim"] = agora()
-        for f in os.listdir("/tmp"):
-            if f.startswith("feed_") and f.endswith(".xml"):
-                try:
-                    os.remove(os.path.join("/tmp", f))
-                except OSError:
-                    pass
+        out.write("</Imoveis>\n</OpenNavent>\n")
 
-
-def rodar(job_id, alvos):
-    job = JOBS[job_id]
-    job["estado"] = "rodando"
-    try:
-        os.makedirs(uf.DIR_SAIDA, exist_ok=True)
-        # Zera os caches da rodada e levanta, uma unica vez, quais imoveis
-        # aparecem em mais de uma sucursal — so esses recebem o recorte de fotos.
-        uf.nova_execucao()
-        compartilhados = uf.levantar_compartilhados()
-        for nome in alvos:
-            cfg = uf.SUCURSAIS[nome]
-            item = {"sucursal": nome, "estado": "rodando"}
-            job["sucursais"].append(item)
-            try:
-                escolhas = ler_config(f"destaques_{nome}.json",
-                                      {"HOME": [], "DESTACADO": [], "SIMPLE": []})
-                rel = uf.processar(nome, cfg, escolhas=escolhas,
-                                   compartilhados=compartilhados)
-                caminho = os.path.join(uf.DIR_SAIDA, cfg["saida"])
-                bytes_xml = subir(caminho, cfg["saida"], "application/xml; charset=utf-8")
-
-                # o catalogo alimenta a tela de destaques
-                gravar_config(f"catalogo_{nome}.json", {
-                    "sucursal": nome,
-                    "gerado_em": agora(),
-                    "cota_home": rel["cota_home"],
-                    "cota_destacado": rel["cota_destacado"],
-                    "itens": rel["catalogo"],
-                })
-
-                item.update(
-                    estado="ok",
-                    home=rel["home"],
-                    titulos_proprios=rel.get("titulos_proprios"),
-                    anuncios_recortados=rel.get("anuncios_recortados"),
-                    fotos_removidas=rel.get("fotos_removidas"),
-                    home_manual=rel["home_manual"],
-                    destacado=rel["destacado"],
-                    destacado_manual=rel["destacado_manual"],
-                    total=rel["total"],
-                    vagas=rel["vagas"],
-                    livres=rel["vagas"] - rel["total"],
-                    descartados=rel["descartados"],
-                    marcados=rel["marcados"],
-                    tipos=rel["tipos"],
-                    mb=round(bytes_xml / 1024 / 1024, 1),
-                    url=url_publica(cfg["saida"]),
-                )
-
-                if USAR_GZIP:
-                    gz = comprimir(caminho)
-                    bytes_gz = subir(gz, cfg["saida"] + ".gz", "application/gzip")
-                    item["url_gz"] = url_publica(cfg["saida"] + ".gz")
-                    item["mb_gz"] = round(bytes_gz / 1024 / 1024, 1)
-                    os.remove(gz)
-
-                os.remove(caminho)  # disco do Render é efêmero e pequeno
-            except Exception as e:
-                item.update(estado="erro", erro=f"{type(e).__name__}: {e}")
-                job["erros"] += 1
-                traceback.print_exc()
-
-        job["estado"] = "concluido" if job["erros"] == 0 else "concluido_com_erro"
-    except Exception as e:  # falha fora do laço
-        job["estado"] = "erro"
-        job["erro"] = f"{type(e).__name__}: {e}"
-        job["erros"] += 1
-        traceback.print_exc()
-    finally:
-        job["fim"] = agora()
-        # limpa os downloads temporários do urlretrieve
-        for f in os.listdir("/tmp"):
-            if f.startswith("feed_") and f.endswith(".xml"):
-                try:
-                    os.remove(os.path.join("/tmp", f))
-                except OSError:
-                    pass
-
-
-@app.get("/saude")
-def saude():
-    """Aberta de propósito: é por aqui que se confere se a geração rodou.
-
-    As telas de destaque leem catalogo_{sucursal}.json. Quando o cron passou a
-    chamar só a geração unificada, esses arquivos pararam de ser reescritos e a
-    tela ficou mostrando a data da última rodada manual, sem nada indicar que
-    estava velha. Agora a data de cada catálogo aparece aqui, sem login.
-    """
-    catalogos = {}
-    for nome in list(uf.SUCURSAIS) + ["alianca"]:
-        cfg = ler_config(f"catalogo_{nome}.json", None) or {}
-        catalogos[nome] = {
-            "gerado_em": cfg.get("gerado_em"),
-            "origem": cfg.get("origem", "por sucursal"),
-            "itens": len(cfg.get("itens") or []),
-        }
-    return {
-        "ok": True,
-        "sucursais": list(uf.SUCURSAIS),
-        "bucket": BUCKET,
-        "prefixo": PREFIXO,
-        "gzip": USAR_GZIP,
-        "agora": agora(),
-        "catalogos": catalogos,
-    }
-
-
-@app.post("/gerar")
-def gerar(
-    tarefas: BackgroundTasks,
-    sucursal: str = "",
-    x_feed_token: str = Header(default=""),
-):
-    confere_token(x_feed_token)
-
-    alvos = [sucursal] if sucursal else list(uf.SUCURSAIS)
-    unificado = (alvos == ["unificado"] or alvos == ["alianca"])
-    desconhecidas = [] if unificado else [a for a in alvos if a not in uf.SUCURSAIS]
-    if desconhecidas:
-        raise HTTPException(400, f"sucursal desconhecida: {', '.join(desconhecidas)}")
-
-    with LOCK:
-        rodando = [j for j in JOBS.values() if j["estado"] == "rodando"]
-        if rodando:
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "erro": "já existe uma geração em andamento",
-                    "job_id": rodando[0]["job_id"],
-                },
-            )
-        job_id = uuid.uuid4().hex[:12]
-        JOBS[job_id] = {
-            "job_id": job_id,
-            "estado": "na fila",
-            "inicio": agora(),
-            "fim": None,
-            "alvos": alvos,
-            "sucursais": [],
-            "erros": 0,
-        }
-        JOBS["ultimo"] = JOBS[job_id]
-
-    if unificado:
-        tarefas.add_task(rodar_unificado, job_id)
+    # 5. relatorio
+    mb = os.path.getsize(destino) / 1024 / 1024
+    print(f"\n  SAIDA: {destino}  ({total} imoveis, {mb:.1f} MB)")
+    print(f"  tipoPublicacao: " + " | ".join(f"{k}={v}" for k, v in sorted(tipos.items())))
+    print(f"  titulos proprios da sucursal: {trocados[0]} de {total}")
+    print(f"  complemento (caracteristica {ID_COMPLEMENTO}): "
+          f"iList {complementos['i']} | Nonstop {complementos['n']}"
+          f"  (de {total} anuncios)")
+    if recortados[0]:
+        media = fotos_fora[0] / recortados[0]
+        print(f"  fotos recortadas: {recortados[0]} anuncios compartilhados "
+              f"(-{fotos_fora[0]} fotos, media {media:.1f} por anuncio, "
+              f"passo {PASSO_RECORTE})")
     else:
-        tarefas.add_task(rodar, job_id, alvos)
-    return JSONResponse(status_code=202, content={"job_id": job_id, "estado": "na fila"})
+        print(f"  fotos recortadas: nenhum anuncio (passo {PASSO_RECORTE})")
+    print(f"  destaques: {tipos.get('HOME', 0)}/{cota_h} super "
+          f"({manual_h} escolhidos na tela), "
+          f"{tipos.get('DESTACADO', 0)}/{cota_d} destaque "
+          f"({manual_d} escolhidos na tela)")
+
+    livres = cfg["vagas"] - total
+    if livres >= 0:
+        print(f"  vagas: {total}/{cfg['vagas']}  ->  {livres} livres")
+    else:
+        print(f"  ATENCAO: excede a cota em {-livres} anuncios")
+
+    if descartados:
+        print(f"\n  removidos:")
+        for cod_ns, cod_il in descartados[:10]:
+            print(f"    {cod_ns}  ->  {cod_il}")
+        if len(descartados) > 10:
+            print(f"    (+{len(descartados)-10})")
+
+    return {"unidade": nome, "total": total, "descartados": len(descartados),
+            "marcados": marcados, "vagas": cfg["vagas"], "tipos": tipos,
+            "catalogo": catalogo,
+            "home": tipos.get("HOME", 0), "destacado": tipos.get("DESTACADO", 0),
+            "home_manual": manual_h, "destacado_manual": manual_d,
+            "cota_home": cota_h, "cota_destacado": cota_d,
+            "titulos_proprios": trocados[0],
+            "complementos": dict(complementos),
+            "anuncios_recortados": recortados[0],
+            "fotos_removidas": fotos_fora[0],
+            "passo_recorte": PASSO_RECORTE}
 
 
-@app.get("/gerar")
-def gerar_pelo_navegador(
-    tarefas: BackgroundTasks,
-    token: str = "",
-    sucursal: str = "",
-):
-    """Mesma coisa que o POST, mas dá para colar no navegador.
-
-    Existe para o disparo manual: POST com header não se faz pela barra de
-    endereço. O n8n continua usando o POST com o header.
-    """
-    confere_token(token)
-    return gerar(tarefas, sucursal=sucursal, x_feed_token=token)
-
-
-@app.get("/testar")
-def testar(token: str = "", x_feed_token: str = Header(default="")):
-    """Diagnostico: bate nas 6 URLs de origem e devolve o codigo HTTP de cada uma.
-
-    Serve para separar "o site bloqueou o servidor" de "a URL mudou".
-    """
-    confere_token(x_feed_token or token)
-    testes = []
-    for nome, cfg in uf.SUCURSAIS.items():
-        for origem in ("ilist", "nonstop"):
-            url = cfg[origem]
-            item = {"sucursal": nome, "origem": origem, "url": url}
-            try:
-                r = requests.get(
-                    url,
-                    headers=uf.CABECALHOS_HTTP,
-                    stream=True,
-                    timeout=60,
-                    allow_redirects=True,
-                )
-                item["http"] = r.status_code
-                item["tipo"] = r.headers.get("Content-Type", "")
-                item["tamanho"] = r.headers.get("Content-Length", "")
-                if r.url != url:
-                    item["redirecionou_para"] = r.url
-                trecho = next(r.iter_content(300), b"")
-                item["inicio"] = trecho.decode("utf-8", "replace")
-                r.close()
-            except Exception as e:
-                item["erro"] = f"{type(e).__name__}: {e}"
-            testes.append(item)
-    return {"testes": testes}
-
-
-@app.get("/api/config")
-def config_da_tela():
-    """Dados publicos que a tela precisa para fazer o login com o Google."""
-    return {"supabase_url": SUPABASE_URL, "supabase_anon_key": SUPABASE_ANON}
-
-
-@app.get("/destaques/{sucursal}", response_class=HTMLResponse)
-def tela_destaques(sucursal: str):
-    """A pagina em si e publica; ela nao mostra nada sem login.
-
-    Quem guarda os dados sao as rotas /api/destaques, e essas exigem uma
-    conta Google autorizada.
-    """
-    if sucursal not in uf.SUCURSAIS:
-        raise HTTPException(404, "sucursal desconhecida")
-    caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "destaques.html")
-    with open(caminho, encoding="utf-8") as f:
-        return HTMLResponse(f.read())
-
-
-@app.get("/api/destaques/{sucursal}")
-def api_destaques(sucursal: str, authorization: str = Header(default="")):
-    if sucursal not in uf.SUCURSAIS:
-        raise HTTPException(404, "sucursal desconhecida")
-    email = exige_acesso(authorization, sucursal)
-    cota_home, cota_destacado = cotas_de(sucursal)
-    catalogo = ler_config(f"catalogo_{sucursal}.json", None)
-    escolha = ler_config(f"destaques_{sucursal}.json",
-                         {"HOME": [], "DESTACADO": [], "SIMPLE": [],
-                          "atualizado_em": None})
-    return {
-        "sucursal": sucursal,
-        "email": email,
-        "minhas_sucursais": sorted(sucursais_de(email)),
-        "cota_home": cota_home,
-        "cota_destacado": cota_destacado,
-        "catalogo": catalogo,
-        "escolha": escolha,
-        "tomados": destaques_de_outras(sucursal),
-    }
-
-
-def destaques_de_outras(sucursal):
-    """Imóveis que as OUTRAS sucursais já marcaram como destaque.
-
-    No arquivo único existe um anúncio por imóvel, logo um tipoPublicacao só.
-    Se duas sucursais marcarem o mesmo imóvel, uma delas gasta cota à toa — a
-    geração resolve o conflito, mas quem escolheu não fica sabendo. Mostrar
-    isso na tela evita o desperdício antes de acontecer.
-
-    A chave de comparação é o sufixo depois do '#', que é o que identifica o
-    imóvel entre sucursais (remaxville#40450 e homemark#40450 são o mesmo).
-    Código do iList não tem '#' e portanto não cruza — mas imóvel do iList
-    quase nunca está em duas sucursais (1 caso hoje), então o que importa,
-    que é o pool compartilhado, fica coberto.
-    """
-    tomados = {}
-    for outra in uf.SUCURSAIS:
-        if outra == sucursal:
-            continue
-        esc = ler_config(f"destaques_{outra}.json", None)
-        if not esc:
-            continue
-        for nivel in ("HOME", "DESTACADO"):
-            for codigo in (esc.get(nivel) or []):
-                chave = uf.chave_compartilhada(str(codigo).strip())
-                # HOME tem precedência: é o que a geração também faz
-                if chave in tomados and tomados[chave]["nivel"] == "HOME":
-                    continue
-                tomados[chave] = {"sucursal": outra, "nivel": nivel}
-    return tomados
-
-
-@app.post("/api/destaques/{sucursal}")
-def salvar_destaques(
-    sucursal: str,
-    corpo: dict = Body(...),
-    authorization: str = Header(default=""),
-):
-    if sucursal not in uf.SUCURSAIS:
-        raise HTTPException(404, "sucursal desconhecida")
-    email = exige_acesso(authorization, sucursal)
-    cota_home, cota_destacado = cotas_de(sucursal)
-
-    def lista(chave):
-        valores = corpo.get(chave) or []
-        if not isinstance(valores, list):
-            raise HTTPException(400, f"{chave} deve ser uma lista")
-        limpos, vistos = [], set()
-        for v in valores:
-            v = str(v).strip()
-            if v and v not in vistos:
-                vistos.add(v)
-                limpos.append(v)
-        return limpos
-
-    home, destacado = lista("HOME"), lista("DESTACADO")
-    # SIMPLE aqui quer dizer "nunca destaque este": fica de fora tambem do
-    # preenchimento automatico. Nao tem cota.
-    simples = lista("SIMPLE")
-    for a, b, rotulo in ((home, destacado, "superdestaque e destaque"),
-                         (home, simples, "superdestaque e simples"),
-                         (destacado, simples, "destaque e simples")):
-        repetidos = set(a) & set(b)
-        if repetidos:
-            raise HTTPException(400, f"o mesmo imóvel está marcado como {rotulo}: "
-                                     + ", ".join(sorted(repetidos)[:5]))
-    if len(home) > cota_home:
-        raise HTTPException(400, f"máximo de {cota_home} superdestaques")
-    if len(destacado) > cota_destacado:
-        raise HTTPException(400, f"máximo de {cota_destacado} destaques")
-
-    dados = {"HOME": home, "DESTACADO": destacado, "SIMPLE": simples,
-             "por": email, "atualizado_em": agora()}
-    gravar_config(f"destaques_{sucursal}.json", dados)
-    return {"ok": True, "home": len(home), "destacado": len(destacado),
-            "simples": len(simples), "atualizado_em": dados["atualizado_em"]}
-
-
-# ============================================================================
-# PAINEL DE LEADS — /leads/{sucursal}
+# ================================================================ XML UNIFICADO
 #
-# Mesmo login das telas de destaque: conta Google + tabela feed_acessos. O que
-# muda é o que se vê: por decisão de 13/09, as três sucursais enxergam os leads
-# umas das outras. O que NUNCA sai daqui é a chave do C2S — a API devolve só se
-# existe e os quatro últimos dígitos.
-# ============================================================================
+# Fase 2 (11/09/2026): pacote renegociado para 6.000 anuncios e UM arquivo so,
+# com os leads dos imoveis sem dono distribuidos pela roleta.
+#
+# Regras, na ordem (definidas pelo Guilherme):
+#   1. O iList das tres sucursais e a CARTEIRA PROPRIA. Tem prioridade.
+#   2. O mesmo imovel vindo do Nonstop de qualquer sucursal e derrubado.
+#   3. O que sobra do Nonstop entra uma vez so e vai para a ROLETA.
+#
+# Sem duplicata entre sucursais, some a razao de existir do recorte de fotos e
+# do titulo por sucursal: aqui o anuncio sai inteiro, com todas as fotos.
 
-def _rpc(funcao, params=None):
-    """Chama uma função do banco pelo PostgREST."""
-    r = requests.post(
-        f"{SUPABASE_URL}/rest/v1/rpc/{funcao}",
-        headers={**_cabecalhos(), "Content-Type": "application/json"},
-        data=json.dumps(params or {}),
-        timeout=60,
-    )
-    if r.status_code >= 400:
-        raise HTTPException(502, f"{funcao}: HTTP {r.status_code} {r.text[:300]}")
-    return r.json()
+DONO_ROLETA = "ROLETA"
+PREFIXO = {"ville": "VIL", "homemark": "HMK", "alcance": "ALC", DONO_ROLETA: "PAR"}
+
+SAIDA_UNIFICADA = os.environ.get("SAIDA_UNIFICADA", "remax_alianca.xml")
+VAGAS_UNIFICADAS = int(os.environ.get("VAGAS_UNIFICADAS", "6000"))
+# Os totais da conta unica sao a soma das cotas por sucursal (COTAS_SUCURSAL,
+# mais abaixo) — assim nao da para mexer numa e esquecer da outra.
 
 
-@app.get("/", response_class=HTMLResponse)
-@app.get("/inicio", response_class=HTMLResponse)
-def tela_inicio():
-    """Porta de entrada única.
+def _so_digitos(texto):
+    d = re.sub(r"[^\d]", "", texto or "")
+    return d or ""
 
-    Antes cada tela tinha o próprio endereço e era preciso saber qual digitar —
-    /destaques/ville, /leads/homemark. Quem tem acesso a uma sucursal só não
-    tinha como descobrir o endereço dela. Aqui entra-se sempre pelo mesmo
-    lugar e o login decide o que aparece.
+
+def _normalizar(texto):
+    """Minuscula, sem acento, so letras e numeros separados por espaco."""
+    t = unicodedata.normalize("NFD", texto or "").encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", " ", t.lower()).strip()
+
+
+RE_COD_IMOBILIARIA = re.compile(
+    r"<codigoImobiliaria>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</codigoImobiliaria>", re.S)
+
+# Codigo RE/MAX de cada sucursal, como vem no bloco <publicador> do iList.
+IMOBILIARIA_SUCURSAL = {"60124": "ville", "60227": "homemark", "60226": "alcance"}
+
+
+def dono_declarado(bloco):
+    """Sucursal que o proprio anuncio diz ser a dona, ou None.
+
+    O feed do iList de uma sucursal carrega tambem anuncios captados por
+    outras unidades RE/MAX — na Ville sao algumas dezenas. Para a publicacao
+    isso nao importa (o handoff de 07/09 decidiu que tudo no feed da sucursal
+    conta como dela). Mas quando o MESMO imovel aparece no iList de duas, este
+    campo e quem desempata sem chute.
     """
-    caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inicio.html")
-    with open(caminho, encoding="utf-8") as f:
-        return HTMLResponse(f.read())
+    m = RE_COD_IMOBILIARIA.search(bloco)
+    if not m:
+        return None
+    return IMOBILIARIA_SUCURSAL.get(m.group(1).strip())
 
 
-@app.get("/api/inicio")
-def api_inicio(authorization: str = Header(default="")):
-    """O que esta conta pode abrir, e um número em cada card.
+def chave_de_fato(bloco):
+    """Identidade do IMOVEL por fatos, para cruzar iList com Nonstop.
 
-    Não usa exige_acesso: aqui ninguém está pedindo uma sucursal específica,
-    está perguntando 'o que eu posso ver?'. Sem acesso a nada, a resposta é
-    uma lista vazia — e a tela diz isso com todas as letras, em vez de dar
-    403 numa página que a pessoa nem escolheu.
+    Por que existe: os codigos do iList estao todos no formato antigo
+    (601241038-128) e nunca trazem o sufixo depois do '#'. O Nonstop so usa
+    'corretor#CODIGO'. As duas familias nao tem nenhum caractere em comum — a
+    chave por codigo e CEGA entre os dois sistemas, e a regra "o iList derruba
+    o Nonstop" acharia zero casos por motivo errado. Medido em 11/09: existem
+    127 imoveis do iList publicados tambem pelo Nonstop.
+
+    A chave usa endereco + area + quartos + banheiros + preco. Endereco sozinho
+    nao serve: nao traz numero de apartamento, e dois apartamentos iguais no
+    mesmo predio casariam por engano. Com area, comodos e preco juntos, isso
+    fica improvavel.
+
+    Devolve None quando falta dado — sem chave completa, nao se derruba nada.
     """
-    email = email_do_pedido(authorization)
-    minhas = sorted(sucursais_de(email))
-
-    cartoes = []
-    if minhas:
-        try:
-            resumo = {r["sucursal"]: r for r in _rpc("alianca_painel_resumo", {"p_dias": 7})}
-        except Exception:
-            resumo = {}
-        for nome in minhas:
-            cfg = uf.SUCURSAIS.get(nome, {})
-            cota_home, cota_destacado = cotas_de(nome)
-            catalogo = ler_config(f"catalogo_{nome}.json", None) or {}
-            r = resumo.get(nome, {})
-            cartoes.append({
-                "sucursal": nome,
-                "nome": cfg.get("nome") or f"RE/MAX {nome.title()}",
-                "imoveis": len(catalogo.get("itens") or []),
-                "catalogo_em": catalogo.get("gerado_em"),
-                "cota_home": cota_home,
-                "cota_destacado": cota_destacado,
-                "leads_7d": r.get("total", 0),
-                "leads_pendentes": r.get("pendentes", 0),
-                "tem_chave": r.get("tem_chave"),
-            })
-
-    return {"email": email, "minhas_sucursais": minhas,
-            "cartoes": cartoes, "agora": agora()}
+    endereco = _normalizar(campo("endereco", bloco))
+    if not endereco:
+        return None
+    c = {k.strip().upper(): v.strip() for k, v in RE_CARACTERISTICA.findall(bloco)}
+    area = _so_digitos(c.get("MEDIDAS|AREA_UTIL")) or _so_digitos(c.get("MEDIDAS|AREA_TOTAL"))
+    if not area:
+        return None
+    quartos = _so_digitos(c.get("PRINCIPALES|QUARTO"))
+    banheiros = _so_digitos(c.get("PRINCIPALES|BANHEIRO"))
+    preco = int(preco_de(bloco) or 0)
+    return (endereco, area, quartos, banheiros, preco)
 
 
-@app.get("/leads/{sucursal}", response_class=HTMLResponse)
-def tela_leads(sucursal: str):
-    """A página é pública; ela não mostra nada sem login."""
-    if sucursal not in uf.SUCURSAIS:
-        raise HTTPException(404, "sucursal desconhecida")
-    caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "leads.html")
-    with open(caminho, encoding="utf-8") as f:
-        return HTMLResponse(f.read())
+RE_BLOCO_REF = re.compile(r"(<codigoReferencia>)(.*?)(</codigoReferencia>)", re.S)
 
 
-@app.get("/api/leads/{sucursal}")
-def api_leads(sucursal: str, dias: int = 30, authorization: str = Header(default="")):
-    if sucursal not in uf.SUCURSAIS:
-        raise HTTPException(404, "sucursal desconhecida")
-    email = exige_acesso(authorization, sucursal)
-    dias = max(1, min(int(dias or 30), 180))
+def marcar_dono(bloco, dono):
+    """Escreve o prefixo do dono no codigoReferencia: VIL-, HMK-, ALC- ou PAR-.
 
-    # A situação das chaves vem da função que mascara: nunca o token.
-    chaves = _rpc("alianca_c2s_situacao")
+    O codigoReferencia hoje e copia do codigoAnuncio e nao e chave de nada no
+    portal — o portal se guia pelo codigoAnuncio, que fica intacto. E por isso
+    que da para usar este campo para carregar o dono ate o motor de leads, que
+    e o que o modelo do projeto (secao 3, Componente B) pede.
+    """
+    prefixo = PREFIXO.get(dono, "PAR")
+    m = RE_BLOCO_REF.search(bloco)
+    if not m:
+        return bloco
+    corpo = m.group(2)
+    atual = re.sub(r"^\s*(?:<!\[CDATA\[)?|(?:\]\]>)?\s*$", "", corpo)
+    if atual.startswith(prefixo + "-"):
+        return bloco
+    novo = f"{prefixo}-{atual}"
+    corpo_novo = f"<![CDATA[{novo}]]>" if "CDATA" in corpo else novo
+    return bloco[:m.start(2)] + corpo_novo + bloco[m.end(2):]
 
-    return {
-        "sucursal": sucursal,
-        "email": email,
-        "minhas_sucursais": sorted(sucursais_de(email)),
-        "dias": dias,
-        "gerado_em": agora(),
-        "resumo": _rpc("alianca_painel_resumo", {"p_dias": dias}),
-        "roleta": _rpc("alianca_painel_roleta"),
-        "leads": _rpc("alianca_painel_leads",
-                      {"p_sucursal": None, "p_dias": dias, "p_limite": 500}),
-        "sem_destino": _rpc("alianca_painel_sem_destino", {"p_dias": dias}),
-        "chaves": chaves,
+
+COTAS_SUCURSAL = {
+    # Aditivo de 15/09: mais 100 super, total 300 — agora 100 para cada uma.
+    #   Antes (contrato de 07/09): 67 + 67 + 66 = 200. O 66 da Alcance existia
+    #   so porque 200 nao dividia por tres; com 300, divide certo e some a
+    #   assimetria. O destaque nao mudou: 175 x 3 = 525.
+    # Os totais da conta unica saem da soma desta tabela — nao existe numero
+    # de cota escrito em nenhum outro lugar deste arquivo.
+    "ville":    {"HOME": 100, "DESTACADO": 175},
+    "homemark": {"HOME": 100, "DESTACADO": 175},
+    "alcance":  {"HOME": 100, "DESTACADO": 175},
+}
+
+
+COTA_HOME_UNIFICADA = sum(c["HOME"] for c in COTAS_SUCURSAL.values())
+COTA_DESTACADO_UNIFICADA = sum(c["DESTACADO"] for c in COTAS_SUCURSAL.values())
+
+
+def decidir_marcacao_unificada(itens, dono_de, por_sucursal, traducao):
+    """Decide o tipoPublicacao de cada anuncio na conta unica.
+
+    Antes da conta unica, cada sucursal tinha as suas 67 e 175 num arquivo
+    proprio. Ao juntar tudo, o preenchimento automatico global passou a ir pelo
+    imovel mais caro — e a Ville, que tem a carteira mais cara, ficou com 87 dos
+    200 superdestaques enquanto a Homemark ficou com 4. Cada uma paga a sua
+    parte; a cota tem que ser de cada uma.
+
+    Ordem de decisao:
+
+      1. ESCOLHA DA TELA. Cada sucursal gasta a propria cota. HOME antes de
+         DESTACADO, para que o nivel maior prevaleca quando duas sucursais
+         marcarem o mesmo imovel.
+      2. AUTOMATICO NA PROPRIA CARTEIRA. O que a sucursal nao escolheu e
+         completado com os imoveis dela no iList, do mais caro para o mais
+         barato.
+      3. AUTOMATICO NO POOL DA ROLETA. Carteira pequena nao preenche a cota
+         (a Homemark tem 109 imoveis no iList para 242 vagas), entao o que
+         sobra vem do pool sem dono — em rodizio entre as sucursais que ainda
+         tem cota, para nenhuma varrer o pool sozinha.
+
+    Traducao de codigo: a escolha da Homemark esta gravada em 'homemark#40450'
+    e no arquivo unico sobrou 'remaxville#40450'. Sem traduzir, some calada.
+    """
+    presentes = {c for c, _ in itens}
+    preco = {c: p for c, p in itens}
+    marcacao, travados = {}, set()
+    usado = {n: {"HOME": 0, "DESTACADO": 0} for n in COTAS_SUCURSAL}
+    manual = {n: {"HOME": 0, "DESTACADO": 0} for n in COTAS_SUCURSAL}
+    orfas, conflitos = 0, 0
+
+    def traduzir(codigo):
+        return traducao.get(chave_compartilhada(str(codigo).strip()))
+
+    ordem = [n for n in COTAS_SUCURSAL if n in (por_sucursal or {})]
+
+    # --- 1. escolhas da tela
+    for nome in ordem:
+        for codigo in ((por_sucursal[nome] or {}).get("SIMPLE") or []):
+            final = traduzir(codigo)
+            if final in presentes:
+                travados.add(final)
+
+    for rotulo in ("HOME", "DESTACADO"):
+        for nome in ordem:
+            cota = COTAS_SUCURSAL[nome][rotulo]
+            for codigo in ((por_sucursal[nome] or {}).get(rotulo) or []):
+                final = traduzir(codigo)
+                if not final or final not in presentes:
+                    orfas += 1
+                    continue
+                if final in marcacao:
+                    conflitos += 1        # ja levado por outra sucursal
+                    continue
+                if final in travados or usado[nome][rotulo] >= cota:
+                    continue
+                marcacao[final] = rotulo
+                usado[nome][rotulo] += 1
+                manual[nome][rotulo] += 1
+
+    # --- 2. automatico dentro da carteira propria (iList da sucursal)
+    for nome in COTAS_SUCURSAL:
+        meus = sorted([c for c, _ in itens if dono_de.get(c) == nome],
+                      key=lambda c: -preco.get(c, 0))
+        for rotulo in ("HOME", "DESTACADO"):
+            cota = COTAS_SUCURSAL[nome][rotulo]
+            for c in meus:
+                if usado[nome][rotulo] >= cota:
+                    break
+                if c in marcacao or c in travados:
+                    continue
+                marcacao[c] = rotulo
+                usado[nome][rotulo] += 1
+
+    # --- 3. o que sobrou vem do pool da roleta, em rodizio
+    pool = sorted([c for c, _ in itens if dono_de.get(c) == DONO_ROLETA],
+                  key=lambda c: -preco.get(c, 0))
+    do_pool = {"HOME": 0, "DESTACADO": 0}
+    for rotulo in ("HOME", "DESTACADO"):
+        i = 0
+        faltam = True
+        while faltam and i < len(pool):
+            faltam = False
+            for nome in COTAS_SUCURSAL:
+                if usado[nome][rotulo] >= COTAS_SUCURSAL[nome][rotulo]:
+                    continue
+                faltam = True
+                while i < len(pool) and (pool[i] in marcacao or pool[i] in travados):
+                    i += 1
+                if i >= len(pool):
+                    break
+                marcacao[pool[i]] = rotulo
+                usado[nome][rotulo] += 1
+                do_pool[rotulo] += 1
+                i += 1
+
+    diag = {
+        "orfas": orfas,
+        "conflitos": conflitos,
+        "do_pool": do_pool,
+        "por_sucursal": {
+            n: {"HOME": usado[n]["HOME"], "HOME_tela": manual[n]["HOME"],
+                "DESTACADO": usado[n]["DESTACADO"], "DESTACADO_tela": manual[n]["DESTACADO"]}
+            for n in COTAS_SUCURSAL},
     }
+    total_manual = (sum(manual[n]["HOME"] for n in manual),
+                    sum(manual[n]["DESTACADO"] for n in manual))
+    return marcacao, total_manual, diag
 
 
-@app.post("/api/leads/{sucursal}/reenviar")
-def api_reenviar(sucursal: str, corpo: dict = Body(...),
-                 authorization: str = Header(default="")):
-    """Devolve um lead para a fila. Quem entrega continua sendo o workflow."""
-    if sucursal not in uf.SUCURSAIS:
-        raise HTTPException(404, "sucursal desconhecida")
-    email = exige_acesso(authorization, sucursal)
+def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
+    """Gera UM XML com os imoveis das tres sucursais, sem repetir imovel."""
+    print(f"\n{'='*58}\nXML UNIFICADO — ALIANCA\n{'='*58}")
+    nova_execucao()
 
-    lead_id = corpo.get("lead_id")
-    if not isinstance(lead_id, int):
-        raise HTTPException(400, "lead_id obrigatório")
+    # ---- 1. carteira propria: tudo que vem do iList das tres
+    #
+    # Um mesmo imovel pode estar no iList de duas sucursais, com codigos
+    # diferentes (601241003-... e 602271004-...). Codigo nao cruza, entao a
+    # deteccao e pela chave de fato, igual ao cruzamento com o Nonstop.
+    # O desempate sai do proprio anuncio: <codigoImobiliaria> diz de quem e.
+    carteira = {}          # chave de codigo -> (sucursal, bloco)
+    fatos_carteira = {}    # chave de fato   -> (sucursal, codigo)
+    traducao = {}          # chave de codigo de QUALQUER copia -> codigo final
+    por_fato = {}          # chave de fato   -> (sucursal, codigo, chave)
+    sem_chave_fato = 0
+    conflitos_ilist = 0
+    conflitos_terceiro = 0
 
-    try:
-        r = _rpc("alianca_reenfileirar", {"p_lead_id": lead_id, "p_por": email})
-    except HTTPException as e:
-        # a função levanta exceção com motivo legível; repassa como 400
-        raise HTTPException(400, str(e.detail))
-    return (r or [{}])[0]
+    for nome, cfg in SUCURSAIS.items():
+        n = 0
+        for bloco in blocos_imovel(obter(cfg["ilist"])):
+            m = RE_COD.search(bloco)
+            if not m:
+                continue
+            codigo = m.group(1).strip()
+            chave = chave_compartilhada(codigo)
+            n += 1
+
+            if chave in carteira:
+                print(f"  AVISO: {codigo} ja estava na carteira de "
+                      f"{carteira[chave][0]}; mantida a primeira.")
+                continue
+
+            cf = chave_de_fato(bloco)
+            # So e conflito quando as sucursais sao DIFERENTES. Dentro da mesma,
+            # dois anuncios com o mesmo endereco, area, comodos e preco sao dois
+            # apartamentos iguais no mesmo predio — o CRM deu codigos distintos
+            # porque sao unidades distintas, e sao 17 casos hoje. Fundir isso
+            # seria apagar imovel de verdade.
+            if cf and cf in por_fato and por_fato[cf][0] != nome:
+                conflitos_ilist += 1
+                antigo_nome, antigo_codigo, antigo_chave = por_fato[cf]
+                declarado = (dono_declarado(bloco)
+                             or dono_declarado(carteira[antigo_chave][1]))
+
+                if declarado == nome:
+                    # o anuncio diz que e desta sucursal: troca o que estava
+                    del carteira[antigo_chave]
+                    traducao[antigo_chave] = codigo
+                    carteira[chave] = (nome, bloco)
+                    traducao[chave] = codigo
+                    por_fato[cf] = (nome, codigo, chave)
+                    fatos_carteira[cf] = (nome, codigo)
+                    print(f"  iList x iList: {antigo_codigo} ({antigo_nome}) cede para "
+                          f"{codigo} ({nome}) — codigoImobiliaria aponta {declarado}")
+
+                elif declarado == antigo_nome:
+                    traducao[chave] = antigo_codigo
+                    print(f"  iList x iList: {codigo} ({nome}) cede para "
+                          f"{antigo_codigo} ({antigo_nome}) — codigoImobiliaria "
+                          f"aponta {declarado}")
+
+                else:
+                    # Ninguem entre as duas captou: e imovel de terceiro ou de
+                    # uma quarta unidade RE/MAX, que as duas pegaram por
+                    # parceria. Sem dono entre elas, vai para a roleta — e a
+                    # Secao 3 do escopo diz exatamente isso sobre imovel de
+                    # terceiro. Manter a primeira seria decidir por ordem do
+                    # dicionario, que nao e regra, e acidente.
+                    conflitos_terceiro += 1
+                    carteira[antigo_chave] = (DONO_ROLETA, carteira[antigo_chave][1])
+                    traducao[chave] = antigo_codigo
+                    fatos_carteira[cf] = (DONO_ROLETA, antigo_codigo)
+                    por_fato[cf] = (DONO_ROLETA, antigo_codigo, antigo_chave)
+                    quem = declarado or "imobiliaria de fora"
+                    print(f"  iList x iList: {codigo} ({nome}) e {antigo_codigo} "
+                          f"({antigo_nome}) — nenhuma das duas e a dona "
+                          f"({quem}); vai para a ROLETA")
+                continue
+
+            carteira[chave] = (nome, bloco)
+            traducao[chave] = codigo
+            if cf:
+                # setdefault: apartamentos iguais na mesma sucursal nao
+                # sobrescrevem o primeiro, que e quem representa o predio no
+                # cruzamento com o Nonstop.
+                por_fato.setdefault(cf, (nome, codigo, chave))
+                fatos_carteira.setdefault(cf, (nome, codigo))
+            else:
+                sem_chave_fato += 1
+        print(f"  iList {nome:<9} {n} imoveis")
+
+    print(f"  carteira propria ... {len(carteira)} imoveis "
+          f"({sem_chave_fato} sem dado suficiente para cruzar com o Nonstop)")
+    if conflitos_ilist:
+        print(f"  mesmo imovel no iList de 2 sucursais: {conflitos_ilist} "
+              f"({conflitos_ilist - conflitos_terceiro} pelo codigoImobiliaria, "
+              f"{conflitos_terceiro} para a roleta por nao ter dono entre elas)")
+
+    # ---- 2. Nonstop: derruba o que ja esta na carteira, e nao repete imovel
+    roleta = {}
+    derrubados_codigo = 0
+    derrubados_fato = 0
+    repetidos = 0
+    for nome, cfg in SUCURSAIS.items():
+        for bloco in blocos_imovel(obter(cfg["nonstop"])):
+            m = RE_COD.search(bloco)
+            if not m:
+                continue
+            codigo = m.group(1).strip()
+            chave = chave_compartilhada(codigo)
+            if chave in carteira:
+                derrubados_codigo += 1
+                continue
+            cf = chave_de_fato(bloco)
+            if cf and cf in por_fato:
+                # O imovel ja esta na carteira via iList. Tres situacoes:
+                #
+                #  a) MESMA sucursal publicando pelos dois sistemas: o iList
+                #     prevalece e a copia do Nonstop cai. E o caso comum.
+                #  b) OUTRA sucursal publicando o mesmo imovel, e a dona
+                #     declarada e quem esta no iList: fica com ela.
+                #  c) OUTRA sucursal, e nenhuma das duas e a dona (imovel de
+                #     terceiro ou de uma quarta unidade RE/MAX): ninguem
+                #     captou, entao vai para a ROLETA.
+                dono_ilist, codigo_ilist, chave_ilist = por_fato[cf]
+                traducao[chave] = codigo_ilist
+                derrubados_fato += 1
+
+                if dono_ilist != DONO_ROLETA and nome != dono_ilist:
+                    declarado = dono_declarado(carteira[chave_ilist][1])
+                    if declarado != dono_ilist:
+                        conflitos_terceiro += 1
+                        carteira[chave_ilist] = (DONO_ROLETA,
+                                                 carteira[chave_ilist][1])
+                        fatos_carteira[cf] = (DONO_ROLETA, codigo_ilist)
+                        por_fato[cf] = (DONO_ROLETA, codigo_ilist, chave_ilist)
+                        quem = declarado or "imobiliaria de fora"
+                        print(f"  iList x Nonstop: {codigo_ilist} ({dono_ilist}) "
+                              f"tambem publicado por {nome} — nenhuma das duas e "
+                              f"a dona ({quem}); vai para a ROLETA")
+                continue
+            if chave in roleta:
+                repetidos += 1     # mesmo imovel no Nonstop de outra sucursal
+                continue
+            roleta[chave] = (DONO_ROLETA, bloco)
+            traducao[chave] = codigo
+    print(f"  Nonstop derrubado pelo codigo ... {derrubados_codigo}")
+    print(f"  Nonstop derrubado pelo endereco . {derrubados_fato}")
+    print(f"  Nonstop repetido entre sucursais  {repetidos}")
+    print(f"  roleta ............ {len(roleta)} imoveis")
+
+    # ---- 3. destaques, agora sobre a conta unica
+    tudo = list(carteira.items()) + list(roleta.items())
+    itens, dono_de = [], {}
+    for _, (dono, bloco) in tudo:
+        m = RE_COD.search(bloco)
+        if m:
+            codigo = m.group(1).strip()
+            itens.append((codigo, preco_de(bloco)))
+            dono_de[codigo] = dono
+    marcacao, (manual_h, manual_d), diag = decidir_marcacao_unificada(
+        itens, dono_de, escolhas_por_sucursal, traducao)
+    print(f"  destaques: {manual_h} super e {manual_d} destaque escolhidos nas telas"
+          f" | conflitos={diag['conflitos']} | orfas={diag['orfas']}")
+    for n, c in diag["por_sucursal"].items():
+        print(f"     {n:<9} super {c['HOME']}/{COTAS_SUCURSAL[n]['HOME']}"
+              f" ({c['HOME_tela']} na tela)   destaque {c['DESTACADO']}"
+              f"/{COTAS_SUCURSAL[n]['DESTACADO']} ({c['DESTACADO_tela']} na tela)")
+    print(f"     do pool da roleta: {diag['do_pool']['HOME']} super, "
+          f"{diag['do_pool']['DESTACADO']} destaque")
+
+    # ---- 4. escreve
+    os.makedirs(DIR_SAIDA, exist_ok=True)
+    destino = os.path.join(DIR_SAIDA, SAIDA_UNIFICADA)
+    tipos, por_dono, catalogo, total = {}, {}, [], 0
+    complementos = {"carteira": 0, "roleta": 0}
+    with open(destino, "w", encoding="utf-8") as out:
+        out.write('<?xml version="1.0" encoding="UTF-8"?>\n<OpenNavent>\n<Imoveis>\n')
+        for _, (dono, bloco) in tudo:
+            m = RE_COD.search(bloco)
+            codigo = m.group(1).strip() if m else ""
+            tipo = marcacao.get(codigo, "SIMPLE")
+            bloco, trocas = RE_BLOCO_PUB.subn(
+                f"<tipoPublicacao>{tipo}</tipoPublicacao>", bloco, count=1)
+            if not trocas:
+                tipo = "sem tipoPublicacao"
+            bloco, tem_complemento = normalizar_complemento(bloco)
+            if tem_complemento:
+                grupo = "roleta" if dono == DONO_ROLETA else "carteira"
+                complementos[grupo] += 1
+            bloco = marcar_dono(bloco, dono)
+            out.write(bloco.rstrip() + "\n")
+            total += 1
+            tipos[tipo] = tipos.get(tipo, 0) + 1
+            por_dono[dono] = por_dono.get(dono, 0) + 1
+            catalogo.append({
+                "c": codigo,
+                # referencia com prefixo: e por ela que o portal identifica o
+                # anuncio no webhook de lead (campo internalReference)
+                "r": f"{PREFIXO.get(dono, 'PAR')}-{codigo}",
+                "tp": tipo,
+                "d": dono,
+                "t": campo("titulo", bloco)[:110],
+                "e": campo("endereco", bloco).strip()[:70],
+                "p": preco_de(bloco),
+                "o": operacao_de(bloco),
+                "u": foto_de(bloco),
+                "f": "i" if dono != DONO_ROLETA else "n",
+            })
+        out.write("</Imoveis>\n</OpenNavent>\n")
+
+    por_dono_carteira = sum(v for k, v in por_dono.items() if k != DONO_ROLETA)
+    mb = os.path.getsize(destino) / 1024 / 1024
+    print(f"\n  SAIDA: {destino}  ({total} imoveis, {mb:.1f} MB)")
+    print("  por dono: " + " | ".join(f"{k}={v}" for k, v in sorted(por_dono.items())))
+    print("  tipoPublicacao: " + " | ".join(f"{k}={v}" for k, v in sorted(tipos.items())))
+    # Separado por origem de proposito: se a carteira propria (iList) vier
+    # zerada e a roleta (Nonstop) vier cheia, o complemento nao existe no feed
+    # do iList — e o pedido e para eles, nao conserto aqui.
+    print(f"  complemento (caracteristica {ID_COMPLEMENTO}): "
+          f"carteira/iList {complementos['carteira']} de {por_dono_carteira} | "
+          f"roleta/Nonstop {complementos['roleta']} de {por_dono.get(DONO_ROLETA, 0)}")
+    print(f"  destaques: {tipos.get('HOME',0)}/{COTA_HOME_UNIFICADA} super "
+          f"({manual_h} na tela), {tipos.get('DESTACADO',0)}/{COTA_DESTACADO_UNIFICADA} "
+          f"destaque ({manual_d} na tela)")
+    livres = VAGAS_UNIFICADAS - total
+    if livres >= 0:
+        print(f"  vagas: {total}/{VAGAS_UNIFICADAS}  ->  {livres} livres")
+    else:
+        print(f"  ATENCAO: excede a cota em {-livres} anuncios")
+
+    return {"unidade": "alianca", "total": total, "arquivo": SAIDA_UNIFICADA,
+            "vagas": VAGAS_UNIFICADAS, "tipos": tipos, "catalogo": catalogo,
+            "por_dono": por_dono, "carteira": len(carteira), "roleta": len(roleta),
+            "derrubados_codigo": derrubados_codigo, "derrubados_fato": derrubados_fato,
+            "conflitos_ilist": conflitos_ilist,
+            "conflitos_terceiro": conflitos_terceiro,
+            "repetidos": repetidos,
+            "complementos": dict(complementos),
+            "home": tipos.get("HOME", 0), "destacado": tipos.get("DESTACADO", 0),
+            "home_manual": manual_h, "destacado_manual": manual_d,
+            "escolhas": diag, "cotas_sucursal": COTAS_SUCURSAL,
+            "cota_home": COTA_HOME_UNIFICADA, "cota_destacado": COTA_DESTACADO_UNIFICADA}
 
 
-@app.post("/api/leads/{sucursal}/token")
-def api_token(sucursal: str, corpo: dict = Body(...),
-              authorization: str = Header(default="")):
-    """Grava a chave do C2S de UMA sucursal.
+def main():
+    alvos = sys.argv[1:] or list(SUCURSAIS)
+    print(f"Unificacao de feeds — {datetime.now():%d/%m/%Y %H:%M}")
+    if alvos and alvos[0] == "unificado":
+        processar_unificado()
+        return
+    nova_execucao()
+    compart = levantar_compartilhados()
+    rel = [processar(n, SUCURSAIS[n], compartilhados=compart)
+           for n in alvos if n in SUCURSAIS]
 
-    Ver os leads é aberto entre as três; mexer na chave, não. Cada uma só
-    grava a própria — quem tem acesso a duas não passa a poder trocar a chave
-    da outra por engano. Token vazio limpa, que é o jeito de revogar.
-    """
-    if sucursal not in uf.SUCURSAIS:
-        raise HTTPException(404, "sucursal desconhecida")
-    email = exige_acesso(authorization, sucursal)
-
-    alvo = str(corpo.get("sucursal") or sucursal).strip().lower()
-    if alvo != sucursal:
-        raise HTTPException(403, "a chave de cada sucursal só pode ser alterada "
-                                 "na tela dela mesma")
-
-    token = str(corpo.get("token") or "").strip()
-    if token and len(token) < 20:
-        raise HTTPException(400, "essa chave parece curta demais — confira antes de salvar")
-
-    r = _rpc("alianca_definir_token",
-             {"p_sucursal": alvo, "p_token": token, "p_por": email})
-    return (r or [{}])[0]
+    print(f"\n{'='*58}\nRESUMO\n{'='*58}")
+    print(f"{'unidade':<12}{'imoveis':>9}{'vagas':>8}{'livres':>9}{'dedup':>8}")
+    for r in rel:
+        print(f"{r['unidade']:<12}{r['total']:>9}{r['vagas']:>8}"
+              f"{r['vagas']-r['total']:>9}{r['descartados']:>8}")
 
 
-@app.get("/status")
-def status_ultimo(x_feed_token: str = Header(default=""), token: str = ""):
-    confere_token(x_feed_token or token)
-    ultimo = JOBS.get("ultimo")
-    if not ultimo:
-        return {"estado": "nenhuma geração ainda"}
-    return ultimo
 
 
-@app.get("/status/{job_id}")
-def status(job_id: str, x_feed_token: str = Header(default=""), token: str = ""):
-    confere_token(x_feed_token or token)
-    job = JOBS.get(job_id)
-    if not job:
-        raise HTTPException(404, "job não encontrado")
-    return job
+# ---------------------------------------------------------------- auxiliares
+#
+# A escolha dos destaques mora na tela servida pelo app.py; aqui ficam so as
+# pecas que a unificacao usa para aplicar essa escolha ao XML.
+
+RE_BLOCO_PUB = re.compile(r"<tipoPublicacao>.*?</tipoPublicacao>", re.S)
+
+
+def campo(tag, bloco):
+    m = re.search(r"<%s>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</%s>" % (tag, tag), bloco, re.S)
+    return m.group(1).strip() if m else ""
+
+
+if __name__ == "__main__":
+    main()
