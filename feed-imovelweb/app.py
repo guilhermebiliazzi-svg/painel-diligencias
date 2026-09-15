@@ -82,6 +82,26 @@ ACESSOS = _ler_acessos(os.environ.get("ACESSOS", ""))
 
 uf.DIR_SAIDA = os.environ.get("DIR_SAIDA", "/tmp/feeds")
 
+
+def cotas_de(sucursal):
+    """Cota de destaque da sucursal no contrato VIGENTE (conta unica).
+
+    A fonte e uf.COTAS_SUCURSAL. O uf.SUCURSAIS ainda carrega cota_home e
+    cota_destacado do contrato antigo, de quando cada sucursal tinha o proprio
+    arquivo — ler de la fazia a tela e a validacao do POST travarem em 67 mesmo
+    depois do aditivo de 15/09, que levou o superdestaque para 100 em cada uma.
+
+    O fallback para SUCURSAIS existe so para nao quebrar se alguem acrescentar
+    uma sucursal em um lugar e esquecer do outro.
+
+    Devolve (super, destaque).
+    """
+    c = uf.COTAS_SUCURSAL.get(sucursal) or {}
+    cfg = uf.SUCURSAIS.get(sucursal) or {}
+    return (int(c.get("HOME", cfg.get("cota_home", 0))),
+            int(c.get("DESTACADO", cfg.get("cota_destacado", 0))))
+
+
 app = FastAPI(title="Feed unificado ImovelWeb")
 
 # job store em memória: o serviço roda uma instância e um job por vez
@@ -443,7 +463,8 @@ def rodar_unificado(job_id):
         #
         # Cada sucursal ve a propria carteira mais o pool da roleta, que e
         # exatamente o conjunto de onde ela pode marcar. As cotas continuam
-        # sendo as dela (67/67/66 super, 175 destaque), nao as somadas.
+        # sendo as DELA, nao as somadas — hoje 100 super e 175 destaque para
+        # cada uma (aditivo de 15/09). O numero sai de uf.COTAS_SUCURSAL.
         for nome in uf.SUCURSAIS:
             meus = [it for it in rel["catalogo"]
                     if it.get("d") == nome or it.get("d") == uf.DONO_ROLETA]
@@ -731,7 +752,7 @@ def api_destaques(sucursal: str, authorization: str = Header(default="")):
     if sucursal not in uf.SUCURSAIS:
         raise HTTPException(404, "sucursal desconhecida")
     email = exige_acesso(authorization, sucursal)
-    cfg = uf.SUCURSAIS[sucursal]
+    cota_home, cota_destacado = cotas_de(sucursal)
     catalogo = ler_config(f"catalogo_{sucursal}.json", None)
     escolha = ler_config(f"destaques_{sucursal}.json",
                          {"HOME": [], "DESTACADO": [], "SIMPLE": [],
@@ -740,8 +761,8 @@ def api_destaques(sucursal: str, authorization: str = Header(default="")):
         "sucursal": sucursal,
         "email": email,
         "minhas_sucursais": sorted(sucursais_de(email)),
-        "cota_home": cfg.get("cota_home", 0),
-        "cota_destacado": cfg.get("cota_destacado", 0),
+        "cota_home": cota_home,
+        "cota_destacado": cota_destacado,
         "catalogo": catalogo,
         "escolha": escolha,
         "tomados": destaques_de_outras(sucursal),
@@ -788,7 +809,7 @@ def salvar_destaques(
     if sucursal not in uf.SUCURSAIS:
         raise HTTPException(404, "sucursal desconhecida")
     email = exige_acesso(authorization, sucursal)
-    cfg = uf.SUCURSAIS[sucursal]
+    cota_home, cota_destacado = cotas_de(sucursal)
 
     def lista(chave):
         valores = corpo.get(chave) or []
@@ -813,10 +834,10 @@ def salvar_destaques(
         if repetidos:
             raise HTTPException(400, f"o mesmo imóvel está marcado como {rotulo}: "
                                      + ", ".join(sorted(repetidos)[:5]))
-    if len(home) > cfg.get("cota_home", 0):
-        raise HTTPException(400, f"máximo de {cfg['cota_home']} superdestaques")
-    if len(destacado) > cfg.get("cota_destacado", 0):
-        raise HTTPException(400, f"máximo de {cfg['cota_destacado']} destaques")
+    if len(home) > cota_home:
+        raise HTTPException(400, f"máximo de {cota_home} superdestaques")
+    if len(destacado) > cota_destacado:
+        raise HTTPException(400, f"máximo de {cota_destacado} destaques")
 
     dados = {"HOME": home, "DESTACADO": destacado, "SIMPLE": simples,
              "por": email, "atualizado_em": agora()}
@@ -882,6 +903,7 @@ def api_inicio(authorization: str = Header(default="")):
             resumo = {}
         for nome in minhas:
             cfg = uf.SUCURSAIS.get(nome, {})
+            cota_home, cota_destacado = cotas_de(nome)
             catalogo = ler_config(f"catalogo_{nome}.json", None) or {}
             r = resumo.get(nome, {})
             cartoes.append({
@@ -889,8 +911,8 @@ def api_inicio(authorization: str = Header(default="")):
                 "nome": cfg.get("nome") or f"RE/MAX {nome.title()}",
                 "imoveis": len(catalogo.get("itens") or []),
                 "catalogo_em": catalogo.get("gerado_em"),
-                "cota_home": cfg.get("cota_home", 0),
-                "cota_destacado": cfg.get("cota_destacado", 0),
+                "cota_home": cota_home,
+                "cota_destacado": cota_destacado,
                 "leads_7d": r.get("total", 0),
                 "leads_pendentes": r.get("pendentes", 0),
                 "tem_chave": r.get("tem_chave"),
