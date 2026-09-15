@@ -255,6 +255,22 @@ RE_LER_VALOR = re.compile(r"<valor>\s*(?:<!\[CDATA\[)?\s*(.*?)\s*(?:\]\]>)?\s*</
 RE_CORPO_NOME = re.compile(r"(<nome>)(.*?)(</nome>)", re.S)
 
 
+def _e_complemento(nome):
+    """True quando o nome da caracteristica designa o complemento.
+
+    As origens escrevem o nome como GRUPO|CAMPO ("PRINCIPALES|QUARTO",
+    "MEDIDAS|AREA_UTIL"). O complemento aparece ora solto e minusculo, no
+    Nonstop, ora possivelmente com prefixo de grupo no iList. Comparar o nome
+    inteiro com "complemento" so pegava a primeira forma.
+
+    Compara o ULTIMO segmento, sem acento e em minusculas. Cobre COMPLEMENTO,
+    complemento, PRINCIPALES|COMPLEMENTO e "Complemento do endereco".
+    """
+    ultimo = (nome or "").split("|")[-1]
+    limpo = unicodedata.normalize("NFD", ultimo).encode("ascii", "ignore").decode()
+    return limpo.strip().lower().startswith("complemento")
+
+
 def normalizar_complemento(bloco):
     """Reescreve o <nome> da caracteristica de complemento para COMPLEMENTO.
 
@@ -278,7 +294,7 @@ def normalizar_complemento(bloco):
         m_id = RE_LER_ID.search(texto)
         ident = m_id.group(1).strip() if m_id else ""
         nome = m_nome.group(1).strip()
-        if ident != ID_COMPLEMENTO and nome.lower() != "complemento":
+        if ident != ID_COMPLEMENTO and not _e_complemento(nome):
             return texto
 
         m_valor = RE_LER_VALOR.search(texto)
@@ -646,7 +662,7 @@ def processar(nome, cfg, escolhas=None, compartilhados=None):
     total = 0
     catalogo = []
     trocados = [0]      # quantos titulos foram reescritos
-    complementos = [0]  # quantos sairam com o complemento preenchido
+    complementos = {"i": 0, "n": 0}   # com complemento preenchido, por origem
     recortados = [0]    # quantos anuncios tiveram fotos recortadas
     fotos_fora = [0]    # quantas fotos sairam no total
 
@@ -666,7 +682,7 @@ def processar(nome, cfg, escolhas=None, compartilhados=None):
             tipo = "sem tipoPublicacao"
         bloco, tem_complemento = normalizar_complemento(bloco)
         if tem_complemento:
-            complementos[0] += 1
+            complementos[fonte] = complementos.get(fonte, 0) + 1
         # Diferenciacao entre sucursais. O recorte de fotos so vale a pena onde
         # existe duplicata: em imovel exclusivo seria perder foto de graca.
         if codigo and chave_compartilhada(codigo) in compartilhados:
@@ -712,7 +728,8 @@ def processar(nome, cfg, escolhas=None, compartilhados=None):
     print(f"  tipoPublicacao: " + " | ".join(f"{k}={v}" for k, v in sorted(tipos.items())))
     print(f"  titulos proprios da sucursal: {trocados[0]} de {total}")
     print(f"  complemento (caracteristica {ID_COMPLEMENTO}): "
-          f"{complementos[0]} de {total}")
+          f"iList {complementos['i']} | Nonstop {complementos['n']}"
+          f"  (de {total} anuncios)")
     if recortados[0]:
         media = fotos_fora[0] / recortados[0]
         print(f"  fotos recortadas: {recortados[0]} anuncios compartilhados "
@@ -745,7 +762,7 @@ def processar(nome, cfg, escolhas=None, compartilhados=None):
             "home_manual": manual_h, "destacado_manual": manual_d,
             "cota_home": cota_h, "cota_destacado": cota_d,
             "titulos_proprios": trocados[0],
-            "complementos": complementos[0],
+            "complementos": dict(complementos),
             "anuncios_recortados": recortados[0],
             "fotos_removidas": fotos_fora[0],
             "passo_recorte": PASSO_RECORTE}
@@ -861,10 +878,15 @@ def marcar_dono(bloco, dono):
 
 
 COTAS_SUCURSAL = {
-    # Contrato de 07/09: 67 + 67 + 66 = 200 super, 175 x 3 = 525 destaque.
-    "ville":    {"HOME": 67, "DESTACADO": 175},
-    "homemark": {"HOME": 67, "DESTACADO": 175},
-    "alcance":  {"HOME": 66, "DESTACADO": 175},
+    # Aditivo de 15/09: mais 100 super, total 300 — agora 100 para cada uma.
+    #   Antes (contrato de 07/09): 67 + 67 + 66 = 200. O 66 da Alcance existia
+    #   so porque 200 nao dividia por tres; com 300, divide certo e some a
+    #   assimetria. O destaque nao mudou: 175 x 3 = 525.
+    # Os totais da conta unica saem da soma desta tabela — nao existe numero
+    # de cota escrito em nenhum outro lugar deste arquivo.
+    "ville":    {"HOME": 100, "DESTACADO": 175},
+    "homemark": {"HOME": 100, "DESTACADO": 175},
+    "alcance":  {"HOME": 100, "DESTACADO": 175},
 }
 
 
@@ -1160,7 +1182,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
     os.makedirs(DIR_SAIDA, exist_ok=True)
     destino = os.path.join(DIR_SAIDA, SAIDA_UNIFICADA)
     tipos, por_dono, catalogo, total = {}, {}, [], 0
-    complementos = 0
+    complementos = {"carteira": 0, "roleta": 0}
     with open(destino, "w", encoding="utf-8") as out:
         out.write('<?xml version="1.0" encoding="UTF-8"?>\n<OpenNavent>\n<Imoveis>\n')
         for _, (dono, bloco) in tudo:
@@ -1173,7 +1195,8 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                 tipo = "sem tipoPublicacao"
             bloco, tem_complemento = normalizar_complemento(bloco)
             if tem_complemento:
-                complementos += 1
+                grupo = "roleta" if dono == DONO_ROLETA else "carteira"
+                complementos[grupo] += 1
             bloco = marcar_dono(bloco, dono)
             out.write(bloco.rstrip() + "\n")
             total += 1
@@ -1195,11 +1218,17 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
             })
         out.write("</Imoveis>\n</OpenNavent>\n")
 
+    por_dono_carteira = sum(v for k, v in por_dono.items() if k != DONO_ROLETA)
     mb = os.path.getsize(destino) / 1024 / 1024
     print(f"\n  SAIDA: {destino}  ({total} imoveis, {mb:.1f} MB)")
     print("  por dono: " + " | ".join(f"{k}={v}" for k, v in sorted(por_dono.items())))
     print("  tipoPublicacao: " + " | ".join(f"{k}={v}" for k, v in sorted(tipos.items())))
-    print(f"  complemento (caracteristica {ID_COMPLEMENTO}): {complementos} de {total}")
+    # Separado por origem de proposito: se a carteira propria (iList) vier
+    # zerada e a roleta (Nonstop) vier cheia, o complemento nao existe no feed
+    # do iList — e o pedido e para eles, nao conserto aqui.
+    print(f"  complemento (caracteristica {ID_COMPLEMENTO}): "
+          f"carteira/iList {complementos['carteira']} de {por_dono_carteira} | "
+          f"roleta/Nonstop {complementos['roleta']} de {por_dono.get(DONO_ROLETA, 0)}")
     print(f"  destaques: {tipos.get('HOME',0)}/{COTA_HOME_UNIFICADA} super "
           f"({manual_h} na tela), {tipos.get('DESTACADO',0)}/{COTA_DESTACADO_UNIFICADA} "
           f"destaque ({manual_d} na tela)")
@@ -1216,7 +1245,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
             "conflitos_ilist": conflitos_ilist,
             "conflitos_terceiro": conflitos_terceiro,
             "repetidos": repetidos,
-            "complementos": complementos,
+            "complementos": dict(complementos),
             "home": tipos.get("HOME", 0), "destacado": tipos.get("DESTACADO", 0),
             "home_manual": manual_h, "destacado_manual": manual_d,
             "escolhas": diag, "cotas_sucursal": COTAS_SUCURSAL,
