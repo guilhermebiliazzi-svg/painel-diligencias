@@ -468,9 +468,31 @@ def rodar_unificado(job_id):
         # exatamente o conjunto de onde ela pode marcar. As cotas continuam
         # sendo as DELA, nao as somadas — hoje 100 super e 175 destaque para
         # cada uma (aditivo de 15/09). O numero sai de uf.COTAS_SUCURSAL.
+        def ofertavel(it, nome):
+            """A sucursal so pode destacar o que ela mesma publica.
+
+            Ate 19/09 cada tela via a carteira propria MAIS o pool inteiro.
+            Com a regra da marcacao, um imovel do pool que ela nao manda no
+            XML nunca gera lead para ela — destacar aquilo era gastar cota
+            para alimentar concorrente. Agora:
+
+              - carteira propria (iList): sempre;
+              - carteira de outra: nunca (ja era assim);
+              - pool que ela mandou no Nonstop: sim;
+              - pool sem marcacao nenhuma: sim, para as tres — sao os
+                conflitos iList x iList, cujo lead vai para a roleta entre
+                as tres, entao todas participam.
+            """
+            dono = it.get("d")
+            if dono == nome:
+                return True
+            if dono != uf.DONO_ROLETA:
+                return False
+            marcada = it.get("m")
+            return (not marcada) or (nome in marcada)
+
         for nome in uf.SUCURSAIS:
-            meus = [it for it in rel["catalogo"]
-                    if it.get("d") == nome or it.get("d") == uf.DONO_ROLETA]
+            meus = [it for it in rel["catalogo"] if ofertavel(it, nome)]
             cotas = uf.COTAS_SUCURSAL.get(nome, {})
             gravar_config(f"catalogo_{nome}.json", {
                 "sucursal": nome,
@@ -481,8 +503,7 @@ def rodar_unificado(job_id):
                 "itens": meus,
             })
         item["telas_atualizadas"] = {
-            nome: sum(1 for it in rel["catalogo"]
-                      if it.get("d") == nome or it.get("d") == uf.DONO_ROLETA)
+            nome: sum(1 for it in rel["catalogo"] if ofertavel(it, nome))
             for nome in uf.SUCURSAIS
         }
 
