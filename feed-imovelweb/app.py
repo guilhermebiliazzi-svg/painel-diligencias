@@ -380,6 +380,9 @@ def gravar_catalogo_no_banco(itens):
         "endereco": it.get("e"),
         "foto": it.get("u"),
         "tipo_publicacao": it.get("tp"),
+        # Sucursais que mandaram este imovel no proprio XML do Nonstop.
+        # Gravado desde 19/09; o motor da roleta ainda NAO consulta.
+        "marcado_por": it.get("m") or None,
         "ativo": True,
         "gerado_em": agora_iso,
         "visto_em": agora_iso,
