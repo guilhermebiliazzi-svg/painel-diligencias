@@ -166,7 +166,7 @@
     <select id="fMarcacao">
       <option value="">Marcação no Nonstop</option>
       <option value="sosua">Só os seus exclusivos</option>
-      <option value="dividido">Na roleta com outra(s)</option>
+      <option value="dividido">Na roleta (qualquer)</option>
     </select>
     <select id="fPublicacao">
       <option value="">Toda publicação</option>
@@ -383,6 +383,7 @@
   }
 
   var NOME_SUC = {ville: 'Ville', homemark: 'Homemark', alcance: 'Alcance'};
+  var ORDEM_SUC = ['ville', 'homemark', 'alcance'];
 
   function alternar(codigo, tipo){
     var t = tipo !== 'SIMPLE' ? tomadoPor(codigo) : null;
@@ -439,6 +440,35 @@
   // item do pool que nao seja exclusivo dela e disputa de roleta.
   function doPool(it){ return it.d === 'ROLETA'; }
   function naRoleta(it){ return doPool(it) && !soMinha(it); }
+  // As OUTRAS sucursais que mandaram este imovel, em ordem fixa — e a chave
+  // que casa com o valor da opcao do filtro.
+  function outrasDe(it){
+    return marcacaoDe(it).filter(function(s){ return s !== sucursal; }).sort();
+  }
+
+  // As opcoes 'na roleta com X' dependem de quem esta logada, entao sao
+  // montadas aqui em vez de ficarem fixas no HTML.
+  function montarFiltroDisputa(){
+    var sel = $('fMarcacao');
+    if (!sel || sel.dataset.pronto) return;
+    var outras = ORDEM_SUC.filter(function(s){ return s !== sucursal; });
+    var opcoes = outras.map(function(s){
+      return {v: 'roleta:' + s, t: 'Na roleta com ' + (NOME_SUC[s] || s)};
+    });
+    if (outras.length === 2) {
+      opcoes.push({
+        v: 'roleta:' + outras.slice().sort().join('+'),
+        t: 'Na roleta com ' + (NOME_SUC[outras[0]] || outras[0]) +
+           ' e ' + (NOME_SUC[outras[1]] || outras[1])
+      });
+    }
+    opcoes.forEach(function(o){
+      var el = document.createElement('option');
+      el.value = o.v; el.textContent = o.t;
+      sel.appendChild(el);
+    });
+    sel.dataset.pronto = '1';
+  }
 
   function desenhar(){
     contar();
@@ -455,6 +485,11 @@
       if (org && it.f !== org) return false;
       if (marc === 'sosua' && !soMinha(it)) return false;
       if (marc === 'dividido' && !naRoleta(it)) return false;
+      if (marc.indexOf('roleta:') === 0) {
+        // imovel sem marcacao nenhuma nao casa com nenhuma combinacao —
+        // ele aparece so em 'Na roleta (qualquer)'
+        if (!naRoleta(it) || outrasDe(it).join('+') !== marc.slice(7)) return false;
+      }
       if (vmin !== null && (it.p || 0) < vmin) return false;
       if (vmax !== null && (it.p || 0) > vmax) return false;
       if (pub === 'escolhidos' && !manual[it.c]) return false;
@@ -621,6 +656,7 @@
         cotaH = d.cota_home; cotaD = d.cota_destacado;
         $('titulo').textContent = 'Destaques — RE/MAX ' +
           sucursal.charAt(0).toUpperCase() + sucursal.slice(1);
+        montarFiltroDisputa();
 
         tomados = d.tomados || {};
         var esc0 = d.escolha || {};
