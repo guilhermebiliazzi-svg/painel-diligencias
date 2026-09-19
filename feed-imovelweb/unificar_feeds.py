@@ -1005,6 +1005,49 @@ def decidir_marcacao_unificada(itens, dono_de, por_sucursal, traducao):
     return marcacao, total_manual, diag
 
 
+def relatar_marcacao(marcado_por, roleta):
+    """Retrato de quantos imoveis do pool cada sucursal mandou sozinha.
+
+    So mede. Nenhuma decisao depende disto ainda — e de proposito: antes de
+    mandar lead de imovel exclusivo direto para a sucursal, e preciso saber
+    quanto do pool isso representa. Se quase tudo for exclusivo, a regra nao
+    ajusta a roleta: encerra a roleta.
+
+    Mede sobre o POOL (o que sobrou para a roleta). Imovel de carteira ja tem
+    dono pelo iList e nao passa por aqui.
+    """
+    exclusivos = {nome: 0 for nome in SUCURSAIS}
+    duas = tres = orfaos = 0
+    for chave in roleta:
+        quem = marcado_por.get(chave) or set()
+        if len(quem) == 1:
+            exclusivos[next(iter(quem))] += 1
+        elif len(quem) == 2:
+            duas += 1
+        elif len(quem) >= 3:
+            tres += 1
+        else:
+            orfaos += 1
+
+    total = len(roleta)
+    total_exclusivos = sum(exclusivos.values())
+    pct = (100.0 * total_exclusivos / total) if total else 0.0
+
+    print("  marcacao no Nonstop (quem mandou o imovel no proprio XML):")
+    for nome in SUCURSAIS:
+        print(f"     so {nome:<9} {exclusivos[nome]:>5}")
+    print(f"     duas          {duas:>5}")
+    print(f"     as tres       {tres:>5}")
+    if orfaos:
+        print(f"     sem marcacao  {orfaos:>5}  <- nao deveria acontecer no pool")
+    print(f"  => {total_exclusivos} de {total} imoveis do pool ({pct:.1f}%) iriam "
+          f"DIRETO para uma sucursal; {duas + tres} continuariam na roleta.")
+
+    return {"exclusivos": dict(exclusivos), "duas": duas, "tres": tres,
+            "sem_marcacao": orfaos, "pool": total,
+            "exclusivos_total": total_exclusivos, "exclusivos_pct": round(pct, 1)}
+
+
 def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
     """Gera UM XML com os imoveis das tres sucursais, sem repetir imovel."""
     print(f"\n{'='*58}\nXML UNIFICADO — ALIANCA\n{'='*58}")
@@ -1107,6 +1150,13 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
 
     # ---- 2. Nonstop: derruba o que ja esta na carteira, e nao repete imovel
     roleta = {}
+    # Quem mandou cada imovel no PROPRIO XML do Nonstop. O XML de uma sucursal
+    # e a declaracao de que ela trabalha aquele imovel: quem nao mandou, nao
+    # disputa o lead. Ate 19/09 essa informacao era contada em 'repetidos' e
+    # jogada fora — o nome da segunda sucursal morria no 'continue'.
+    # Chave: o sufixo depois do '#', que e o que identifica o IMOVEL entre as
+    # tres contas (remaxville#1A57L == homemark#1A57L).
+    marcado_por = {}
     derrubados_codigo = 0
     derrubados_fato = 0
     repetidos = 0
@@ -1117,6 +1167,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                 continue
             codigo = m.group(1).strip()
             chave = chave_compartilhada(codigo)
+            marcado_por.setdefault(chave, set()).add(nome)
             if chave in carteira:
                 derrubados_codigo += 1
                 continue
@@ -1157,6 +1208,8 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
     print(f"  Nonstop derrubado pelo endereco . {derrubados_fato}")
     print(f"  Nonstop repetido entre sucursais  {repetidos}")
     print(f"  roleta ............ {len(roleta)} imoveis")
+
+    marcacao_resumo = relatar_marcacao(marcado_por, roleta)
 
     # ---- 3. destaques, agora sobre a conta unica
     tudo = list(carteira.items()) + list(roleta.items())
@@ -1215,6 +1268,10 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                 "o": operacao_de(bloco),
                 "u": foto_de(bloco),
                 "f": "i" if dono != DONO_ROLETA else "n",
+                # quem mandou este imovel no proprio XML do Nonstop.
+                # So existe para o pool: imovel de carteira ja tem dono.
+                "m": (sorted(marcado_por.get(chave_compartilhada(codigo), ()))
+                      if (codigo and dono == DONO_ROLETA) else None),
             })
         out.write("</Imoveis>\n</OpenNavent>\n")
 
@@ -1245,6 +1302,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
             "conflitos_ilist": conflitos_ilist,
             "conflitos_terceiro": conflitos_terceiro,
             "repetidos": repetidos,
+            "marcacao": marcacao_resumo,
             "complementos": dict(complementos),
             "home": tipos.get("HOME", 0), "destacado": tipos.get("DESTACADO", 0),
             "home_manual": manual_h, "destacado_manual": manual_d,
