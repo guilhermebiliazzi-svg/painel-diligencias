@@ -1066,6 +1066,9 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
     sem_chave_fato = 0
     conflitos_ilist = 0
     conflitos_terceiro = 0
+    # imovel cujo codigoImobiliaria aponta uma sucursal da alianca que NAO
+    # esta no conflito. Ate 19/09 isso virava roleta; agora vai para a dona.
+    conflitos_terceira_sucursal = 0
 
     for nome, cfg in SUCURSAIS.items():
         n = 0
@@ -1111,10 +1114,25 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                           f"{antigo_codigo} ({antigo_nome}) — codigoImobiliaria "
                           f"aponta {declarado}")
 
+                elif declarado in SUCURSAIS:
+                    # O campo aponta uma sucursal da alianca que nao esta no
+                    # conflito: o imovel e DELA. Antes isto caia no 'else' e
+                    # virava roleta — a dona perdia imovel proprio porque nao
+                    # participava da briga. O anuncio que fica e o que ja
+                    # estava; so o dono muda.
+                    conflitos_terceira_sucursal += 1
+                    carteira[antigo_chave] = (declarado, carteira[antigo_chave][1])
+                    traducao[chave] = antigo_codigo
+                    fatos_carteira[cf] = (declarado, antigo_codigo)
+                    por_fato[cf] = (declarado, antigo_codigo, antigo_chave)
+                    print(f"  iList x iList: {codigo} ({nome}) e {antigo_codigo} "
+                          f"({antigo_nome}) — o codigoImobiliaria aponta "
+                          f"{declarado}; fica com ela")
+
                 else:
-                    # Ninguem entre as duas captou: e imovel de terceiro ou de
+                    # Ninguem da alianca captou: e imovel de terceiro ou de
                     # uma quarta unidade RE/MAX, que as duas pegaram por
-                    # parceria. Sem dono entre elas, vai para a roleta — e a
+                    # parceria. Sem dono entre as tres, vai para a roleta — e a
                     # Secao 3 do escopo diz exatamente isso sobre imovel de
                     # terceiro. Manter a primeira seria decidir por ordem do
                     # dicionario, que nao e regra, e acidente.
@@ -1146,7 +1164,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
     if conflitos_ilist:
         print(f"  mesmo imovel no iList de 2 sucursais: {conflitos_ilist} "
               f"({conflitos_ilist - conflitos_terceiro} pelo codigoImobiliaria, "
-              f"{conflitos_terceiro} para a roleta por nao ter dono entre elas)")
+              f"{conflitos_terceiro} para a roleta por nao ser de nenhuma das tres)")
 
     # ---- 2. Nonstop: derruba o que ja esta na carteira, e nao repete imovel
     roleta = {}
@@ -1189,15 +1207,27 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                 if dono_ilist != DONO_ROLETA and nome != dono_ilist:
                     declarado = dono_declarado(carteira[chave_ilist][1])
                     if declarado != dono_ilist:
-                        conflitos_terceiro += 1
-                        carteira[chave_ilist] = (DONO_ROLETA,
+                        # Mesma regra do iList x iList: se o campo aponta
+                        # QUALQUER uma das tres, o imovel e dela. Roleta so
+                        # quando aponta para fora da alianca ou nao existe.
+                        novo_dono = (declarado if declarado in SUCURSAIS
+                                     else DONO_ROLETA)
+                        if novo_dono == DONO_ROLETA:
+                            conflitos_terceiro += 1
+                            quem = declarado or "imobiliaria de fora"
+                            print(f"  iList x Nonstop: {codigo_ilist} ({dono_ilist}) "
+                                  f"tambem publicado por {nome} — nenhuma das tres "
+                                  f"e a dona ({quem}); vai para a ROLETA")
+                        else:
+                            conflitos_terceira_sucursal += 1
+                            print(f"  iList x Nonstop: {codigo_ilist} ({dono_ilist}) "
+                                  f"tambem publicado por {nome} — o "
+                                  f"codigoImobiliaria aponta {novo_dono}; "
+                                  f"fica com ela")
+                        carteira[chave_ilist] = (novo_dono,
                                                  carteira[chave_ilist][1])
-                        fatos_carteira[cf] = (DONO_ROLETA, codigo_ilist)
-                        por_fato[cf] = (DONO_ROLETA, codigo_ilist, chave_ilist)
-                        quem = declarado or "imobiliaria de fora"
-                        print(f"  iList x Nonstop: {codigo_ilist} ({dono_ilist}) "
-                              f"tambem publicado por {nome} — nenhuma das duas e "
-                              f"a dona ({quem}); vai para a ROLETA")
+                        fatos_carteira[cf] = (novo_dono, codigo_ilist)
+                        por_fato[cf] = (novo_dono, codigo_ilist, chave_ilist)
                 continue
             if chave in roleta:
                 repetidos += 1     # mesmo imovel no Nonstop de outra sucursal
@@ -1208,6 +1238,10 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
     print(f"  Nonstop derrubado pelo endereco . {derrubados_fato}")
     print(f"  Nonstop repetido entre sucursais  {repetidos}")
     print(f"  roleta ............ {len(roleta)} imoveis")
+
+    if conflitos_terceira_sucursal:
+        print(f"  imovel entregue a uma TERCEIRA sucursal pelo codigoImobiliaria: "
+              f"{conflitos_terceira_sucursal}  (antes de 19/09 estes iam para a roleta)")
 
     marcacao_resumo = relatar_marcacao(marcado_por, roleta)
 
@@ -1301,6 +1335,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
             "derrubados_codigo": derrubados_codigo, "derrubados_fato": derrubados_fato,
             "conflitos_ilist": conflitos_ilist,
             "conflitos_terceiro": conflitos_terceiro,
+            "conflitos_terceira_sucursal": conflitos_terceira_sucursal,
             "repetidos": repetidos,
             "marcacao": marcacao_resumo,
             "complementos": dict(complementos),
