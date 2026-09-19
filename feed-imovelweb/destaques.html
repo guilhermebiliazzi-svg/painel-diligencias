@@ -77,6 +77,12 @@
   .acoes button.on.dest{background:var(--azul);border-color:var(--azul);color:#fff}
   .acoes button.on.simp{background:var(--cinza);border-color:var(--cinza);color:#fff}
   .tag.tomado{background:#f1f5f9;color:#475569;border-color:#cbd5e1}
+  /* Imovel do pool que so a SUA sucursal mandou no XML do Nonstop: o lead
+     dele vem direto para voce, sem passar pela roleta. */
+  .tag.sosua{background:#fffbeb;color:#92400e;border-color:#fcd34d;font-weight:600}
+  .tag.dividido{background:#f8fafc;color:#64748b;border-color:#e2e8f0}
+  tr.sosua{background:#fffef5}
+  tr.sosua td.capa{box-shadow:inset 3px 0 0 #f59e0b}
   .acoes button[disabled]{opacity:.35;cursor:not-allowed}
   .cota.orfas{background:#fff7ed;color:#9a3412;border-color:#fed7aa}
   .cota.orfas button{margin-left:8px;font:inherit;color:#9a3412;background:none;
@@ -156,6 +162,11 @@
       <option value="">As duas origens</option>
       <option value="i">Só iList</option>
       <option value="n">Só Nonstop</option>
+    </select>
+    <select id="fMarcacao">
+      <option value="">Marcação no Nonstop</option>
+      <option value="sosua">Só os seus exclusivos</option>
+      <option value="dividido">Na roleta com outra(s)</option>
     </select>
     <select id="fPublicacao">
       <option value="">Toda publicação</option>
@@ -420,10 +431,20 @@
     });
   }
 
+  // Quem mandou este imovel no proprio XML do Nonstop (campo 'm' do catalogo).
+  // So existe para imovel do pool; na carteira propria vem vazio.
+  function marcacaoDe(it){ return Array.isArray(it.m) ? it.m : []; }
+  function soMinha(it){ var m = marcacaoDe(it); return m.length === 1 && m[0] === sucursal; }
+  // A tela so recebe imovel em que esta sucursal participa, entao qualquer
+  // item do pool que nao seja exclusivo dela e disputa de roleta.
+  function doPool(it){ return it.d === 'ROLETA'; }
+  function naRoleta(it){ return doPool(it) && !soMinha(it); }
+
   function desenhar(){
     contar();
     var termo = semAcento($('busca').value.trim());
     var op = $('fOperacao').value, org = $('fOrigem').value, pub = $('fPublicacao').value;
+    var marc = $('fMarcacao').value;
     var vmin = parseFloat($('vMin').value), vmax = parseFloat($('vMax').value);
     if (!isFinite(vmin)) vmin = null;
     if (!isFinite(vmax)) vmax = null;
@@ -432,6 +453,8 @@
     var visiveis = itens.filter(function(it){
       if (op && it.o !== op) return false;
       if (org && it.f !== org) return false;
+      if (marc === 'sosua' && !soMinha(it)) return false;
+      if (marc === 'dividido' && !naRoleta(it)) return false;
       if (vmin !== null && (it.p || 0) < vmin) return false;
       if (vmax !== null && (it.p || 0) > vmax) return false;
       if (pub === 'escolhidos' && !manual[it.c]) return false;
@@ -467,6 +490,20 @@
         : '<div class="vazia">sem foto</div>';
       var tags = '<span class="tag ' + (it.f === 'i' ? 'ilist">iList' : 'nonstop">Nonstop') + '</span>';
       if (it.o === 'ALUGUEL') tags += '<span class="tag aluguel">Aluguel</span>';
+      var ehSoMinha = soMinha(it);
+      if (ehSoMinha) {
+        tags += '<span class="tag sosua" title="Só a sua sucursal mandou este ' +
+                'imóvel no XML do Nonstop — o lead dele vem direto para você">' +
+                'Só sua</span>';
+      } else if (naRoleta(it)) {
+        var outras = marcacaoDe(it).filter(function(s){ return s !== sucursal; })
+                     .map(function(s){ return NOME_SUC[s] || s; }).join(', ');
+        tags += '<span class="tag dividido" title="' + (outras
+                  ? 'Também está no XML de: ' + esc(outras) +
+                    ' — o lead vai para a roleta entre vocês'
+                  : 'Sem marcação de nenhuma sucursal — o lead vai para a ' +
+                    'roleta entre as três') + '">Na roleta</span>';
+      }
       var tom = m ? null : tomadoPor(it.c);
       if (tom) {
         tags += '<span class="tag tomado">' +
@@ -476,7 +513,7 @@
       var trava = tom ? ' disabled title="Já marcado por outra sucursal"' : '';
 
 
-      html += '<tr data-c="' + cod + '">' +
+      html += '<tr data-c="' + cod + '"' + (ehSoMinha ? ' class="sosua"' : '') + '>' +
         '<td class="capa">' + capa + '</td>' +
         '<td><div class="tit">' + esc(it.t) + '</div>' +
         '<div class="end">' + tags + '<span class="estado"></span>' +
@@ -625,7 +662,8 @@
   $('busca').oninput = recomecar;
   $('vMin').oninput = recomecar;
   $('vMax').oninput = recomecar;
-  ['fOperacao','fOrigem','fPublicacao','ordem'].forEach(function(id){ $(id).onchange = recomecar; });
+  ['fOperacao','fOrigem','fMarcacao','fPublicacao','ordem']
+    .forEach(function(id){ $(id).onchange = recomecar; });
 
   $('limpar').onclick = function(){
     var tem = false; for (var k in manual) { tem = true; break; }
