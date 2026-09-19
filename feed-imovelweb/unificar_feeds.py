@@ -840,8 +840,12 @@ _NUM_EXTENSO = {
 }
 
 
+_TIPO_CANON = {'r': 'rua', 'av': 'avenida', 'al': 'alameda', 'pca': 'praca',
+               'rod': 'rodovia'}
+
+
 def _canon_rua(endereco):
-    """(logradouro canonico, numero) — ou (None, None) sem logradouro.
+    """(logradouro canonico, numero, tipo da via) — (None, None, "") sem rua.
 
     Canonico = palavras significativas, numeros por extenso convertidos,
     ORDENADAS. Assim "RUA DOS BANDEIRANTES" e "Rua Bandeirantes" viram a
@@ -849,23 +853,30 @@ def _canon_rua(endereco):
     """
     t = _normalizar(endereco)
     if not t:
-        return None, None
+        return None, None, ''
     m = re.search(r"(\d+)\s*$", t)
     numero = m.group(1) if m else ''
     corpo = t[:m.start()] if m else t
-    palavras = [_NUM_EXTENSO.get(p, p) for p in corpo.split()
+    partes = corpo.split()
+    # O tipo da via NAO entra na chave — "R. Ibijau" e "Avenida Ibijau"
+    # precisam se encontrar. Mas ele e devolvido a parte, porque quando
+    # difere a comparacao fica mais exigente (ver caracteristicas_compativeis).
+    tipo = _TIPO_CANON.get(partes[0], partes[0]) if partes and partes[0] in _STOP_RUA else ''
+    palavras = [_NUM_EXTENSO.get(p, p) for p in partes
                 if p and p not in _STOP_RUA]
     if not palavras:
-        return None, None
-    return ' '.join(sorted(palavras)), numero
+        return None, None, ''
+    return ' '.join(sorted(palavras)), numero, tipo
 
 
-def _area_m2(caracteristicas):
-    """Area em m2, arredondada. Trata decimal: o Nonstop manda "85.22".
+def _areas_m2(caracteristicas):
+    """AS DUAS areas (util e total), arredondadas, so as preenchidas.
 
-    O _so_digitos original transformava "85.22" em 8522 e a chave nunca
-    casava com o 85 do iList — 7 pares perdidos so por isso.
+    Devolve lista porque os dois sistemas invertem os campos no mesmo imovel.
+    Trata decimal: o Nonstop manda "85.22" e o _so_digitos original virava
+    8522, que nunca casava com o 85 do iList.
     """
+    achadas = []
     for chave in ("MEDIDAS|AREA_UTIL", "MEDIDAS|AREA_TOTAL"):
         bruto = (caracteristicas.get(chave) or '').strip().replace(',', '.')
         bruto = re.sub(r"[^\d.]", "", bruto)
@@ -876,8 +887,10 @@ def _area_m2(caracteristicas):
         except ValueError:
             continue
         if v > 0:
-            return int(round(v))
-    return 0
+            achadas.append(int(round(v)))
+    # tupla, nao lista: a chave de fato inteira e usada como chave de
+    # dicionario em fatos_carteira, e lista nao e hashavel.
+    return tuple(achadas)
 
 
 def _inteiro(texto):
@@ -893,17 +906,67 @@ def _inteiro(texto):
 TOLERANCIA_AREA = 3   # m2 — arredondamento entre os dois sistemas
 
 
-def achar_fato(por_fato, cf):
-    """Chave existente em por_fato que casa com cf, tolerando a area."""
+def indice_fato(cf):
+    """A chave do indice: endereco + preco. Caracteristicas ficam de fora."""
+    return cf[0] if cf else None
+
+
+def _areas_casam(a, b):
+    """Qualquer area de um lado batendo com qualquer area do outro.
+
+    Os dois sistemas invertem area util e area total no mesmo imovel
+    (343/227 de um lado, 227/343 do outro). Comparar so a "primeira" perdia
+    esses casos.
+    """
+    return bool(a) and bool(b) and any(
+        abs(x - y) <= TOLERANCIA_AREA for x in a for y in b)
+
+
+def caracteristicas_compativeis(cf_a, cf_b):
+    """True quando os dois blocos podem ser o MESMO imovel.
+
+    Basta UMA caracteristica concordar — area, quartos ou banheiros. E pouco
+    de proposito: entre iList e Nonstop os numeros divergem muito. O papel
+    aqui nao e provar identidade (o endereco e o preco ja fizeram isso), e
+    sim separar unidades diferentes do mesmo predio anunciadas pelo mesmo
+    preco, que e o unico engano possivel nesta altura.
+
+    EXCECAO — tipo da via diferente ("Rua" x "Avenida"): ai o endereco ja
+    esta divergindo, entao a regra aperta e exige area E banheiros iguais.
+    Decisao do Guilherme em 19/09, no caso "R. Ibijau, 229".
+    """
+    _, areas_a, quartos_a, banheiros_a, tipo_a = cf_a
+    _, areas_b, quartos_b, banheiros_b, tipo_b = cf_b
+
+    if tipo_a and tipo_b and tipo_a != tipo_b:
+        return _areas_casam(areas_a, areas_b) and banheiros_a == banheiros_b
+
+    return (_areas_casam(areas_a, areas_b)
+            or quartos_a == quartos_b
+            or banheiros_a == banheiros_b)
+
+
+def casar_fato(por_fato, cf, exceto=None):
+    """Acha na carteira o imovel que casa com cf.
+
+    Devolve (chave, posicao) ou None. Uma chave pode guardar VARIOS imoveis —
+    quatro apartamentos iguais no mesmo predio ao mesmo preco e caso real
+    (Rua Aurelia 358) — por isso a busca percorre os candidatos e devolve o
+    primeiro compativel, em vez de assumir que ha so um.
+
+    'exceto' ignora os imoveis de uma sucursal. E o que o cruzamento iList x
+    iList precisa: la o que interessa e achar copia de OUTRA sucursal, e as
+    unidades iguais da propria nao podem esconder essa copia por estarem
+    antes na lista.
+    """
     if not cf:
         return None
-    rua, area, quartos, preco = cf
-    for d in (0, -1, 1, -2, 2, -3, 3):
-        if abs(d) > TOLERANCIA_AREA:
+    k = indice_fato(cf)
+    for i, (dono, _, _, cf_outro) in enumerate(por_fato.get(k, ())):
+        if exceto is not None and dono == exceto:
             continue
-        k = (rua, area + d, quartos, preco)
-        if k in por_fato:
-            return k
+        if caracteristicas_compativeis(cf, cf_outro):
+            return k, i
     return None
 
 
@@ -924,19 +987,20 @@ def chave_de_fato(bloco):
 
     Devolve None quando falta dado — sem chave completa, nao se derruba nada.
     """
-    rua, numero = _canon_rua(campo("endereco", bloco))
-    if not rua:
+    rua, numero, tipo = _canon_rua(campo("endereco", bloco))
+    if not rua or not numero:
+        return None
+    preco = int(preco_de(bloco) or 0)
+    if not preco:
         return None
     c = {k.strip().upper(): v.strip() for k, v in RE_CARACTERISTICA.findall(bloco)}
-    area = _area_m2(c)
-    if not area:
-        return None
+    areas = _areas_m2(c)
     quartos = _inteiro(c.get("PRINCIPALES|QUARTO"))
-    preco = int(preco_de(bloco) or 0)
-    # Banheiros FICOU DE FORA de proposito: e o campo que mais diverge entre
-    # os dois sistemas (lavabo) e nao acrescenta identidade quando endereco,
-    # area, quartos e preco ja batem. Eram 30 duplicatas perdidas so por ele.
-    return (rua + '|' + numero, area, quartos, preco)
+    banheiros = _inteiro(c.get("PRINCIPALES|BANHEIRO"))
+    # A PRIMEIRA posicao e a chave do indice: endereco + preco. O resto viaja
+    # junto e so decide empate (ver caracteristicas_compativeis).
+    return (rua + '|' + numero + '|' + str(preco),
+            areas, quartos, banheiros, tipo)
 
 
 RE_BLOCO_REF = re.compile(r"(<codigoReferencia>)(.*?)(</codigoReferencia>)", re.S)
@@ -1148,7 +1212,11 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
     carteira = {}          # chave de codigo -> (sucursal, bloco)
     fatos_carteira = {}    # chave de fato   -> (sucursal, codigo)
     traducao = {}          # chave de codigo de QUALQUER copia -> codigo final
-    por_fato = {}          # chave de fato   -> (sucursal, codigo, chave)
+    # endereco+preco -> LISTA de (sucursal, codigo, chave, chave de fato).
+    # Lista, e nao um so: quatro apartamentos iguais no mesmo predio pelo
+    # mesmo preco e caso real (Rua Aurelia 358). Guardar so o primeiro fazia
+    # o segundo anuncio do Nonstop casar com o apartamento errado.
+    por_fato = {}
     sem_chave_fato = 0
     conflitos_ilist = 0
     conflitos_terceiro = 0
@@ -1177,10 +1245,11 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
             # apartamentos iguais no mesmo predio — o CRM deu codigos distintos
             # porque sao unidades distintas, e sao 17 casos hoje. Fundir isso
             # seria apagar imovel de verdade.
-            kf = achar_fato(por_fato, cf)
-            if kf and por_fato[kf][0] != nome:
+            achado = casar_fato(por_fato, cf, exceto=nome)
+            if achado:
+                kf, pos = achado
                 conflitos_ilist += 1
-                antigo_nome, antigo_codigo, antigo_chave = por_fato[kf]
+                antigo_nome, antigo_codigo, antigo_chave, _ = por_fato[kf][pos]
                 declarado = (dono_declarado(bloco)
                              or dono_declarado(carteira[antigo_chave][1]))
 
@@ -1190,7 +1259,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                     traducao[antigo_chave] = codigo
                     carteira[chave] = (nome, bloco)
                     traducao[chave] = codigo
-                    por_fato[kf] = por_fato[cf] = (nome, codigo, chave)
+                    por_fato[kf][pos] = (nome, codigo, chave, cf)
                     fatos_carteira[cf] = (nome, codigo)
                     print(f"  iList x iList: {antigo_codigo} ({antigo_nome}) cede para "
                           f"{codigo} ({nome}) — codigoImobiliaria aponta {declarado}")
@@ -1211,7 +1280,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                     carteira[antigo_chave] = (declarado, carteira[antigo_chave][1])
                     traducao[chave] = antigo_codigo
                     fatos_carteira[cf] = (declarado, antigo_codigo)
-                    por_fato[kf] = por_fato[cf] = (declarado, antigo_codigo, antigo_chave)
+                    por_fato[kf][pos] = (declarado, antigo_codigo, antigo_chave, cf)
                     print(f"  iList x iList: {codigo} ({nome}) e {antigo_codigo} "
                           f"({antigo_nome}) — o codigoImobiliaria aponta "
                           f"{declarado}; fica com ela")
@@ -1227,7 +1296,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                     carteira[antigo_chave] = (DONO_ROLETA, carteira[antigo_chave][1])
                     traducao[chave] = antigo_codigo
                     fatos_carteira[cf] = (DONO_ROLETA, antigo_codigo)
-                    por_fato[kf] = por_fato[cf] = (DONO_ROLETA, antigo_codigo, antigo_chave)
+                    por_fato[kf][pos] = (DONO_ROLETA, antigo_codigo, antigo_chave, cf)
                     quem = declarado or "imobiliaria de fora"
                     print(f"  iList x iList: {codigo} ({nome}) e {antigo_codigo} "
                           f"({antigo_nome}) — nenhuma das duas e a dona "
@@ -1237,10 +1306,12 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
             carteira[chave] = (nome, bloco)
             traducao[chave] = codigo
             if cf:
-                # setdefault: apartamentos iguais na mesma sucursal nao
-                # sobrescrevem o primeiro, que e quem representa o predio no
-                # cruzamento com o Nonstop.
-                por_fato.setdefault(cf, (nome, codigo, chave))
+                # append, e nao setdefault: apartamentos iguais na mesma
+                # sucursal sao imoveis diferentes e cada um entra no indice.
+                # Quem casa com o anuncio do Nonstop e decidido depois, pelas
+                # caracteristicas (ver casar_fato).
+                por_fato.setdefault(indice_fato(cf), []).append(
+                    (nome, codigo, chave, cf))
                 fatos_carteira.setdefault(cf, (nome, codigo))
             else:
                 sem_chave_fato += 1
@@ -1277,8 +1348,9 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                 derrubados_codigo += 1
                 continue
             cf = chave_de_fato(bloco)
-            kf = achar_fato(por_fato, cf)
-            if kf:
+            achado = casar_fato(por_fato, cf)
+            if achado:
+                kf, pos = achado
                 # O imovel ja esta na carteira via iList. Tres situacoes:
                 #
                 #  a) MESMA sucursal publicando pelos dois sistemas: o iList
@@ -1288,7 +1360,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                 #  c) OUTRA sucursal, e nenhuma das duas e a dona (imovel de
                 #     terceiro ou de uma quarta unidade RE/MAX): ninguem
                 #     captou, entao vai para a ROLETA.
-                dono_ilist, codigo_ilist, chave_ilist = por_fato[kf]
+                dono_ilist, codigo_ilist, chave_ilist, cf_ilist = por_fato[kf][pos]
                 traducao[chave] = codigo_ilist
                 derrubados_fato += 1
 
@@ -1315,7 +1387,8 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                         carteira[chave_ilist] = (novo_dono,
                                                  carteira[chave_ilist][1])
                         fatos_carteira[cf] = (novo_dono, codigo_ilist)
-                        por_fato[kf] = (novo_dono, codigo_ilist, chave_ilist)
+                        por_fato[kf][pos] = (novo_dono, codigo_ilist,
+                                             chave_ilist, cf_ilist)
                 continue
             if chave in roleta:
                 repetidos += 1     # mesmo imovel no Nonstop de outra sucursal
