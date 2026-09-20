@@ -19,6 +19,29 @@ function fone(n: string) {
     ? `(${ddd}) ${r.slice(0, 5)}-${r.slice(5)}`
     : `(${ddd}) ${r.slice(0, 4)}-${r.slice(4)}`;
 }
+// A notificação de lançamento do IPTU mostra o CPF do contribuinte com parte
+// dos dígitos escondida (ex.: ***.456.789-**). Como a lista daqui traz o CPF
+// inteiro, dá para cruzar e descobrir em nome de quem está o IPTU — de graça,
+// sem a consulta paga. E é um sinal bem mais forte de propriedade que o
+// vínculo cadastral de endereço.
+//
+// A comparação é por POSIÇÃO e aceita qualquer máscara: tudo que não é dígito
+// vira curinga. Assim funciona com *, x, # ou espaço, sem precisar saber de
+// antemão como a prefeitura escondeu.
+export function padraoDoIptu(mascara: string): string | null {
+  const bruto = mascara.replace(/[.\-\s/]/g, '');
+  if (bruto.length !== 11) return null;
+  return bruto.replace(/\D/g, '?');
+}
+
+export function bateComIptu(cpf: string, padrao: string | null): boolean {
+  if (!padrao || cpf.length !== 11) return false;
+  for (let i = 0; i < 11; i++) {
+    if (padrao[i] !== '?' && padrao[i] !== cpf[i]) return false;
+  }
+  return true;
+}
+
 function dataBr(s: string) {
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? `${m[3]}/${m[2]}/${m[1]}` : s;
@@ -28,7 +51,7 @@ const CAMPOS = [
   ['cep', 'CEP', '01310-100', 'sm:col-span-2'],
   ['rua', 'Rua', 'Avenida Paulista', 'sm:col-span-4'],
   ['numero', 'Número', '1000', 'sm:col-span-2'],
-  ['unidade', 'Unidade', '44', 'sm:col-span-2'],
+  ['unidade', 'Unidade', '44 — vazio traz o prédio', 'sm:col-span-2'],
   ['bairro', 'Bairro', 'Bela Vista', 'sm:col-span-2'],
   ['cidade', 'Cidade', 'São Paulo', 'sm:col-span-4'],
   ['uf', 'UF', 'SP', 'sm:col-span-2'],
@@ -57,6 +80,11 @@ export default function BuscaUnidade() {
   const [erro, setErro] = useState('');
   const [res, setRes] = useState<ResultadoUnidade | null>(null);
   const [contatos, setContatos] = useState<Record<string, Contato>>({});
+  // Fica FORA do `form`: é conferência local, nunca vai para a DirectD.
+  const [iptu, setIptu] = useState('');
+
+  const padraoIptu = padraoDoIptu(iptu);
+  const iptuInvalido = iptu.trim().length > 0 && padraoIptu === null;
 
   function mudar(k: Campo, v: string) {
     setForm((f) => ({ ...f, [k]: v }));
@@ -112,6 +140,27 @@ export default function BuscaUnidade() {
           ))}
         </div>
 
+        <div className="mt-4 border-t border-slate-200 pt-4">
+          <label
+            htmlFor="iptu"
+            className="block text-xs font-semibold uppercase tracking-wide text-slate-500"
+          >
+            CPF na notificação do IPTU (opcional)
+          </label>
+          <input
+            id="iptu"
+            value={iptu}
+            placeholder="***.456.789-**  — como aparece na notificação"
+            onChange={(e) => setIptu(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200 sm:max-w-sm"
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            {iptuInvalido
+              ? 'Precisa ter 11 posições contando os dígitos escondidos — copie do jeito que está na notificação.'
+              : 'Cole com os asteriscos. Quem bater é quem está no IPTU — e isso não consome saldo.'}
+          </p>
+        </div>
+
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
             onClick={procurar}
@@ -120,7 +169,9 @@ export default function BuscaUnidade() {
           >
             {buscando ? 'Procurando…' : 'Procurar'}
           </button>
-          <span className="text-sm text-slate-500">Esta busca não consome saldo.</span>
+          <span className="text-sm text-slate-500">
+            Esta busca não consome saldo. Sem a unidade, traz o condomínio inteiro.
+          </span>
         </div>
       </div>
 
@@ -136,7 +187,7 @@ export default function BuscaUnidade() {
           className="mt-4 rounded-2xl border border-slate-200 p-5 text-sm shadow-sm"
         >
           <b className="text-slate-900">
-            Ninguém consta ligado a {res.unidade} neste endereço.
+            Ninguém consta ligado a {res.predioInteiro ? 'este endereço' : res.unidade}.
           </b>
           <p className="mt-1 text-slate-600">
             Vale conferir a grafia do endereço e o CEP.
@@ -150,18 +201,44 @@ export default function BuscaUnidade() {
           className="mt-4 rounded-2xl border border-slate-200 p-5 shadow-sm"
         >
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            {res.unidade} · {res.quantidade} {res.quantidade === 1 ? 'pessoa' : 'pessoas'}
+            {res.predioInteiro ? 'Prédio inteiro' : res.unidade} · {res.quantidade}{' '}
+            {res.quantidade === 1 ? 'pessoa' : 'pessoas'}
           </p>
 
+          {res.predioInteiro && (
+            <p className="mt-1 text-xs leading-relaxed text-slate-500">
+              Busca sem complemento: são todas as pessoas ligadas ao endereço. A base não
+              devolve o apartamento de cada uma — para saber a unidade, repita a busca
+              preenchendo o campo.
+            </p>
+          )}
+
+          {res.totalNaBase > res.quantidade + res.descartadosPorPrefixo && (
+            <p className="mt-1 text-xs leading-relaxed text-amber-700">
+              A DirectD diz ter encontrado {res.totalNaBase} pessoas neste filtro, mas
+              devolveu {res.quantidade + res.descartadosPorPrefixo}. A lista abaixo pode
+              estar incompleta — vale estreitar o endereço.
+            </p>
+          )}
+
+          {padraoIptu && <AvisoIptu pessoas={res.pessoas} padrao={padraoIptu} />}
+
           <ul className="mt-2 divide-y divide-slate-200">
-            {res.pessoas.map((p) => (
-              <Pessoa
-                key={p.cpf}
-                pessoa={p}
-                contato={contatos[p.cpf]}
-                aoAchar={(c) => setContatos((m) => ({ ...m, [p.cpf]: c }))}
-              />
-            ))}
+            {[...res.pessoas]
+              .sort(
+                (a, b) =>
+                  Number(bateComIptu(b.cpf, padraoIptu)) -
+                  Number(bateComIptu(a.cpf, padraoIptu))
+              )
+              .map((p) => (
+                <Pessoa
+                  key={p.cpf}
+                  pessoa={p}
+                  contato={contatos[p.cpf]}
+                  noIptu={bateComIptu(p.cpf, padraoIptu)}
+                  aoAchar={(c) => setContatos((m) => ({ ...m, [p.cpf]: c }))}
+                />
+              ))}
           </ul>
 
           {res.descartadosPorPrefixo > 0 && (
@@ -177,13 +254,44 @@ export default function BuscaUnidade() {
   );
 }
 
+function AvisoIptu({ pessoas, padrao }: { pessoas: PessoaNaUnidade[]; padrao: string }) {
+  const batem = pessoas.filter((p) => bateComIptu(p.cpf, padrao));
+  const conhecidos = padrao.split('').filter((c) => c !== '?').length;
+
+  if (batem.length === 0) {
+    return (
+      <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
+        Nenhum CPF da lista bate com o da notificação do IPTU. O contribuinte do IPTU não
+        está entre as pessoas que a base liga a este endereço — pode ser espólio, empresa,
+        ou alguém que nunca constou aqui.
+      </p>
+    );
+  }
+  if (batem.length > 1) {
+    return (
+      <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
+        {batem.length} pessoas batem com a máscara do IPTU — ela mostra só {conhecidos}{' '}
+        dígitos, e isso não chega para distinguir. Confira também o nome na notificação.
+      </p>
+    );
+  }
+  return (
+    <p className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs leading-relaxed text-emerald-900">
+      O IPTU está no CPF de <b>{batem[0].nome}</b>. Confere com o nome que aparece na
+      notificação antes de usar.
+    </p>
+  );
+}
+
 function Pessoa({
   pessoa,
   contato,
+  noIptu,
   aoAchar,
 }: {
   pessoa: PessoaNaUnidade;
   contato?: Contato;
+  noIptu?: boolean;
   aoAchar: (c: Contato) => void;
 }) {
   // Dois toques antes de gastar: o primeiro arma, o segundo cobra, e desarma
@@ -213,7 +321,14 @@ function Pessoa({
 
   return (
     <li className="py-4">
-      <p className="font-semibold text-slate-900">{pessoa.nome}</p>
+      <p className="font-semibold text-slate-900">
+        {pessoa.nome}
+        {noIptu && (
+          <span className="ml-2 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+            bate com o IPTU
+          </span>
+        )}
+      </p>
       <p className="mt-0.5 text-sm text-slate-500">
         {cpfCurto(pessoa.cpf)}
         {pessoa.nascimento && ` · nasc. ${dataBr(pessoa.nascimento)}`}

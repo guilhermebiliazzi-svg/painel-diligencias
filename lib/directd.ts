@@ -39,9 +39,13 @@ export type PessoaNaUnidade = {
 
 export type ResultadoUnidade = {
   unidade: string;
+  /** true quando veio sem complemento: a lista é o condomínio inteiro. */
+  predioInteiro: boolean;
   quantidade: number;
   pessoas: PessoaNaUnidade[];
   descartadosPorPrefixo: number;
+  /** numberOfPeople que a DirectD diz ter achado — pode ser maior que a lista. */
+  totalNaBase: number;
 };
 
 export type Contato = {
@@ -98,7 +102,6 @@ function conferirResposta(r: Response, texto: string) {
  */
 export function montarConsultas(endereco: Endereco, unidade: string) {
   const d = digitos(unidade);
-  if (!d) throw new ErroDirectD('Informe a unidade (só o número, ex.: "44").');
 
   const base: Record<string, string> = {
     postalCode: digitos(endereco.cep),
@@ -113,6 +116,17 @@ export function montarConsultas(endereco: Endereco, unidade: string) {
     throw new ErroDirectD('Informe ao menos um campo de endereço (CEP, ou rua e número).');
   }
 
+  // Sem unidade: uma consulta só, sem `complement`. A base devolve todo mundo
+  // ligado ao endereço — o condomínio inteiro. Não há prefixo, logo não há o
+  // que subtrair, e as 11 chamadas viram 1.
+  if (!d) {
+    return {
+      alvo: '',
+      predioInteiro: true,
+      consultas: [{ papel: 'alvo' as const, corpo: base }],
+    };
+  }
+
   const alvo = PREFIXO + d;
   const consultas: { papel: 'alvo' | 'ruido'; corpo: Record<string, string> }[] = [
     { papel: 'alvo', corpo: { ...base, complement: alvo } },
@@ -120,7 +134,7 @@ export function montarConsultas(endereco: Endereco, unidade: string) {
   for (let i = 0; i <= 9; i++) {
     consultas.push({ papel: 'ruido', corpo: { ...base, complement: alvo + i } });
   }
-  return { alvo, consultas };
+  return { alvo, predioInteiro: false, consultas };
 }
 
 /** Etapa GRATUITA. Quem consta ligado à unidade. */
@@ -129,7 +143,7 @@ export async function pessoasNaUnidade(
   unidade: string
 ): Promise<ResultadoUnidade> {
   const t = token();
-  const { alvo, consultas } = montarConsultas(endereco, unidade);
+  const { alvo, predioInteiro, consultas } = montarConsultas(endereco, unidade);
 
   // As 11 vão em paralelo: em série seriam 11 idas e voltas e a tela ficaria
   // pensando por dezenas de segundos.
@@ -143,7 +157,10 @@ export async function pessoasNaUnidade(
       const texto = await r.text();
       conferirResposta(r, texto);
       try {
-        return JSON.parse(texto) as { listFilters?: Record<string, unknown>[] };
+        return JSON.parse(texto) as {
+          listFilters?: Record<string, unknown>[];
+          numberOfPeople?: number;
+        };
       } catch {
         throw new ErroDirectD('A DirectD devolveu algo que não é JSON.');
       }
@@ -177,8 +194,12 @@ export async function pessoasNaUnidade(
 
   return {
     unidade: alvo,
+    predioInteiro,
     quantidade: naUnidade.length,
     pessoas: naUnidade,
+    // Se a DirectD diz ter achado mais gente do que veio na lista, a tela avisa
+    // em vez de deixar o corretor achar que aquilo é o prédio todo.
+    totalNaBase: Number(respostas[0]?.numberOfPeople ?? naUnidade.length),
     // A subtração erra num caso: alguém ligado ao Ap 4 E ao Ap 40 (mudou de
     // unidade no mesmo prédio) sai da lista. Raro, mas sumiria sem avisar — por
     // isso o número vai para a tela.
