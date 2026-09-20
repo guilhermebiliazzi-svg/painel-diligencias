@@ -12,7 +12,7 @@ export default async function Usuarios() {
   const sb = supabaseAdmin();
   const { data } = await sb
     .from('perfis')
-    .select('email,nome,is_admin,ativo,pode_diligencias,pode_cobrancas,pode_repasse,pode_notas,pode_pagamentos')
+    .select('email,nome,is_admin,ativo,pode_diligencias,pode_cobrancas,pode_repasse,pode_notas,pode_pagamentos,pode_captacao')
     .order('email');
   const lista = (data ?? []) as Perfil[];
 

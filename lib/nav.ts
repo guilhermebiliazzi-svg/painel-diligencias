@@ -1,9 +1,9 @@
 // Config das telas do hub. Como tudo está no mesmo app, os links apontam
 // para as rotas internas. Uma env opcional (PAINEL_URL_*) pode sobrescrever.
 
-export type IconeNav = 'diligencias' | 'cobrancas' | 'repasse' | 'notas' | 'usuarios' | 'locador' | 'mais';
+export type IconeNav = 'diligencias' | 'cobrancas' | 'repasse' | 'notas' | 'usuarios' | 'locador' | 'captacao' | 'mais';
 export type Cor = 'blue' | 'emerald' | 'violet' | 'amber' | 'slate';
-export type PermKey = 'pode_diligencias' | 'pode_cobrancas' | 'pode_repasse' | 'pode_notas' | 'pode_pagamentos';
+export type PermKey = 'pode_diligencias' | 'pode_cobrancas' | 'pode_repasse' | 'pode_notas' | 'pode_pagamentos' | 'pode_captacao';
 
 export type ItemNav = {
   chave: string; titulo: string; descricao: string; href: string;
@@ -30,6 +30,7 @@ export function getNav(): ItemNav[] {
     item('repasse', 'Repasse', 'Repasses aos locadores e conciliação de valores.', 'PAINEL_URL_REPASSE', '/repasses', 'repasse', 'emerald', 'pode_repasse'),
     item('notas', 'Notas', 'Emissão e conciliação de NFS-e da administração.', 'PAINEL_URL_NOTAS', '/notas', 'notas', 'violet', 'pode_notas'),
     item('notas-comissao', 'Notas de comissão', 'NFS-e de corretagem sobre os recebimentos do Asaas e notas avulsas.', 'PAINEL_URL_NOTAS_COMISSAO', '/notas-comissao', 'notas', 'violet', 'pode_notas'),
+    item('captacao', 'Captação', 'Quem consta ligado a uma unidade, e como falar com a pessoa.', 'PAINEL_URL_CAPTACAO', '/captacao', 'captacao', 'blue', 'pode_captacao'),
     item('pagamentos', 'Pagamentos', 'Pagar boletos da imobiliária (IPTU/condomínio) pelo Banco Inter.', 'PAINEL_URL_PAGAMENTOS', '/pagamentos', 'cobrancas', 'slate', 'pode_pagamentos'),
   ];
 }

@@ -10,6 +10,7 @@ const TELAS = [
   ['pode_repasse', 'Repasse'],
   ['pode_notas', 'Notas'],
   ['pode_pagamentos', 'Pagamentos'],
+  ['pode_captacao', 'Captação'],
 ] as const;
 
 type TelaKey = (typeof TELAS)[number][0];

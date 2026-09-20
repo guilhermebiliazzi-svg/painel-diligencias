@@ -35,6 +35,9 @@ function Icone({ nome }: { nome: IconeNav }) {
       return (<svg {...common}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>);
     case 'locador':
       return (<svg {...common}><path d="M3 21h18" /><path d="M5 21V7l8-4v18" /><path d="M19 21V11l-6-4" /><line x1="9" y1="9" x2="9" y2="9" /><line x1="9" y1="13" x2="9" y2="13" /><line x1="9" y1="17" x2="9" y2="17" /></svg>);
+    case 'captacao':
+      // Lupa sobre um prédio: procurar quem está numa unidade.
+      return (<svg {...common}><path d="M3 21h8" /><path d="M5 21V5l7-3v9" /><line x1="8" y1="8" x2="8" y2="8" /><line x1="8" y1="12" x2="8" y2="12" /><circle cx="17" cy="14" r="4" /><line x1="20" y1="17" x2="22.5" y2="19.5" /></svg>);
     case 'mais':
       return (<svg {...common}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>);
   }
