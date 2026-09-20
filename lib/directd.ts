@@ -18,9 +18,14 @@
 // "consta ligado a esta unidade", nunca "o proprietário é".
 
 const APIV3 = (process.env.DIRECTD_BASE || 'https://apiv3.directd.com.br').replace(/\/+$/, '');
-// O manual da Pesquisa Avançada deixa a base como {base-url-directdata}: é a
-// única parte do contrato que ele não fecha, por isso fica trocável por env.
-const AVANCADA = (process.env.DIRECTD_BASE_AVANCADA || APIV3).replace(/\/+$/, '');
+// O manual da Pesquisa Avançada deixa a base como {base-url-directdata}.
+// Descoberta em 20/09 lendo o bundle do painel da DirectD e confirmada pelo
+// contraste: api.app.directd.com.br responde 405 (rota existe, só aceita POST)
+// e apiv3.directd.com.br responde 404 (rota não existe lá). Fica em env para o
+// caso de mudarem.
+const AVANCADA = (
+  process.env.DIRECTD_BASE_AVANCADA || 'https://api.app.directd.com.br'
+).replace(/\/+$/, '');
 // Grafia que a base guarda — testado em 20/09. Não é "APTO 44" nem o número solto.
 const PREFIXO = process.env.DIRECTD_PREFIXO_UNIDADE ?? 'Ap ';
 
@@ -82,6 +87,11 @@ async function comPrazo(url: string, init: RequestInit): Promise<Response> {
 }
 
 function conferirResposta(r: Response, texto: string) {
+  // 404 no filtro é "nenhum resultado", não rota errada: é assim que o próprio
+  // painel da DirectD responde uma busca que não achou ninguém (conferido em
+  // 20/09 no app.directd.com.br). Quem trata isso como erro mostra
+  // "HTTP 404" para o corretor em vez de "ninguém encontrado".
+  if (r.status === 404) return;
   if (r.status === 401) throw new ErroDirectD('A DirectD recusou o token (401). Confira DIRECTD_TOKEN.');
   if (r.status === 403) {
     throw new ErroDirectD(
@@ -156,6 +166,7 @@ export async function pessoasNaUnidade(
       });
       const texto = await r.text();
       conferirResposta(r, texto);
+      if (r.status === 404) return { listFilters: [], numberOfPeople: 0 };
       try {
         return JSON.parse(texto) as {
           listFilters?: Record<string, unknown>[];
@@ -223,6 +234,9 @@ export async function contatoPorCpf(cpfEntrada: string): Promise<Contato> {
   const url = `${APIV3}/api/CadastroPessoaFisicaPlus?CPF=${cpf}&TOKEN=${encodeURIComponent(t)}`;
   const r = await comPrazo(url, { method: 'GET' });
   const texto = await r.text();
+  if (r.status === 404) {
+    throw new ErroDirectD('A DirectD não localizou este CPF.');
+  }
   conferirResposta(r, texto);
 
   let corpo: Record<string, unknown>;
