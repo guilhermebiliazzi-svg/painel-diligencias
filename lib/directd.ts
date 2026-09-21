@@ -183,14 +183,17 @@ export async function pessoasNaUnidade(
 
   respostas.forEach((resposta, i) => {
     for (const p of resposta.listFilters ?? []) {
-      const cpf = digitos(p.cpf);
-      if (!cpf) continue;
+      // A chave de identidade é o `id`, NÃO o CPF: a DirectD devolve o CPF
+      // mascarado (6 dígitos, conferido em 20/09), e dois vizinhos podem
+      // coincidir nesses seis. Deduplicar por CPF fundiria pessoas diferentes.
+      const chave = String(p.id ?? '') || digitos(p.cpf);
+      if (!chave) continue;
       if (consultas[i].papel === 'ruido') {
-        ruido.add(cpf);
+        ruido.add(chave);
         continue;
       }
-      pessoas.set(cpf, {
-        cpf,
+      pessoas.set(chave, {
+        cpf: digitos(p.cpf),
         nome: String(p.fullName ?? '').trim(),
         nomeMae: String(p.motherName ?? '').trim(),
         nascimento: String(p.dateOfBirth ?? '').trim(),
@@ -199,8 +202,9 @@ export async function pessoasNaUnidade(
     }
   });
 
-  const naUnidade = [...pessoas.values()]
-    .filter((p) => !ruido.has(p.cpf))
+  const naUnidade = [...pessoas.entries()]
+    .filter(([chave]) => !ruido.has(chave))
+    .map(([, p]) => p)
     .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 
   return {

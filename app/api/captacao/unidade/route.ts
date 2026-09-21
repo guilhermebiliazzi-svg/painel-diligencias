@@ -4,6 +4,9 @@ import { getSessaoPerfil } from '@/lib/perfil';
 import { pessoasNaUnidade, ErroDirectD, type Endereco } from '@/lib/directd';
 
 export const dynamic = 'force-dynamic';
+// As 11 chamadas à DirectD levaram 37 s numa medição real (20/09). O padrão
+// da Vercel é bem menor que isso e a função morreria no meio, sem erro claro.
+export const maxDuration = 60;
 
 export async function POST(req: Request) {
   // Route handler não pode usar exigirPerfil(): redirect() aqui viraria uma
