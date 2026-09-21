@@ -2,188 +2,35 @@
 
 import { useState } from 'react';
 import type { Contato, PessoaNaUnidade, ResultadoUnidade } from '@/lib/directd';
+import type { PredioIptu } from '@/lib/iptu';
+import TabelaPredio from './predio';
+import { Pessoa, pedir } from './pessoa';
+import {
+  bateComIptu,
+  bateComNome,
+  ehNome,
+  montarCpf,
+  padraoDoIptu,
+} from './cruzamento';
 
-// A DirectD devolve os SEIS DÍGITOS DO MEIO (posições 4 a 9). Mostrar cru
-// confunde; mostrar na posição certa deixa claro o que se tem e o que falta.
-function cpfParcial(c: string) {
-  if (c.length === 6) return `***.${c.slice(0, 3)}.${c.slice(3)}-**`;
-  if (c.length === 11) return `${c.slice(0, 3)}.***.***-${c.slice(9)}`;
-  return c;
-}
-function cpfCheio(c: string) {
-  return c.length === 11 ? `${c.slice(0, 3)}.${c.slice(3, 6)}.${c.slice(6, 9)}-${c.slice(9)}` : c;
-}
-function fone(n: string) {
-  const ddd = n.slice(0, 2);
-  const r = n.slice(2);
-  return r.length === 9
-    ? `(${ddd}) ${r.slice(0, 5)}-${r.slice(5)}`
-    : `(${ddd}) ${r.slice(0, 4)}-${r.slice(4)}`;
-}
-// A notificação de lançamento do IPTU mostra o CPF do contribuinte com parte
-// dos dígitos escondida (ex.: ***.456.789-**). Como a lista daqui traz o CPF
-// inteiro, dá para cruzar e descobrir em nome de quem está o IPTU — de graça,
-// sem a consulta paga. E é um sinal bem mais forte de propriedade que o
-// vínculo cadastral de endereço.
-//
-// A comparação é por POSIÇÃO e aceita qualquer máscara: tudo que não é dígito
-// vira curinga. Assim funciona com *, x, # ou espaço, sem precisar saber de
-// antemão como a prefeitura escondeu.
-export function padraoDoIptu(entrada: string): string | null {
-  const bruto = entrada.replace(/[.\-\s/]/g, '');
-  if (!bruto) return null;
+// As regras puras moraram aqui e agora vivem em ./cruzamento. O reexport
+// mantém `import { … } from './busca'` funcionando para quem já usava.
+export {
+  bateComIptu,
+  bateComNome,
+  conferirReconstrucao,
+  digitosVerificadores,
+  ehNome,
+  montarCpf,
+  padraoDoIptu,
+} from './cruzamento';
 
-  // Máscara completa, do jeito que a notificação mostra: ***.456.789-**
-  if (bruto.length === 11) return bruto.replace(/\D/g, '?');
-
-  // Só os primeiros dígitos, que é o que a certidão de dados cadastrais
-  // entrega (ex.: "701"). Vira prefixo: 701????????.
-  if (bruto.length < 11 && /^\d+$/.test(bruto)) {
-    return bruto + '?'.repeat(11 - bruto.length);
-  }
-
-  return null;
-}
-
-// A DirectD devolve os SEIS DÍGITOS DO MEIO do CPF (posições 4 a 9) e a
-// certidão do IPTU mostra os TRÊS PRIMEIROS (posições 1 a 3). Os conjuntos não
-// se tocam — cruzar número com número é impossível entre essas duas fontes.
-// Por isso o campo também aceita NOME: a certidão costuma trazer o nome do
-// contribuinte, e a lista daqui traz o nome inteiro.
-/**
- * Os dois últimos dígitos do CPF não são informação: são CALCULADOS dos nove
- * primeiros. Então a certidão (posições 1 a 3) e a DirectD (posições 4 a 9)
- * juntas fecham o CPF inteiro, sem chute.
- */
-export function digitosVerificadores(nove: string): string | null {
-  if (!/^\d{9}$/.test(nove)) return null;
-  const dv = (base: string) => {
-    const peso0 = base.length + 1;
-    const soma = base.split('').reduce((t, d, i) => t + Number(d) * (peso0 - i), 0);
-    const r = (soma * 10) % 11;
-    return String(r === 10 ? 0 : r);
-  };
-  const d10 = dv(nove);
-  return d10 + dv(nove + d10);
-}
-
-/** Prefixo da certidão (3) + miolo da DirectD (6) -> CPF completo (11). */
-export function montarCpf(prefixo: string, miolo: string): string | null {
-  const p = prefixo.replace(/\D/g, '');
-  const m = miolo.replace(/\D/g, '');
-  if (p.length !== 3 || m.length !== 6) return null;
-  const dvs = digitosVerificadores(p + m);
-  return dvs ? p + m + dvs : null;
-}
-
-/**
- * Confere se o CPF reconstruído é MESMO daquela pessoa.
- *
- * Isto é o coração do método. Montar prefixo + miolo sempre produz um CPF
- * válido — os verificadores eu calculo, não observo —, então validade não
- * prova nada. Quem prova é a consulta: o filtro já deu de graça o nome, o ano
- * de nascimento e um pedaço do nome da mãe, mascarados; a consulta por CPF
- * devolve os três sem máscara. Três sinais independentes batendo é confirmação;
- * um divergindo já descarta.
- */
-export function conferirReconstrucao(
-  pessoa: { nome: string; nomeMae: string; nascimento: string },
-  contato: { nome: string; nomeMae: string; nascimento: string }
-): { veredito: 'confirma' | 'nega' | 'insuficiente'; sinais: string[] } {
-  const limpo = (t: string) =>
-    t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z ]+/g, ' ')
-      .replace(/\s+/g, ' ').trim();
-  const ano = (t: string) => (t.match(/(\d{4})/) || [])[1] || '';
-
-  const sinais: string[] = [];
-  let confere = 0;
-  let nega = 0;
-
-  if (pessoa.nome && contato.nome) {
-    // O filtro às vezes devolve o nome cortado ("SERGIO EDU****"): nesse caso
-    // basta o começo bater, senão a comparação inteira acusaria diferença.
-    const cortado = /[*#]/.test(pessoa.nome);
-    const esq = limpo(cortado ? pessoa.nome.split(/[*#]/)[0] : pessoa.nome);
-    const dir = limpo(contato.nome);
-    const bate = esq ? (cortado ? dir.startsWith(esq) : esq === dir) : false;
-    if (esq) {
-      sinais.push(bate ? 'nome confere' : 'nome diferente');
-      if (bate) confere++;
-      else nega++;
-    }
-  }
-  const a1 = ano(pessoa.nascimento), a2 = ano(contato.nascimento);
-  if (a1 && a2) {
-    const bate = a1 === a2;
-    sinais.push(bate ? 'ano de nascimento confere' : 'ano de nascimento diferente');
-    if (bate) confere++;
-    else nega++;
-  }
-  // O nome da mãe vem parcialmente escondido no filtro: compara só as palavras
-  // que apareceram inteiras.
-  const palavras = limpo(pessoa.nomeMae).split(' ').filter((w) => w.length > 2);
-  if (palavras.length && contato.nomeMae) {
-    const mae = limpo(contato.nomeMae);
-    const bate = palavras.every((w) => mae.includes(w));
-    sinais.push(bate ? 'nome da mãe confere' : 'nome da mãe diferente');
-    if (bate) confere++;
-    else nega++;
-  }
-
-  if (nega > 0) return { veredito: 'nega', sinais };
-  if (confere >= 2) return { veredito: 'confirma', sinais };
-  return { veredito: 'insuficiente', sinais };
-}
-
-export function ehNome(entrada: string): boolean {
-  return /[a-zA-ZÀ-ÿ]/.test(entrada);
-}
-
-function normalizar(t: string): string {
-  return t
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toUpperCase()
-    .replace(/[^A-Z ]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/**
- * Compara o nome da certidão com o nome da lista. Aceita nome mascarado
- * ("SERGIO EDU****"): os asteriscos viram fim de prefixo, e basta o começo
- * bater. Sem máscara, exige que cada palavra informada apareça no nome.
- */
-export function bateComNome(nomeDaLista: string, entrada: string): boolean {
-  const alvo = normalizar(nomeDaLista);
-  if (!alvo) return false;
-
-  const mascarado = /[*#]/.test(entrada);
-  const busca = normalizar(entrada.split(/[*#]/)[0]);
-  if (!busca) return false;
-
-  if (mascarado) return alvo.startsWith(busca);
-  return busca.split(' ').every((palavra) => alvo.split(' ').includes(palavra));
-}
-
-export function bateComIptu(cpf: string, padrao: string | null): boolean {
-  if (!padrao || cpf.length !== 11) return false;
-  for (let i = 0; i < 11; i++) {
-    if (padrao[i] !== '?' && padrao[i] !== cpf[i]) return false;
-  }
-  return true;
-}
-
-function dataBr(s: string) {
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : s;
-}
 
 const CAMPOS = [
   ['cep', 'CEP', '01310-100', 'sm:col-span-2'],
   ['rua', 'Rua', 'Avenida Paulista', 'sm:col-span-4'],
   ['numero', 'Número', '1000', 'sm:col-span-2'],
-  ['unidade', 'Unidade', '44 — vazio traz o prédio', 'sm:col-span-2'],
+  ['unidade', 'Unidade', '44 — vazio monta a tabela do prédio', 'sm:col-span-2'],
   ['bairro', 'Bairro', 'Bela Vista', 'sm:col-span-2'],
   ['cidade', 'Cidade', 'São Paulo', 'sm:col-span-4'],
   ['uf', 'UF', 'SP', 'sm:col-span-2'],
@@ -195,22 +42,12 @@ const VAZIO: Record<Campo, string> = {
   cep: '', rua: '', numero: '', unidade: '', bairro: '', cidade: '', uf: '',
 };
 
-async function pedir<T>(rota: string, corpo: unknown): Promise<T> {
-  const r = await fetch(rota, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(corpo),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.erro || `HTTP ${r.status}`);
-  return j as T;
-}
-
 export default function BuscaUnidade() {
   const [form, setForm] = useState<Record<Campo, string>>(VAZIO);
   const [buscando, setBuscando] = useState(false);
   const [erro, setErro] = useState('');
   const [res, setRes] = useState<ResultadoUnidade | null>(null);
+  const [predio, setPredio] = useState<PredioIptu | null>(null);
   const [contatos, setContatos] = useState<Record<string, Contato>>({});
   // Fica FORA do `form`: é conferência local, nunca vai para a DirectD.
   const [iptu, setIptu] = useState('');
@@ -232,9 +69,27 @@ export default function BuscaUnidade() {
   async function procurar() {
     setErro('');
     setRes(null);
+    setPredio(null);
     setContatos({});
     setBuscando(true);
     try {
+      // Sem unidade, o caminho é a TABELA DO PRÉDIO: o cadastro do IPTU diz
+      // quais apartamentos existem e qual o SQL de cada um — coisa que a
+      // DirectD não sabe. A consulta de morador vira uma linha de cada vez.
+      if (!form.unidade.trim()) {
+        const r = await pedir<{ achou: boolean; predio?: PredioIptu }>(
+          '/api/captacao/predio',
+          { cep: form.cep, numero: form.numero }
+        );
+        if (r.achou && r.predio) {
+          setPredio(r.predio);
+          return;
+        }
+        // O prédio não está no cadastro (ou é imóvel fora de SP): cai no
+        // comportamento antigo, que lista todo mundo ligado ao endereço.
+        setRes(await pedir<ResultadoUnidade>('/api/captacao/unidade', form));
+        return;
+      }
       setRes(await pedir<ResultadoUnidade>('/api/captacao/unidade', form));
     } catch (e) {
       setErro(e instanceof Error ? e.message : String(e));
@@ -309,7 +164,7 @@ export default function BuscaUnidade() {
             {buscando ? 'Procurando…' : 'Procurar'}
           </button>
           <span className="text-sm text-slate-500">
-            Esta busca não consome saldo. Sem a unidade, traz o condomínio inteiro.
+            Não consome saldo. Sem a unidade, monta a tabela do prédio — para isso precisa do CEP e do número.
           </span>
         </div>
       </div>
@@ -318,6 +173,19 @@ export default function BuscaUnidade() {
         <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {erro}
         </p>
+      )}
+
+      {predio && (
+        <TabelaPredio
+          predio={predio}
+          endereco={{
+            cep: form.cep, rua: form.rua, numero: form.numero,
+            bairro: form.bairro, cidade: form.cidade, uf: form.uf,
+          }}
+          confere={confere}
+          cruzando={cruzando}
+          prefixo3={prefixo3}
+        />
       )}
 
       {res && res.quantidade === 0 && (
@@ -425,210 +293,5 @@ function AvisoIptu({
       O IPTU está no CPF de <b>{batem[0].nome}</b>. Confere com o nome que aparece na
       notificação antes de usar.
     </p>
-  );
-}
-
-function Pessoa({
-  pessoa,
-  contato,
-  noIptu,
-  cpfMontado,
-  aoAchar,
-}: {
-  pessoa: PessoaNaUnidade;
-  contato?: Contato;
-  noIptu?: boolean;
-  cpfMontado?: string | null;
-  aoAchar: (c: Contato) => void;
-}) {
-  // Dois toques antes de gastar: o primeiro arma, o segundo cobra, e desarma
-  // sozinho em 6 s. Mesmo padrão do "Limpar ficha" da ficha de captação — um
-  // toque sem querer não vira conta.
-  const [armado, setArmado] = useState(false);
-  const [buscando, setBuscando] = useState(false);
-  const [erro, setErro] = useState('');
-
-  async function clicar() {
-    if (!armado) {
-      setArmado(true);
-      setTimeout(() => setArmado(false), 6000);
-      return;
-    }
-    setArmado(false);
-    setBuscando(true);
-    setErro('');
-    try {
-      // A consulta paga precisa de 11 dígitos. Só o CPF reconstruído serve.
-      aoAchar(await pedir<Contato>('/api/captacao/contato', { cpf: cpfMontado || '' }));
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBuscando(false);
-    }
-  }
-
-  return (
-    <li className="py-4">
-      <p className="font-semibold text-slate-900">
-        {pessoa.nome}
-        {noIptu && (
-          <span className="ml-2 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
-            bate com o IPTU
-          </span>
-        )}
-      </p>
-      <p className="mt-0.5 text-sm text-slate-500">
-        {cpfMontado ? cpfCheio(cpfMontado) : cpfParcial(pessoa.cpf)}
-        {pessoa.nascimento && ` · nasc. ${dataBr(pessoa.nascimento)}`}
-        {pessoa.nomeMae && ` · mãe: ${pessoa.nomeMae}`}
-      </p>
-
-      {!contato && (
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <button
-            onClick={clicar}
-            disabled={buscando || !cpfMontado}
-            className={
-              'rounded-lg border px-3 py-1.5 text-sm font-medium shadow-sm transition disabled:opacity-50 ' +
-              (armado
-                ? 'border-amber-600 bg-amber-600 text-white'
-                : 'border-amber-300 bg-white text-amber-800 hover:bg-amber-50')
-            }
-          >
-            {buscando
-              ? 'Buscando…'
-              : armado
-                ? 'Confirmar — vai consumir saldo'
-                : 'Buscar contato'}
-          </button>
-          {!cpfMontado && (
-            <span className="text-sm text-slate-500">
-              precisa dos 3 dígitos da certidão
-            </span>
-          )}
-          {!erro && <span className="text-sm text-slate-500">consome saldo</span>}
-          {erro && <span className="text-sm text-red-700">{erro}</span>}
-        </div>
-      )}
-
-      {contato && (
-        <>
-          {cpfMontado && <Veredito pessoa={pessoa} contato={contato} />}
-          <CartaoContato c={contato} />
-        </>
-      )}
-    </li>
-  );
-}
-
-function Veredito({
-  pessoa,
-  contato,
-}: {
-  pessoa: PessoaNaUnidade;
-  contato: Contato;
-}) {
-  const { veredito, sinais } = conferirReconstrucao(pessoa, contato);
-  const cor =
-    veredito === 'confirma'
-      ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
-      : veredito === 'nega'
-        ? 'border-red-200 bg-red-50 text-red-800'
-        : 'border-amber-200 bg-amber-50 text-amber-900';
-  const texto =
-    veredito === 'confirma'
-      ? 'CPF confirmado: os dados batem com esta pessoa.'
-      : veredito === 'nega'
-        ? 'Este CPF NÃO é desta pessoa — o prefixo da certidão é de outro candidato.'
-        : 'Não deu para confirmar: a base devolveu pouca coisa para comparar.';
-  return (
-    <p className={`mt-3 rounded-lg border p-3 text-xs leading-relaxed ${cor}`}>
-      <b>{texto}</b>
-      {sinais.length > 0 && <> — {sinais.join(', ')}.</>}
-    </p>
-  );
-}
-
-function Bloco({ titulo, children }: { titulo: string; children: React.ReactNode }) {
-  return (
-    <div className="mb-3 last:mb-0">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{titulo}</p>
-      <div className="mt-0.5 text-sm text-slate-800">{children}</div>
-    </div>
-  );
-}
-
-function CartaoContato({ c }: { c: Contato }) {
-  return (
-    <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-      <Bloco titulo="CPF">
-        {cpfCheio(c.cpf)}
-        {c.obito && (
-          <span className="ml-2 rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-700">
-            consta falecido
-          </span>
-        )}
-      </Bloco>
-
-      <Bloco titulo="Telefones">
-        {c.telefones.length === 0 ? (
-          <span className="text-slate-500">a base não trouxe telefone.</span>
-        ) : (
-          c.telefones.map((t) => (
-            <div key={t.numero}>
-              <a href={`tel:+55${t.numero}`} className="text-blue-700 hover:underline">
-                {fone(t.numero)}
-              </a>
-              {t.celular && (
-                <a
-                  href={`https://wa.me/55${t.numero}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="ml-2 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
-                >
-                  WhatsApp
-                </a>
-              )}
-            </div>
-          ))
-        )}
-      </Bloco>
-
-      {c.emails.length > 0 && (
-        <Bloco titulo="E-mails">
-          {c.emails.map((e) => (
-            <div key={e}>
-              <a href={`mailto:${e}`} className="text-blue-700 hover:underline">
-                {e}
-              </a>
-            </div>
-          ))}
-        </Bloco>
-      )}
-
-      {c.alerta && <p className="mb-3 text-sm font-semibold text-red-700">{c.alerta}</p>}
-
-      {c.parentescos.length > 0 && (
-        <Bloco titulo="Parentescos">
-          {c.parentescos.map((p, i) => (
-            <div key={`${p.cpf}-${i}`}>
-              {p.nome}
-              {p.vinculo && ` — ${p.vinculo}`}
-            </div>
-          ))}
-        </Bloco>
-      )}
-
-      {(c.rendaEstimada || c.classeSocial) && (
-        <Bloco titulo="Perfil">
-          {[
-            c.rendaEstimada && `renda estimada ${c.rendaEstimada}`,
-            c.classeSocial && `classe ${c.classeSocial}`,
-          ]
-            .filter(Boolean)
-            .join(' · ')}
-        </Bloco>
-      )}
-    </div>
   );
 }

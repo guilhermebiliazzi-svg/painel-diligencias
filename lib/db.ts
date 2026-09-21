@@ -17,7 +17,8 @@ function createPool(): Pool {
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     // Supabase exige SSL. O pooler usa cert auto-assinado — não validar.
-    ssl: { rejectUnauthorized: false },
+    // DB_SSL=off desliga: serve para um Postgres local, que não fala SSL.
+    ssl: process.env.DB_SSL === 'off' ? false : { rejectUnauthorized: false },
     // Pool pequeno: Vercel serverless reusa containers pouco tempo, e a
     // role painel_looker não precisa de muito throughput pra um dashboard.
     max: 3,
