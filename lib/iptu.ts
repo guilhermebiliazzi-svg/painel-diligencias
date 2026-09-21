@@ -85,18 +85,51 @@ type Linha = {
 const COLUNAS = `sql, condominio, codlog, logradouro, numero, complemento, bairro,
   referencia, cep, fracao_ideal, area_construida, venal, ano_construcao, ano_inicio`;
 
+/**
+ * Traduz a falha do Postgres para algo acionável.
+ *
+ * Engolir o erro num "não consegui agora" custa caro: a causa quase sempre é
+ * uma de três, e cada uma tem conserto diferente. O código SQLSTATE é o sinal
+ * confiável — a mensagem varia com o idioma do servidor.
+ */
+export function explicar(e: unknown): ErroIptu | null {
+  const erro = e as { code?: string; message?: string };
+  const codigo = String(erro?.code ?? '');
+  const msg = String(erro?.message ?? e);
+
+  // 42P01 undefined_table — a tabela ainda não existe.
+  if (codigo === '42P01' || (/iptu_cadastro/.test(msg) && /does not exist|não existe/i.test(msg))) {
+    return new ErroIptu(
+      'A tabela public.iptu_cadastro não existe no banco. Rode sql/iptu_cadastro.sql no Supabase.'
+    );
+  }
+  // 42501 insufficient_privilege — existe, mas este usuário não enxerga.
+  if (codigo === '42501' || /permission denied|permissão negada/i.test(msg)) {
+    return new ErroIptu(
+      'A tabela public.iptu_cadastro existe, mas o usuário do banco não tem permissão de leitura. ' +
+        'Rode: grant select on public.iptu_cadastro to ' + (process.env.DB_USER || '<usuário>') + ';'
+    );
+  }
+  // Conexão: host errado, senha errada, banco fora do ar.
+  if (['28P01', '28000', '3D000', 'ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT'].includes(codigo)) {
+    return new ErroIptu(`Não consegui conectar ao banco (${codigo}). Confira DB_HOST, DB_USER e DB_PASSWORD.`);
+  }
+  return null;
+}
+
 async function consultar(texto: string, valores: unknown[]): Promise<Linha[]> {
   try {
     const { rows } = await pool.query(texto, valores);
     return rows as Linha[];
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (/iptu_cadastro/.test(msg) && /does not exist|não existe/i.test(msg)) {
-      throw new ErroIptu(
-        'O cadastro do IPTU ainda não foi carregado no banco. Rode sql/iptu_cadastro.sql.'
-      );
-    }
-    throw e;
+    const explicado = explicar(e);
+    if (explicado) throw explicado;
+    // Não reconheci: repasso o que o banco disse, em vez de esconder atrás de
+    // um "não consegui agora" que não ajuda ninguém a consertar.
+    const erro = e as { code?: string; message?: string };
+    throw new ErroIptu(
+      `O banco recusou a consulta${erro?.code ? ` (${erro.code})` : ''}: ${erro?.message ?? String(e)}`
+    );
   }
 }
 
@@ -147,7 +180,9 @@ export async function predioPorEndereco(
     const cep = limpo(entrada.cep).replace(/\D/g, '');
     const numero = limpo(entrada.numero).replace(/\D/g, '');
     if (cep.length !== 8) throw new ErroIptu('Informe o CEP para listar as unidades do prédio.');
-    if (!numero) throw new ErroIptu('Informe o número do imóvel.');
+    // Um número absurdo estoura o integer do Postgres e viraria erro de banco;
+    // barra aqui, onde dá para explicar.
+    if (!numero || numero.length > 8) throw new ErroIptu('Número do imóvel inválido.');
 
     const cepFormatado = `${cep.slice(0, 5)}-${cep.slice(5)}`;
     const candidatas = await consultar(

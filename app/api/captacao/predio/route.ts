@@ -28,6 +28,13 @@ export async function POST(req: Request) {
   } catch (e) {
     if (e instanceof ErroIptu) return NextResponse.json({ erro: e.message }, { status: 400 });
     console.error('[captacao] falha ao ler o cadastro do IPTU', e);
-    return NextResponse.json({ erro: 'Não consegui ler o cadastro do IPTU agora.' }, { status: 503 });
+    // Quem usa esta tela é gente da casa, autenticada e com permissão. Mostrar
+    // a causa real economiza uma ida e volta; esconder atrás de "não consegui
+    // agora" só transfere o problema.
+    const causa = e instanceof Error ? e.message : String(e);
+    return NextResponse.json(
+      { erro: `Não consegui ler o cadastro do IPTU: ${causa}` },
+      { status: 503 }
+    );
   }
 }
