@@ -28,10 +28,20 @@ function fone(n: string) {
 // A comparação é por POSIÇÃO e aceita qualquer máscara: tudo que não é dígito
 // vira curinga. Assim funciona com *, x, # ou espaço, sem precisar saber de
 // antemão como a prefeitura escondeu.
-export function padraoDoIptu(mascara: string): string | null {
-  const bruto = mascara.replace(/[.\-\s/]/g, '');
-  if (bruto.length !== 11) return null;
-  return bruto.replace(/\D/g, '?');
+export function padraoDoIptu(entrada: string): string | null {
+  const bruto = entrada.replace(/[.\-\s/]/g, '');
+  if (!bruto) return null;
+
+  // Máscara completa, do jeito que a notificação mostra: ***.456.789-**
+  if (bruto.length === 11) return bruto.replace(/\D/g, '?');
+
+  // Só os primeiros dígitos, que é o que a certidão de dados cadastrais
+  // entrega (ex.: "701"). Vira prefixo: 701????????.
+  if (bruto.length < 11 && /^\d+$/.test(bruto)) {
+    return bruto + '?'.repeat(11 - bruto.length);
+  }
+
+  return null;
 }
 
 export function bateComIptu(cpf: string, padrao: string | null): boolean {
@@ -145,19 +155,19 @@ export default function BuscaUnidade() {
             htmlFor="iptu"
             className="block text-xs font-semibold uppercase tracking-wide text-slate-500"
           >
-            CPF na notificação do IPTU (opcional)
+            CPF do IPTU — certidão ou notificação (opcional)
           </label>
           <input
             id="iptu"
             value={iptu}
-            placeholder="***.456.789-**  — como aparece na notificação"
+            placeholder="701  ou  ***.456.789-**"
             onChange={(e) => setIptu(e.target.value)}
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200 sm:max-w-sm"
           />
           <p className="mt-1 text-xs text-slate-500">
             {iptuInvalido
-              ? 'Precisa ter 11 posições contando os dígitos escondidos — copie do jeito que está na notificação.'
-              : 'Cole com os asteriscos. Quem bater é quem está no IPTU — e isso não consome saldo.'}
+              ? 'Ou só os primeiros dígitos (ex.: 701), ou a máscara inteira com 11 posições (***.456.789-**).'
+              : 'Os primeiros dígitos da certidão já servem. Quem bater é quem está no IPTU — e isso não consome saldo.'}
           </p>
         </div>
 
