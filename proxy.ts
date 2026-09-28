@@ -28,6 +28,7 @@ const REGRAS: Regra[] = [
   { re: /^\/pagamentos(\/|$)/, perm: 'pode_pagamentos', legacy: false },
   { re: /^\/api\/adm(\/|$)/, perm: 'any', legacy: true },
   { re: /^\/usuarios(\/|$)/, perm: 'admin', legacy: false },
+  { re: /^\/sdr(\/|$)/, perm: 'admin', legacy: false },
   { re: /^\/$/, perm: 'any', legacy: false },
 ];
 

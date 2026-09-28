@@ -38,6 +38,9 @@ function Icone({ nome }: { nome: IconeNav }) {
     case 'captacao':
       // Lupa sobre um prédio: procurar quem está numa unidade.
       return (<svg {...common}><path d="M3 21h8" /><path d="M5 21V5l7-3v9" /><line x1="8" y1="8" x2="8" y2="8" /><line x1="8" y1="12" x2="8" y2="12" /><circle cx="17" cy="14" r="4" /><line x1="20" y1="17" x2="22.5" y2="19.5" /></svg>);
+    case 'funil':
+      // Funil: leads entrando largos e saindo estreitos.
+      return (<svg {...common}><path d="M3 4h18l-7 8v6l-4 2v-8z" /></svg>);
     case 'mais':
       return (<svg {...common}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>);
   }
@@ -113,6 +116,12 @@ export default async function Home() {
 
         <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {itens.map((item) => (<CardTela key={item.chave} item={item} />))}
+
+          {perfil.is_admin && (
+            <Link href="/sdr" style={{ backgroundColor: '#ffffff' }} className={`${BASE} ${HOVER}`}>
+              <CardConteudo icone="funil" cor="blue" titulo="Funil do SDR" descricao="Leads da Eva: quem respondeu, qualificou, foi distribuído e visitou." disponivel />
+            </Link>
+          )}
 
           {perfil.is_admin && (
             <Link href="/locador" style={{ backgroundColor: '#ffffff' }} className={`${BASE} ${HOVER}`}>
