@@ -200,8 +200,20 @@ function NovoBoleto({ item, competencia, autoRead }: { item: Item; competencia: 
     (async () => {
       try {
         const r = await fetch(`/api/adm/ler-linha-digitavel?contrato=${item.contrato_id}&competencia=${competencia}&subtipo=${item.subtipo}`, { cache: "no-store" });
-        const d = await r.json();
+        let d = await r.json();
         if (!vivo) return;
+        // Fallback OCR no navegador: se o servidor nao leu (boleto imagem/escaneado),
+        // tenta ler o PDF anexado via OCR e so usa se o digito verificador conferir.
+        if (!d.linha && item.boleto?.url) {
+          try {
+            const { lerBoletoViaOCR } = await import("@/lib/ocr-boleto-client");
+            const o = await lerBoletoViaOCR(item.boleto.url);
+            if (!vivo) return;
+            if (o && o.validado) {
+              d = { linha: o.linha, valor: o.valor ?? 0, vencimento: o.vencimento, vencimento_origem: "codigo-de-barras" };
+            }
+          } catch { /* OCR indisponivel -> segue sem preencher */ }
+        }
         if (d.linha) { setLinha((a) => (a.replace(/\D/g, "") ? a : d.linha)); setLida(true); }
         // O valor vem do próprio código de barras, em centavos — é o que o
         // banco cobra. Só preenche se o campo ainda estiver vazio.
