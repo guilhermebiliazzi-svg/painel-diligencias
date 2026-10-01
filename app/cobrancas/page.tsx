@@ -7,14 +7,22 @@ function pctDelta(cur?: number | null, prev?: number | null): number | null {
   return ((cur - prev) / prev) * 100;
 }
 function DeltaCell({ cur, prev }: { cur?: number | null; prev?: number | null }) {
-  const p = pctDelta(cur, prev);
-  if (p == null) return null;
+  if (cur == null || prev == null) return null;
+  const dreais = cur - prev;
+  if (dreais === 0) return <span className="vj-delta vj-delta-eq">=</span>;
+  const up = dreais > 0;
+  const seta = up ? "▲" : "▼";
+  const reais = Math.abs(dreais).toFixed(2).replace(".", ",");
+  if (prev === 0) {
+    return <span className="vj-delta vj-delta-up vj-delta-forte" title={"vs mês anterior: +R$ " + reais}>{seta + " R$ " + reais}</span>;
+  }
+  const p = (dreais / prev) * 100;
   const abs = Math.abs(p);
-  if (abs < 0.5) return <span className="vj-delta vj-delta-eq">=</span>;
-  const up = p > 0;
   const forte = abs >= 10;
+  const numStr = abs < 10 ? abs.toFixed(1).replace(".", ",") : abs.toFixed(0);
+  const label = numStr === "0,0" ? seta + " R$ " + reais : seta + numStr + "%";
   const cls = "vj-delta " + (up ? "vj-delta-up" : "vj-delta-down") + (forte ? " vj-delta-forte" : "");
-  return <span className={cls} title="vs mês anterior">{(up ? "▲" : "▼") + abs.toFixed(0) + "%"}</span>;
+  return <span className={cls} title={"vs mês anterior: " + (up ? "+" : "-") + "R$ " + reais}>{label}</span>;
 }
 function destoaRow(l: Linha, prevMap: Record<number, Linha>): boolean {
   const pr = prevMap[l.contrato_id];
@@ -473,7 +481,7 @@ export default function FechamentoMes() {
                     <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.aluguel)}<DeltaCell cur={l.comp?.aluguel} prev={prevMap[l.contrato_id]?.comp?.aluguel} /></td>
                     <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.condominio)}<DeltaCell cur={l.comp?.condominio} prev={prevMap[l.contrato_id]?.comp?.condominio} /></td>
                     <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.iptu)}<DeltaCell cur={l.comp?.iptu} prev={prevMap[l.contrato_id]?.comp?.iptu} /></td>
-                    <td className={`vj-r vj-comp vj-compval${(l.comp?.outros ?? 0) < 0 ? " vj-neg" : ""}`}>{brlComp(l.comp?.outros)}</td>
+                    <td className={`vj-r vj-comp vj-compval${(l.comp?.outros ?? 0) < 0 ? " vj-neg" : ""}`}>{brlComp(l.comp?.outros)}<DeltaCell cur={l.comp?.outros} prev={prevMap[l.contrato_id]?.comp?.outros} /></td>
                     <td className="vj-r vj-money" data-label="Total">{brl(l.total)}<DeltaCell cur={l.total} prev={prevMap[l.contrato_id]?.total} /></td>
                     <td data-label="Situação">
                       {l.status_cobranca === "a_emitir" ? (
