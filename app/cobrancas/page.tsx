@@ -2,6 +2,32 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+function pctDelta(cur?: number | null, prev?: number | null): number | null {
+  if (cur == null || prev == null || prev === 0) return null;
+  return ((cur - prev) / prev) * 100;
+}
+function DeltaCell({ cur, prev }: { cur?: number | null; prev?: number | null }) {
+  const p = pctDelta(cur, prev);
+  if (p == null) return null;
+  const abs = Math.abs(p);
+  if (abs < 0.5) return <span className="vj-delta vj-delta-eq">=</span>;
+  const up = p > 0;
+  const forte = abs >= 10;
+  const cls = "vj-delta " + (up ? "vj-delta-up" : "vj-delta-down") + (forte ? " vj-delta-forte" : "");
+  return <span className={cls} title="vs mês anterior">{(up ? "▲" : "▼") + abs.toFixed(0) + "%"}</span>;
+}
+function destoaRow(l: Linha, prevMap: Record<number, Linha>): boolean {
+  const pr = prevMap[l.contrato_id];
+  if (!pr) return false;
+  const pares: Array<[number | null | undefined, number | null | undefined]> = [
+    [l.comp?.aluguel, pr.comp?.aluguel],
+    [l.comp?.condominio, pr.comp?.condominio],
+    [l.comp?.iptu, pr.comp?.iptu],
+    [l.total, pr.total],
+  ];
+  return pares.some(([c, q]) => { const dd = pctDelta(c, q); return dd != null && Math.abs(dd) >= 10; });
+}
+
 type Linha = {
   contrato_id: number;
   locatario: string;
@@ -43,6 +69,7 @@ export default function FechamentoMes() {
   });
   const [resumo, setResumo] = useState<Resumo | null>(null);
   const [linhas, setLinhas] = useState<Linha[]>([]);
+  const [prevMap, setPrevMap] = useState<Record<number, Linha>>({});
   const [avisos, setAvisos] = useState<Aviso[]>([]);
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -60,6 +87,18 @@ export default function FechamentoMes() {
       } else {
         setResumo(d.resumo);
         setLinhas(d.linhas || []);
+        // mes anterior (mesmo endpoint) para comparar valores — nao bloqueia a tela
+        try {
+          const [ay, am] = comp.split("-").map(Number);
+          const pm = am === 1 ? `${ay - 1}-12` : `${ay}-${String(am - 1).padStart(2, "0")}`;
+          const rp = await fetch(`/api/adm/fechamento?competencia=${pm}`);
+          if (rp.ok) {
+            const dp = await rp.json();
+            const mp: Record<number, Linha> = {};
+            for (const x of (dp.linhas || [])) mp[x.contrato_id] = x;
+            setPrevMap(mp);
+          } else { setPrevMap({}); }
+        } catch { setPrevMap({}); }
       }
       // avisos (reajuste/renovação) — não bloqueia a tela se falhar
       try {
@@ -323,6 +362,7 @@ export default function FechamentoMes() {
                         <div className="vj-nome">
                           {temVermelho(l.contrato_id) && <span className="vj-dot vj-dot-v" title="Reajuste/renovação nesta competência" />}
                           {!temVermelho(l.contrato_id) && temAmarelo(l.contrato_id) && <span className="vj-dot vj-dot-a" title="Reajuste/renovação no mês seguinte" />}
+                          {destoaRow(l, prevMap) && <span className="vj-destoa-dot" title="Valores destoam do mes anterior">⚠</span>}
                           {l.locatario}
                         </div>
                         <div className="vj-end">{l.endereco}</div>
@@ -349,6 +389,7 @@ export default function FechamentoMes() {
         <section className="vj-card">
           <div className="vj-ajhead">
             <h2 className="vj-h2">Gravadas <span className="vj-count">{gravadas.length}</span></h2>
+            {(() => { const n = gravadas.filter((x) => destoaRow(x, prevMap)).length; return n > 0 ? <span className="vj-destoa-resumo">⚠ {n} destoam vs mes anterior</span> : null; })()}
             <div className="vj-acoes-cab">
               {gravadas.length > 0 && (
                 <button className="vj-btn-status" disabled={conciliando || emitindo} onClick={conciliar}>
@@ -423,16 +464,17 @@ export default function FechamentoMes() {
                         <div className="vj-nome">
                           {temVermelho(l.contrato_id) && <span className="vj-dot vj-dot-v" title="Reajuste/renovação nesta competência" />}
                           {!temVermelho(l.contrato_id) && temAmarelo(l.contrato_id) && <span className="vj-dot vj-dot-a" title="Reajuste/renovação no mês seguinte" />}
+                          {destoaRow(l, prevMap) && <span className="vj-destoa-dot" title="Valores destoam do mes anterior">⚠</span>}
                           {l.locatario}
                         </div>
                       </a>
                     </td>
                     <td data-label="Vencimento">{l.vencimento}</td>
-                    <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.aluguel)}</td>
-                    <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.condominio)}</td>
-                    <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.iptu)}</td>
+                    <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.aluguel)}<DeltaCell cur={l.comp?.aluguel} prev={prevMap[l.contrato_id]?.comp?.aluguel} /></td>
+                    <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.condominio)}<DeltaCell cur={l.comp?.condominio} prev={prevMap[l.contrato_id]?.comp?.condominio} /></td>
+                    <td className="vj-r vj-comp vj-compval">{brlComp(l.comp?.iptu)}<DeltaCell cur={l.comp?.iptu} prev={prevMap[l.contrato_id]?.comp?.iptu} /></td>
                     <td className={`vj-r vj-comp vj-compval${(l.comp?.outros ?? 0) < 0 ? " vj-neg" : ""}`}>{brlComp(l.comp?.outros)}</td>
-                    <td className="vj-r vj-money" data-label="Total">{brl(l.total)}</td>
+                    <td className="vj-r vj-money" data-label="Total">{brl(l.total)}<DeltaCell cur={l.total} prev={prevMap[l.contrato_id]?.total} /></td>
                     <td data-label="Situação">
                       {l.status_cobranca === "a_emitir" ? (
                         <button
@@ -491,6 +533,14 @@ export default function FechamentoMes() {
 }
 
 const CSS = `
+.vj-delta{display:inline-block;margin-left:6px;font-size:11px;font-weight:700;white-space:nowrap}
+.vj-delta-up{color:#DC1C2E}
+.vj-delta-down{color:#0a7d32}
+.vj-delta-eq{color:#8a93a3;font-weight:600}
+.vj-delta-forte{padding:1px 6px;border-radius:999px;background:#fdecec}
+.vj-delta-down.vj-delta-forte{background:#e9f7ee}
+.vj-destoa-dot{color:#DC1C2E;font-weight:800;margin-right:6px;cursor:help}
+.vj-destoa-resumo{display:inline-block;margin-left:10px;font-size:12px;font-weight:700;color:#DC1C2E;background:#fdecec;padding:2px 8px;border-radius:999px}
 .vj-wrap{--azul:#003DA5;--azul-esc:#00286b;--verm:#DC1C2E;--bg:#F4F6FA;--card:#fff;--linha:#E4E9F2;--txt:#16233B;--mut:#5A6B85;--ok:#0F7B4F;--wait:#B8860B;
   min-height:100vh;background:var(--bg);color:var(--txt);
   font-family:Archivo,"Segoe UI",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;}
