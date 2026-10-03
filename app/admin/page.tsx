@@ -120,7 +120,7 @@ export default async function AdminHome({
         <header className="mt-3 mb-8 flex items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              RE/MAX Ville — Painel admin
+              REMAX Ville — Painel admin
             </p>
             <h1 className="mt-2 text-2xl font-semibold text-slate-900 sm:text-3xl">
               Diligências
