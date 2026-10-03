@@ -1,12 +1,12 @@
 import { logoutAction } from '../actions';
 
-export const metadata = { title: 'Sem acesso — Painel RE/MAX Ville' };
+export const metadata = { title: 'Sem acesso — Painel REMAX Ville' };
 
 export default function SemAcesso() {
   return (
     <div style={{ backgroundColor: '#f8fafc' }} className="flex min-h-screen items-center justify-center px-4 py-12">
       <div style={{ backgroundColor: '#ffffff' }} className="w-full max-w-md rounded-2xl border border-slate-200 p-8 text-center shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">RE/MAX Ville</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">REMAX Ville</p>
         <h1 className="mt-2 text-xl font-semibold text-slate-900">Acesso não liberado</h1>
         <p className="mt-2 text-sm leading-relaxed text-slate-600">
           Sua conta entrou, mas ainda não tem acesso ao painel. Peça ao administrador
