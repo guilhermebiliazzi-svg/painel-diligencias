@@ -26,6 +26,8 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 
+import filtro_gestores as fg
+
 # ---------------------------------------------------------------- config
 
 SUCURSAIS = {
@@ -1336,6 +1338,23 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
     derrubados_codigo = 0
     derrubados_fato = 0
     repetidos = 0
+    tirados_gestor = 0
+
+    # Filtro de gestores (03/10): imovel do Nonstop de gestor que nao e REMAX
+    # (nem Animacasa/Yuca) sai. Primeiro levanta os codigos e consulta os
+    # novos; a decisao acontece no laco abaixo, antes de entrar na roleta.
+    lista_gestores = []
+    for nome, cfg in SUCURSAIS.items():
+        slug = cfg["nonstop"].rstrip("/").rsplit("/", 1)[-1]
+        for bloco in blocos_imovel(obter(cfg["nonstop"])):
+            m = RE_COD.search(bloco)
+            if m and "#" in m.group(1):
+                lista_gestores.append((slug, m.group(1).strip().split("#", 1)[1]))
+    try:
+        fg.preparar(lista_gestores)
+    except Exception as e:
+        print(f"  filtro de gestores falhou, nada sera tirado: {type(e).__name__}: {e}")
+
     for nome, cfg in SUCURSAIS.items():
         for bloco in blocos_imovel(obter(cfg["nonstop"])):
             m = RE_COD.search(bloco)
@@ -1393,11 +1412,15 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
             if chave in roleta:
                 repetidos += 1     # mesmo imovel no Nonstop de outra sucursal
                 continue
+            if "#" in codigo and not fg.manter(codigo.split("#", 1)[1]):
+                tirados_gestor += 1    # gestor fora da REMAX: nao publica
+                continue
             roleta[chave] = (DONO_ROLETA, bloco)
             traducao[chave] = codigo
     print(f"  Nonstop derrubado pelo codigo ... {derrubados_codigo}")
     print(f"  Nonstop derrubado pelo endereco . {derrubados_fato}")
     print(f"  Nonstop repetido entre sucursais  {repetidos}")
+    print(f"  tirado por gestor nao REMAX ..... {tirados_gestor}  {fg.resumo()}")
     print(f"  roleta ............ {len(roleta)} imoveis")
 
     if conflitos_terceira_sucursal:
@@ -1495,6 +1518,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
             "por_dono": por_dono, "carteira": len(carteira), "roleta": len(roleta),
             "derrubados_codigo": derrubados_codigo, "derrubados_fato": derrubados_fato,
             "conflitos_ilist": conflitos_ilist,
+            "filtro_gestores": fg.resumo(),
             "conflitos_terceiro": conflitos_terceiro,
             "conflitos_terceira_sucursal": conflitos_terceira_sucursal,
             "repetidos": repetidos,
