@@ -4,7 +4,7 @@ import { exigirAdmin, type Perfil } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import UsuariosClient from './usuarios-client';
 
-export const metadata = { title: 'Usuários — Painel RE/MAX Ville' };
+export const metadata = { title: 'Usuários — Painel REMAX Ville' };
 export const dynamic = 'force-dynamic';
 
 export default async function Usuarios() {
