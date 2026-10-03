@@ -432,7 +432,7 @@ export default async function DiligenciaPage({
       <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
         <header className="mb-8">
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-            RE/MAX Ville — Diligência imobiliária
+            REMAX Ville — Diligência imobiliária
           </p>
           <h1 className="mt-2 text-2xl font-semibold text-slate-900 sm:text-3xl">
             {endereco}
@@ -483,7 +483,7 @@ export default async function DiligenciaPage({
         </section>
 
         <footer className="mt-8 text-center text-xs text-slate-400">
-          RE/MAX Ville — Jardins/Itaim, São Paulo
+          REMAX Ville — Jardins/Itaim, São Paulo
         </footer>
       </main>
     </div>
@@ -499,7 +499,7 @@ export async function generateMetadata({
   const rows = await fetchDiligencia(id);
   return {
     title: rows
-      ? `${rows[0].endereco} — Diligência RE/MAX Ville`
-      : 'Diligência — RE/MAX Ville',
+      ? `${rows[0].endereco} — Diligência REMAX Ville`
+      : 'Diligência — REMAX Ville',
   };
 }
