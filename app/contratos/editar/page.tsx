@@ -9,7 +9,7 @@ const GARANTIAS = [
   { v: "caucao", t: "Caução" },
   { v: "seguro_fianca", t: "Seguro-fiança" },
   { v: "capitalizacao", t: "Capitalização" },
-  { v: "fianca_remax_ville", t: "Fiança RE/MAX Ville" },
+  { v: "fianca_remax_ville", t: "Fiança REMAX Ville" },
   { v: "fianca_bancaria", t: "Fiança bancária" },
 ];
 const TIPO_USO = [
@@ -97,7 +97,7 @@ export default function EditarContrato() {
   return (
     <div className="vj-wrap">
       <header className="vj-top">
-        <a href="/cobrancas" className="vj-mark vj-marklink">RE/MAX <span>Ville</span></a>
+        <a href="/cobrancas" className="vj-mark vj-marklink">REMAX <span>Ville</span></a>
         <div className="vj-crumb">Administração · Editar contrato</div>
       </header>
 
