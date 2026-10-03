@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, useTransition } from 'react';
-import { salvarGrupos, salvarVitrine, arquivarVitrine, type VitrineEntrada } from './actions';
+import { salvarGrupos, salvarVitrine, arquivarVitrine, gerarCarrossel, type VitrineEntrada } from './actions';
 
 export type Imovel = {
   codigo: string;
@@ -31,6 +31,24 @@ export type Vitrine = {
 };
 
 export type GeoAlvo = { geo_id: string; nome: string; tipo: string | null };
+
+export type Carrossel = {
+  id: number;
+  bairro_nome: string | null;
+  status: string | null;
+  qtd_imoveis: number | null;
+  created_at: string | null;
+  postado_em: string | null;
+};
+
+const MAX_CARROSSEL = 8;
+const STATUS_CARROSSEL: Record<string, string> = {
+  gerando: 'Gerando slides',
+  aguardando_aprovacao: 'Aguardando sua aprovação no WhatsApp',
+  aprovado: 'Aprovado, postando',
+  postado: 'Postado no Instagram',
+  erro: 'Erro',
+};
 
 const SITE = 'https://www.villejardins.com.br/imovel/imovel-id-';
 const POR_PAGINA = 30;
@@ -231,13 +249,18 @@ function unicos(lista: (string | null)[]) {
 }
 
 export default function Vitrine({
-  imoveis, selecaoInicial, vitrines, geo,
+  imoveis, selecaoInicial, vitrines, geo, carrosseis,
 }: {
   imoveis: Imovel[];
   selecaoInicial: Record<string, string[]>;
   vitrines: Vitrine[];
   geo: GeoAlvo[];
+  carrosseis: Carrossel[];
 }) {
+  const [carrossel, setCarrossel] = useState<string[]>([]);
+  const [tituloCar, setTituloCar] = useState('');
+  const [msgCar, setMsgCar] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null);
+  const [enviandoCar, iniciarCar] = useTransition();
   const [vits, setVits] = useState<Vitrine[]>(vitrines);
   const [modo, setModo] = useState<'escolhidos' | 'escolher'>('escolhidos');
   const [editor, setEditor] = useState<VitrineEntrada | null>(null);
@@ -323,6 +346,20 @@ export default function Vitrine({
           return n;
         });
         setMsg({ tipo: 'erro', texto: r.erro ?? 'Não foi possível salvar.' });
+      }
+    });
+  }
+
+  function enviarCarrossel() {
+    setMsgCar(null);
+    iniciarCar(async () => {
+      const r = await gerarCarrossel(tituloCar, carrossel);
+      if (r.ok) {
+        setCarrossel([]);
+        setTituloCar('');
+        setMsgCar({ tipo: 'ok', texto: 'Carrossel pedido. A prévia chega no seu WhatsApp para aprovar em alguns minutos.' });
+      } else {
+        setMsgCar({ tipo: 'erro', texto: r.erro ?? 'Não foi possível gerar o carrossel.' });
       }
     });
   }
@@ -470,7 +507,7 @@ export default function Vitrine({
           ].filter(Boolean).join(' · ');
           return (
             <article key={i.codigo} style={{ backgroundColor: '#ffffff' }}
-              className={`flex flex-col gap-3 rounded-2xl border p-3 shadow-sm sm:flex-row ${g.length ? 'border-blue-400' : 'border-slate-200'}`}>
+              className={`flex flex-col gap-3 rounded-2xl border p-3 shadow-sm sm:flex-row ${g.length ? 'border-blue-400' : carrossel.includes(i.codigo) ? 'border-pink-400' : 'border-slate-200'}`}>
               <a href={SITE + i.codigo} target="_blank" rel="noopener noreferrer"
                 className="block aspect-[4/3] w-full shrink-0 overflow-hidden rounded-xl bg-slate-100 sm:w-44">
                 {i.imagem && (
@@ -491,17 +528,37 @@ export default function Vitrine({
                 <p className="mt-1 break-words text-sm text-slate-600">{[i.tipo, i.condominio, i.endereco].filter(Boolean).join(' · ')}</p>
                 {ficha && <p className="mt-0.5 text-sm tabular-nums text-slate-500">{ficha}</p>}
                 <p className="mt-0.5 text-xs text-slate-500">{nomeUnidade(i.unidade)}{i.gestor ? ` · ${i.gestor}` : ''}</p>
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Google Ads</span>
+                  {vits.length === 0 && <span className="text-xs text-slate-400">crie uma vitrine acima</span>}
                   {(vAtiva ? [vAtiva, ...vits.filter((x) => x.id !== vAtiva.id && g.includes(x.id))] : vits).map((gr) => {
                     const ativo = g.includes(gr.id);
                     return (
-                      <button key={gr.id} type="button" aria-pressed={ativo} onClick={() => alternar(i.codigo, gr.id)}
-                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${ativo ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}
+                      <label key={gr.id}
+                        className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${ativo ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}
                         style={ativo ? undefined : { backgroundColor: '#ffffff' }}>
-                        {ativo ? '✓ ' : '+ '}{gr.nome}
-                      </button>
+                        <input type="checkbox" className="size-3.5 accent-white" checked={ativo} onChange={() => alternar(i.codigo, gr.id)} />
+                        {gr.nome}
+                      </label>
                     );
                   })}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Instagram</span>
+                  {(() => {
+                    const noCar = carrossel.includes(i.codigo);
+                    const cheio = !noCar && carrossel.length >= MAX_CARROSSEL;
+                    return (
+                      <label
+                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${noCar ? 'border-pink-600 bg-pink-600 text-white' : 'border-slate-200 text-slate-600'} ${cheio ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:border-slate-300'}`}
+                        style={noCar ? undefined : { backgroundColor: '#ffffff' }}
+                        title={cheio ? `O carrossel aceita no máximo ${MAX_CARROSSEL} imóveis` : undefined}>
+                        <input type="checkbox" className="size-3.5" checked={noCar} disabled={cheio}
+                          onChange={() => { setMsgCar(null); setCarrossel((c) => (noCar ? c.filter((x) => x !== i.codigo) : [...c, i.codigo])); }} />
+                        Carrossel de curadoria
+                      </label>
+                    );
+                  })()}
                   <button type="button" onClick={() => setPrevia((p) => (p === i.codigo ? null : i.codigo))}
                     className="rounded-full border border-transparent px-3 py-1.5 text-xs font-semibold text-blue-700 hover:underline">
                     {previa === i.codigo ? 'Fechar anúncio' : 'Ver anúncio'}
@@ -519,6 +576,46 @@ export default function Vitrine({
           className="mx-auto mt-5 block rounded-lg border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50">
           Mostrar mais {Math.min(POR_PAGINA, lista.length - limite)}
         </button>
+      )}
+
+      {carrosseis.length > 0 && (
+        <section className="mt-8">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Carrosséis recentes</h2>
+          <ul className="mt-2 grid gap-2">
+            {carrosseis.map((c) => (
+              <li key={c.id} style={{ backgroundColor: '#ffffff' }}
+                className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                <span className="font-medium text-slate-800">{c.bairro_nome ?? 'Curadoria'} · {c.qtd_imoveis ?? 0} imóveis</span>
+                <span className={c.status === 'postado' ? 'text-emerald-700' : c.status === 'erro' ? 'text-red-700' : 'text-slate-500'}>
+                  {STATUS_CARROSSEL[c.status ?? ''] ?? c.status}
+                  {c.created_at ? ` · ${new Date(c.created_at).toLocaleDateString('pt-BR')}` : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {(carrossel.length > 0 || msgCar) && (
+        <div className="sticky bottom-0 z-10 -mx-4 mt-6 border-t border-pink-200 px-4 pt-3 sm:mx-0 sm:rounded-2xl sm:border"
+          style={{ backgroundColor: '#fdf2f8', paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}>
+          {carrossel.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-pink-800">
+                Carrossel Instagram: {carrossel.length}/{MAX_CARROSSEL}
+              </span>
+              <input value={tituloCar} onChange={(e) => setTituloCar(e.target.value)} maxLength={40}
+                placeholder="Título (ex.: Jardim Paulista)" aria-label="Título do carrossel"
+                className="min-w-0 flex-1 rounded-lg border border-pink-200 bg-white px-3 py-2 text-sm text-slate-900" />
+              <button type="button" disabled={enviandoCar} onClick={enviarCarrossel}
+                className="rounded-lg bg-pink-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
+                {enviandoCar ? 'Enviando…' : 'Gerar carrossel'}
+              </button>
+              <button type="button" onClick={() => setCarrossel([])} className="text-sm text-slate-600">Limpar</button>
+            </div>
+          )}
+          {msgCar && <p className={`mt-2 text-sm ${msgCar.tipo === 'ok' ? 'text-emerald-700' : 'text-red-700'}`}>{msgCar.texto}</p>}
+        </div>
       )}
     </div>
   );

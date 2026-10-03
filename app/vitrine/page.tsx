@@ -5,10 +5,10 @@
 import Link from 'next/link';
 import { exigirAdmin } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import Vitrine, { type Imovel, type Vitrine as Vitrine_, type GeoAlvo } from './vitrine';
+import Vitrine, { type Imovel, type Vitrine as Vitrine_, type GeoAlvo, type Carrossel } from './vitrine';
 
 export const dynamic = 'force-dynamic';
-export const metadata = { title: 'Vitrine Google Ads — REMAX Ville' };
+export const metadata = { title: 'Vitrine de imóveis — REMAX Ville' };
 
 async function carregar() {
   const sb = supabaseAdmin();
@@ -42,7 +42,19 @@ async function carregar() {
   if (e3) throw new Error(e3.message);
   const { data: geo, error: e4 } = await sb.from('ads_geo_alvos').select('geo_id,nome,tipo').order('nome');
   if (e4) throw new Error(e4.message);
-  return { imoveis, selecao, vitrines: (vit ?? []) as Vitrine_[], geo: (geo ?? []) as GeoAlvo[] };
+  // Carrosséis de curadoria recentes (só leitura; se a tabela falhar, a tela segue sem o histórico).
+  const { data: car } = await sb
+    .from('curadoria_carrosseis')
+    .select('id,bairro_nome,status,qtd_imoveis,created_at,postado_em')
+    .order('id', { ascending: false })
+    .limit(6);
+  return {
+    imoveis,
+    selecao,
+    vitrines: (vit ?? []) as Vitrine_[],
+    geo: (geo ?? []) as GeoAlvo[],
+    carrosseis: (car ?? []) as Carrossel[],
+  };
 }
 
 export default async function VitrinePage() {
@@ -61,18 +73,19 @@ export default async function VitrinePage() {
         <Link href="/" className="text-sm text-slate-500 hover:text-slate-800">
           ← Voltar ao painel
         </Link>
-        <h1 className="mt-3 text-2xl font-semibold text-slate-900">Vitrine Google Ads</h1>
+        <h1 className="mt-3 text-2xl font-semibold text-slate-900">Vitrine de imóveis</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Crie vitrines por bairro, tipo e faixa de valor e escolha os imóveis de cada uma. Cada vitrine vira um
-          grupo da campanha &quot;Imóveis à venda por região&quot; no Google Ads e aparece para quem está no público
-          escolhido. As mudanças vão para o Google todo dia às 6h30.
+          Para cada imóvel, marque o que fazer: anúncio no Google Ads (dentro de uma vitrine) e/ou post no carrossel
+          de curadoria do Instagram. As vitrines viram grupos da campanha &quot;Imóveis à venda por região&quot; e as
+          mudanças vão para o Google todo dia às 6h30. O carrossel segue para a sua aprovação no WhatsApp antes de postar.
         </p>
         {erro || !dados ? (
           <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
             Não consegui carregar os imóveis agora: {erro}
           </div>
         ) : (
-          <Vitrine imoveis={dados.imoveis} selecaoInicial={dados.selecao} vitrines={dados.vitrines} geo={dados.geo} />
+          <Vitrine imoveis={dados.imoveis} selecaoInicial={dados.selecao} vitrines={dados.vitrines} geo={dados.geo}
+            carrosseis={dados.carrosseis} />
         )}
       </main>
     </div>

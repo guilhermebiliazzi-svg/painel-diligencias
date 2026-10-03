@@ -104,3 +104,40 @@ export async function arquivarVitrine(id: string): Promise<Resultado> {
   }
   return { ok: true };
 }
+
+// Carrossel de curadoria para o Instagram (independente dos anúncios).
+// Grava o pedido e avisa o n8n, que monta os slides e manda a prévia para
+// aprovação no WhatsApp — o mesmo fluxo da mensagem [CURADORIA] para a Eva.
+const WEBHOOK_CURADORIA = 'https://villejds.app.n8n.cloud/webhook/curadoria-painel';
+
+export async function gerarCarrossel(titulo: string, codigos: string[]): Promise<Resultado> {
+  const eu = await exigirAdmin();
+  const t = String(titulo || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+  if (t.length < 3) return { ok: false, erro: 'Dê um título ao carrossel (ex.: Jardim Paulista).' };
+  const cods = Array.from(new Set((codigos || []).map((c) => String(c).trim().toUpperCase()))).filter((c) =>
+    /^[A-Z0-9]{3,12}$/.test(c)
+  );
+  if (!cods.length) return { ok: false, erro: 'Marque ao menos 1 imóvel para o carrossel.' };
+  if (cods.length > 8) return { ok: false, erro: 'O carrossel aceita no máximo 8 imóveis.' };
+
+  const sb = supabaseAdmin();
+  const { data, error } = await sb
+    .from('curadoria_pedidos')
+    .insert({ titulo: t, codigos: cods, criado_por: eu.email })
+    .select('id')
+    .single();
+  if (error || !data) return { ok: false, erro: 'Não foi possível registrar o pedido: ' + (error?.message ?? '') };
+
+  try {
+    const r = await fetch(WEBHOOK_CURADORIA, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pedido_id: data.id }),
+      cache: 'no-store',
+    });
+    if (!r.ok) return { ok: false, erro: 'O gerador de carrossel não respondeu (' + r.status + '). Tente de novo em instantes.' };
+  } catch {
+    return { ok: false, erro: 'O gerador de carrossel não respondeu. Tente de novo em instantes.' };
+  }
+  return { ok: true, id: data.id };
+}
