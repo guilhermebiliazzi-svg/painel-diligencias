@@ -61,7 +61,7 @@ export default function PagamentosPage() {
   return (
     <div className="vj-wrap">
       <header className="vj-top">
-        <a href="/" className="vj-mark vj-marklink">RE/MAX <span>Ville</span></a>
+        <a href="/" className="vj-mark vj-marklink">REMAX <span>Ville</span></a>
         <div className="vj-crumb">Administração · Contas a pagar</div>
       </header>
 
