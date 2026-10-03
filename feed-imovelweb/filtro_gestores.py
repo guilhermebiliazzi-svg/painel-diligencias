@@ -33,7 +33,12 @@ DIAS_VALIDADE = int(os.environ.get("FILTRO_GESTORES_DIAS", "30"))
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 PERMITIDOS = re.compile(r"animacasa|yuca", re.I)
-FICAM = {"remax", "parceiro_autorizado", "sem_dados"}
+FICAM = {"remax", "parceiro_autorizado", "sem_dados", "pendente_remax"}
+REMAX_BUSCA = "https://www.remax.com.br/search/agent-search/docs/search"
+REMAX_FILTRO = ("content/TenantId eq 6 and content/MacroRegionId eq 55 and content/Category eq 1 "
+                "and content/ExcludeAgentTraining eq false and content/Disabled eq false "
+                "and content/IsRegionalOffice eq false and content/AgentName ne null "
+                "and content/Hidden eq false and content/IsDisabledOffice eq false")
 
 _TAB = {}          # codigo -> linha da tabela
 _RESUMO = {}
@@ -100,6 +105,41 @@ def consultar(slug, codigo):
     return x
 
 
+def _tel8(t):
+    d = re.sub(r"\D", "", t or "")
+    return d[-8:] if len(d) >= 8 else None
+
+
+def telefones_remax():
+    """Telefones (8 últimos dígitos) de todos os corretores do site remax.com.br.
+    Devolve None se o site não responder: aí ninguém é tirado por falta de checagem."""
+    tels, skip = {}, 0
+    try:
+        while skip < 30000:
+            r = requests.post(REMAX_BUSCA, timeout=60, headers={
+                "Content-Type": "application/json", "User-Agent": "Mozilla/5.0",
+                "Origin": "https://www.remax.com.br",
+                "Referer": "https://www.remax.com.br/ProfileSearch?countryId=55&searchType=agent"},
+                data=json.dumps({"count": False, "skip": skip, "top": 1000, "search": "*",
+                                 "queryType": "full", "select": "*", "filter": REMAX_FILTRO,
+                                 "orderby": "content/LastName asc, content/FirstName asc"}))
+            r.raise_for_status()
+            lote = r.json().get("value") or []
+            for v in lote:
+                c = v.get("content") or {}
+                for campo in ("AgentPhone", "AgentDirectDialPhone", "WhatsApp"):
+                    t = _tel8(c.get(campo))
+                    if t:
+                        tels[t] = f"{c.get('AgentName')} / {c.get('OfficeName')}"
+            if len(lote) < 1000:
+                break
+            skip += 1000
+    except Exception as e:
+        print(f"  site REMAX indisponível ({type(e).__name__}): checagem por telefone adiada")
+        return None
+    return tels if len(tels) > 1000 else None
+
+
 def _gravar(linhas):
     for k in range(0, len(linhas), 500):
         r = requests.post(
@@ -130,13 +170,23 @@ def preparar(itens):
                 venc = datetime.fromisoformat(l["consultado_em"].replace("Z", "+00:00")) < limite
             except Exception:
                 venc = True
-        if l is None or venc:
+        if l is None or venc or l.get("classificacao") == "pendente_remax":
             faltam.append((slug, cod))
     t0 = time.time()
     novos = []
     with ThreadPoolExecutor(max_workers=6) as ex:
         for x in ex.map(lambda a: consultar(*a), faltam):
             novos.append(x)
+    # e-mail fora da REMAX: confere o telefone no site remax.com.br antes de tirar
+    fora = [x for x in novos if x["classificacao"] == "nao_remax"]
+    if fora:
+        tels = telefones_remax()
+        for x in fora:
+            if tels is None:
+                x["classificacao"], x["motivo"] = "pendente_remax", "site REMAX não respondeu; confere na próxima"
+            elif _tel8(x.get("whatsapp")) in tels:
+                x["classificacao"] = "remax"
+                x["motivo"] = "site REMAX (telefone): " + tels[_tel8(x.get("whatsapp"))]
     if novos:
         _gravar(novos)
         for x in novos:
