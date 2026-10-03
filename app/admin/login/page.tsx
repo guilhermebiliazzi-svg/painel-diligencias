@@ -37,7 +37,7 @@ export default async function LoginPage({
       <div className="w-full max-w-md">
         <div style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-8 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-            RE/MAX Ville
+            REMAX Ville
           </p>
           <h1 className="mt-2 text-2xl font-semibold text-slate-900">
             Painel administrativo
