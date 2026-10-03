@@ -72,6 +72,9 @@ function unicos(lista: (string | null)[]) {
 
 export default function Vitrine({ imoveis, selecaoInicial }: { imoveis: Imovel[]; selecaoInicial: Record<string, string[]> }) {
   const [sel, setSel] = useState<Record<string, string[]>>(selecaoInicial);
+  // Ordem "escolhidos primeiro" congelada: só muda quando os filtros mudam,
+  // para a lista não pular enquanto você marca imóveis.
+  const [fixos, setFixos] = useState<Set<string>>(() => new Set(Object.keys(selecaoInicial)));
   const [vitrine, setVitrine] = useState('');
   const [busca, setBusca] = useState('');
   const [bairro, setBairro] = useState('');
@@ -107,7 +110,7 @@ export default function Vitrine({ imoveis, selecaoInicial }: { imoveis: Imovel[]
         (!mx || (i.preco ?? 0) <= mx) &&
         (!vitrine || (sel[i.codigo] ?? []).includes(vitrine))
     );
-    const escolhido = (i: Imovel) => ((sel[i.codigo] ?? []).length ? 1 : 0);
+    const escolhido = (i: Imovel) => (fixos.has(i.codigo) ? 1 : 0);
     const preco = (i: Imovel) => i.preco ?? 0;
     l.sort(
       ordem === 'pdesc' ? (a, b) => preco(b) - preco(a)
@@ -116,7 +119,7 @@ export default function Vitrine({ imoveis, selecaoInicial }: { imoveis: Imovel[]
         : (a, b) => escolhido(b) - escolhido(a) || preco(b) - preco(a)
     );
     return l;
-  }, [imoveis, indice, busca, bairro, tipo, unidade, pmin, pmax, vitrine, sel, ordem]);
+  }, [imoveis, indice, busca, bairro, tipo, unidade, pmin, pmax, vitrine, sel, fixos, ordem]);
 
   const contagem = (g: string) => Object.values(sel).filter((v) => v.includes(g)).length;
   const totalEscolhidos = Object.keys(sel).length;
@@ -145,7 +148,7 @@ export default function Vitrine({ imoveis, selecaoInicial }: { imoveis: Imovel[]
     });
   }
 
-  const resetar = (f: () => void) => { f(); setLimite(POR_PAGINA); };
+  const resetar = (f: () => void) => { f(); setFixos(new Set(Object.keys(sel))); setLimite(POR_PAGINA); };
   const campo = 'w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm';
 
   return (
