@@ -157,7 +157,7 @@ export default function Repasse() {
   return (
     <div className="vj-wrap">
       <header className="vj-top">
-        <a href="/cobrancas" className="vj-mark vj-marklink">RE/MAX <span>Ville</span></a>
+        <a href="/cobrancas" className="vj-mark vj-marklink">REMAX <span>Ville</span></a>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <div className="vj-crumb">Administração · Repasse ao locador</div>
           <a href="/" className="vj-back">← Painel</a>
