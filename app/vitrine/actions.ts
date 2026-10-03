@@ -117,7 +117,7 @@ export async function gerarCarrossel(titulo: string, codigos: string[]): Promise
   const cods = Array.from(new Set((codigos || []).map((c) => String(c).trim().toUpperCase()))).filter((c) =>
     /^[A-Z0-9]{3,12}$/.test(c)
   );
-  if (!cods.length) return { ok: false, erro: 'Marque ao menos 1 imóvel para o carrossel.' };
+  if (cods.length < 5) return { ok: false, erro: 'O carrossel precisa de pelo menos 5 imóveis.' };
   if (cods.length > 8) return { ok: false, erro: 'O carrossel aceita no máximo 8 imóveis.' };
 
   const sb = supabaseAdmin();

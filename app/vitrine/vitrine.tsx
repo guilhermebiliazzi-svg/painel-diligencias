@@ -41,6 +41,7 @@ export type Carrossel = {
   postado_em: string | null;
 };
 
+const MIN_CARROSSEL = 5;
 const MAX_CARROSSEL = 8;
 const STATUS_CARROSSEL: Record<string, string> = {
   gerando: 'Gerando slides',
@@ -603,11 +604,12 @@ export default function Vitrine({
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-pink-800">
                 Carrossel Instagram: {carrossel.length}/{MAX_CARROSSEL}
+                {carrossel.length < MIN_CARROSSEL && <span className="font-normal text-pink-700"> · marque pelo menos {MIN_CARROSSEL}</span>}
               </span>
               <input value={tituloCar} onChange={(e) => setTituloCar(e.target.value)} maxLength={40}
                 placeholder="Título (ex.: Jardim Paulista)" aria-label="Título do carrossel"
                 className="min-w-0 flex-1 rounded-lg border border-pink-200 bg-white px-3 py-2 text-sm text-slate-900" />
-              <button type="button" disabled={enviandoCar} onClick={enviarCarrossel}
+              <button type="button" disabled={enviandoCar || carrossel.length < MIN_CARROSSEL} onClick={enviarCarrossel}
                 className="rounded-lg bg-pink-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
                 {enviandoCar ? 'Enviando…' : 'Gerar carrossel'}
               </button>
