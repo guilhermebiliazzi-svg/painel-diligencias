@@ -5,7 +5,7 @@
 import Link from 'next/link';
 import { exigirAdmin } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import Vitrine, { type Imovel } from './vitrine';
+import Vitrine, { type Imovel, type Vitrine as Vitrine_, type GeoAlvo } from './vitrine';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Vitrine Google Ads — REMAX Ville' };
@@ -33,7 +33,16 @@ async function carregar() {
   for (const s of (sel ?? []) as { codigo: string; grupos: string[] }[]) {
     if (s.grupos?.length) selecao[s.codigo] = s.grupos;
   }
-  return { imoveis, selecao };
+  const { data: vit, error: e3 } = await sb
+    .from('ads_vitrines')
+    .select('id,nome,ad_group_id,bairros,tipos,preco_min,preco_max,publico')
+    .eq('ativo', true)
+    .order('ordem')
+    .order('criado_em');
+  if (e3) throw new Error(e3.message);
+  const { data: geo, error: e4 } = await sb.from('ads_geo_alvos').select('geo_id,nome,tipo').order('nome');
+  if (e4) throw new Error(e4.message);
+  return { imoveis, selecao, vitrines: (vit ?? []) as Vitrine_[], geo: (geo ?? []) as GeoAlvo[] };
 }
 
 export default async function VitrinePage() {
@@ -54,15 +63,16 @@ export default async function VitrinePage() {
         </Link>
         <h1 className="mt-3 text-2xl font-semibold text-slate-900">Vitrine Google Ads</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Escolha os imóveis da campanha &quot;Imóveis à venda por região&quot;. Cada vitrine é o público de uma
-          região de São Paulo: o imóvel aparece para quem está naquela região.
+          Crie vitrines por bairro, tipo e faixa de valor e escolha os imóveis de cada uma. Cada vitrine vira um
+          grupo da campanha &quot;Imóveis à venda por região&quot; no Google Ads e aparece para quem está no público
+          escolhido. As mudanças vão para o Google todo dia às 6h30.
         </p>
         {erro || !dados ? (
           <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
             Não consegui carregar os imóveis agora: {erro}
           </div>
         ) : (
-          <Vitrine imoveis={dados.imoveis} selecaoInicial={dados.selecao} />
+          <Vitrine imoveis={dados.imoveis} selecaoInicial={dados.selecao} vitrines={dados.vitrines} geo={dados.geo} />
         )}
       </main>
     </div>

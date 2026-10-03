@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, useTransition } from 'react';
-import { salvarGrupos } from './actions';
+import { salvarGrupos, salvarVitrine, arquivarVitrine, type VitrineEntrada } from './actions';
 
 export type Imovel = {
   codigo: string;
@@ -19,11 +19,18 @@ export type Imovel = {
   gestor: string | null;
 };
 
-const GRUPOS = [
-  { k: 'jardins', rotulo: 'Jardins e Itaim' },
-  { k: 'zonasul', rotulo: 'Zona Sul' },
-  { k: 'demais', rotulo: 'Demais bairros' },
-] as const;
+export type Vitrine = {
+  id: string;
+  nome: string;
+  ad_group_id: string | null;
+  bairros: string[];
+  tipos: string[];
+  preco_min: number | null;
+  preco_max: number | null;
+  publico: string[];
+};
+
+export type GeoAlvo = { geo_id: string; nome: string; tipo: string | null };
 
 const SITE = 'https://www.villejardins.com.br/imovel/imovel-id-';
 const POR_PAGINA = 30;
@@ -66,11 +73,175 @@ function PreviaAnuncio({ i }: { i: Imovel }) {
   );
 }
 
+// Lista com busca para escolher vários itens (bairros, tipos, público).
+function MultiEscolha({
+  rotulo, opcoes, valor, onChange, vazio,
+}: {
+  rotulo: string;
+  opcoes: { v: string; r: string }[];
+  valor: string[];
+  onChange: (v: string[]) => void;
+  vazio: string;
+}) {
+  const [q, setQ] = useState('');
+  const nomes = useMemo(() => new Map(opcoes.map((o) => [o.v, o.r])), [opcoes]);
+  const achados = useMemo(() => {
+    const b = norm(q.trim());
+    return opcoes.filter((o) => !valor.includes(o.v) && (!b || norm(o.r).includes(b))).slice(0, 40);
+  }, [opcoes, valor, q]);
+  return (
+    <div className="min-w-0">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{rotulo}</p>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {valor.length === 0 && <span className="text-sm text-slate-400">{vazio}</span>}
+        {valor.map((v) => (
+          <button key={v} type="button" onClick={() => onChange(valor.filter((x) => x !== v))}
+            className="rounded-full bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white">
+            {nomes.get(v) ?? v} ✕
+          </button>
+        ))}
+      </div>
+      <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar para adicionar"
+        className="mt-2 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900" />
+      {q.trim() && (
+        <div className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+          {achados.length === 0 && <p className="px-3 py-2 text-sm text-slate-400">Nada encontrado.</p>}
+          {achados.map((o) => (
+            <button key={o.v} type="button" onClick={() => { onChange([...valor, o.v]); setQ(''); }}
+              className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50">
+              + {o.r}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const resumoVitrine = (v: Vitrine) =>
+  [
+    v.bairros.length ? v.bairros.slice(0, 4).join(', ') + (v.bairros.length > 4 ? ` +${v.bairros.length - 4}` : '') : '',
+    v.tipos.length ? v.tipos.join(', ') : '',
+    v.preco_min || v.preco_max
+      ? `${v.preco_min ? 'de ' + fmtPreco(v.preco_min) : ''}${v.preco_min && v.preco_max ? ' ' : ''}${v.preco_max ? 'até ' + fmtPreco(v.preco_max) : ''}`
+      : '',
+  ].filter(Boolean).join(' · ') || 'Sem filtros';
+
+function EditorVitrine({
+  inicial, bairros, tipos, geo, onSalvo, onFechar, onArquivado,
+}: {
+  inicial: VitrineEntrada;
+  bairros: string[];
+  tipos: string[];
+  geo: GeoAlvo[];
+  onSalvo: (v: Vitrine) => void;
+  onFechar: () => void;
+  onArquivado: (id: string) => void;
+}) {
+  const [d, setD] = useState<VitrineEntrada>(inicial);
+  const [erro, setErro] = useState('');
+  const [confirmar, setConfirmar] = useState(false);
+  const [pendente, iniciar] = useTransition();
+  const campo = 'w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900';
+  const opGeo = useMemo(() => geo.map((g) => ({ v: g.geo_id, r: g.nome })), [geo]);
+
+  function salvar() {
+    setErro('');
+    iniciar(async () => {
+      const r = await salvarVitrine(d);
+      if (!r.ok || !r.id) { setErro(r.erro ?? 'Não foi possível salvar.'); return; }
+      onSalvo({
+        id: r.id, nome: d.nome.trim(), ad_group_id: null, bairros: d.bairros, tipos: d.tipos,
+        preco_min: d.preco_min || null, preco_max: d.preco_max || null, publico: d.publico,
+      });
+    });
+  }
+  function arquivar() {
+    if (!d.id) return;
+    iniciar(async () => {
+      const r = await arquivarVitrine(d.id!);
+      if (!r.ok) { setErro(r.erro ?? 'Não foi possível arquivar.'); return; }
+      onArquivado(d.id!);
+    });
+  }
+
+  return (
+    <div style={{ backgroundColor: '#ffffff' }} className="mt-4 rounded-2xl border border-blue-300 p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold text-slate-900">{d.id ? 'Editar vitrine' : 'Nova vitrine'}</h2>
+        <button type="button" onClick={onFechar} className="text-sm text-slate-500 hover:text-slate-800">Fechar</button>
+      </div>
+      <div className="mt-3 grid gap-4">
+        <label className="block">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Nome</span>
+          <input className={`${campo} mt-1.5`} value={d.nome} maxLength={60} placeholder="Ex.: Apartamentos em Moema até R$ 1,5 mi"
+            onChange={(e) => setD({ ...d, nome: e.target.value })} />
+        </label>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <MultiEscolha rotulo="Bairros dos imóveis" opcoes={bairros.map((b) => ({ v: b, r: b }))} valor={d.bairros}
+            onChange={(v) => setD({ ...d, bairros: v })} vazio="Todos os bairros" />
+          <MultiEscolha rotulo="Tipos de imóvel" opcoes={tipos.map((t) => ({ v: t, r: t }))} valor={d.tipos}
+            onChange={(v) => setD({ ...d, tipos: v })} vazio="Todos os tipos" />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Preço mínimo</span>
+            <input className={`${campo} mt-1.5`} type="number" inputMode="numeric" value={d.preco_min ?? ''}
+              onChange={(e) => setD({ ...d, preco_min: e.target.value ? Number(e.target.value) : null })} />
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Preço máximo</span>
+            <input className={`${campo} mt-1.5`} type="number" inputMode="numeric" value={d.preco_max ?? ''}
+              onChange={(e) => setD({ ...d, preco_max: e.target.value ? Number(e.target.value) : null })} />
+          </label>
+        </div>
+        <MultiEscolha rotulo="Público: onde o anúncio aparece (regiões do Google)" opcoes={opGeo} valor={d.publico}
+          onChange={(v) => setD({ ...d, publico: v })} vazio="Escolha ao menos uma região" />
+        <p className="-mt-2 text-xs text-slate-500">
+          O Google só separa São Paulo por distritos (ex.: Brooklin entra em Santo Amaro ou Campo Belo; Vila Olímpia em Itaim Bibi).
+        </p>
+      </div>
+      {erro && <p className="mt-3 text-sm text-red-700">{erro}</p>}
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <button type="button" disabled={pendente} onClick={salvar}
+          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
+          {pendente ? 'Salvando…' : d.id ? 'Salvar vitrine' : 'Criar vitrine'}
+        </button>
+        {d.id && !confirmar && (
+          <button type="button" onClick={() => setConfirmar(true)} className="rounded-lg px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50">
+            Arquivar vitrine
+          </button>
+        )}
+        {d.id && confirmar && (
+          <span className="flex flex-wrap items-center gap-2 text-sm text-red-800">
+            Os imóveis saem dela e os anúncios são pausados.
+            <button type="button" disabled={pendente} onClick={arquivar} className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white">
+              Confirmar
+            </button>
+            <button type="button" onClick={() => setConfirmar(false)} className="text-slate-600">Cancelar</button>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function unicos(lista: (string | null)[]) {
   return Array.from(new Set(lista.filter((x): x is string => !!x))).sort((a, b) => a.localeCompare(b, 'pt-BR'));
 }
 
-export default function Vitrine({ imoveis, selecaoInicial }: { imoveis: Imovel[]; selecaoInicial: Record<string, string[]> }) {
+export default function Vitrine({
+  imoveis, selecaoInicial, vitrines, geo,
+}: {
+  imoveis: Imovel[];
+  selecaoInicial: Record<string, string[]>;
+  vitrines: Vitrine[];
+  geo: GeoAlvo[];
+}) {
+  const [vits, setVits] = useState<Vitrine[]>(vitrines);
+  const [modo, setModo] = useState<'escolhidos' | 'escolher'>('escolhidos');
+  const [editor, setEditor] = useState<VitrineEntrada | null>(null);
+  const geoNome = useMemo(() => new Map(geo.map((g) => [g.geo_id, g.nome])), [geo]);
   const [sel, setSel] = useState<Record<string, string[]>>(selecaoInicial);
   // Ordem "escolhidos primeiro" congelada: só muda quando os filtros mudam,
   // para a lista não pular enquanto você marca imóveis.
@@ -96,6 +267,8 @@ export default function Vitrine({ imoveis, selecaoInicial }: { imoveis: Imovel[]
     [imoveis]
   );
 
+  const vAtiva = vits.find((v) => v.id === vitrine) ?? null;
+
   const lista = useMemo(() => {
     const b = norm(busca.trim());
     const mn = Number(pmin) || 0;
@@ -108,7 +281,13 @@ export default function Vitrine({ imoveis, selecaoInicial }: { imoveis: Imovel[]
         (!unidade || nomeUnidade(i.unidade) === unidade) &&
         (!mn || (i.preco ?? 0) >= mn) &&
         (!mx || (i.preco ?? 0) <= mx) &&
-        (!vitrine || (sel[i.codigo] ?? []).includes(vitrine))
+        (!vitrine || modo === 'escolher' || (sel[i.codigo] ?? []).includes(vitrine)) &&
+        (!vAtiva || modo === 'escolhidos' || (
+          (!vAtiva.bairros.length || vAtiva.bairros.includes(i.bairro ?? '')) &&
+          (!vAtiva.tipos.length || vAtiva.tipos.includes(i.tipo ?? '')) &&
+          (!vAtiva.preco_min || (i.preco ?? 0) >= vAtiva.preco_min) &&
+          (!vAtiva.preco_max || ((i.preco ?? 0) > 0 && (i.preco ?? 0) <= vAtiva.preco_max))
+        ))
     );
     const escolhido = (i: Imovel) => (fixos.has(i.codigo) ? 1 : 0);
     const preco = (i: Imovel) => i.preco ?? 0;
@@ -119,7 +298,7 @@ export default function Vitrine({ imoveis, selecaoInicial }: { imoveis: Imovel[]
         : (a, b) => escolhido(b) - escolhido(a) || preco(b) - preco(a)
     );
     return l;
-  }, [imoveis, indice, busca, bairro, tipo, unidade, pmin, pmax, vitrine, sel, fixos, ordem]);
+  }, [imoveis, indice, busca, bairro, tipo, unidade, pmin, pmax, vitrine, vAtiva, modo, sel, fixos, ordem]);
 
   const contagem = (g: string) => Object.values(sel).filter((v) => v.includes(g)).length;
   const totalEscolhidos = Object.keys(sel).length;
@@ -153,21 +332,86 @@ export default function Vitrine({ imoveis, selecaoInicial }: { imoveis: Imovel[]
 
   return (
     <div className="mt-6">
-      <div className="grid grid-cols-3 gap-2 sm:gap-3">
-        {GRUPOS.map((g) => (
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+        {vits.map((g) => (
           <button
-            key={g.k}
+            key={g.id}
             type="button"
-            aria-pressed={vitrine === g.k}
-            onClick={() => resetar(() => setVitrine((v) => (v === g.k ? '' : g.k)))}
-            style={{ backgroundColor: vitrine === g.k ? '#eff6ff' : '#ffffff' }}
-            className={`rounded-2xl border p-3 text-left shadow-sm transition sm:p-4 ${vitrine === g.k ? 'border-blue-500' : 'border-slate-200 hover:border-slate-300'}`}
+            aria-pressed={vitrine === g.id}
+            onClick={() => resetar(() => { setVitrine((v) => (v === g.id ? '' : g.id)); setModo('escolhidos'); setEditor(null); })}
+            style={{ backgroundColor: vitrine === g.id ? '#eff6ff' : '#ffffff' }}
+            className={`min-w-0 rounded-2xl border p-3 text-left shadow-sm transition sm:p-4 ${vitrine === g.id ? 'border-blue-500' : 'border-slate-200 hover:border-slate-300'}`}
           >
-            <p className="text-2xl font-semibold tabular-nums text-slate-900">{contagem(g.k)}</p>
-            <p className="mt-0.5 text-xs font-medium text-slate-500 sm:text-sm">{g.rotulo}</p>
+            <p className="text-2xl font-semibold tabular-nums text-slate-900">{contagem(g.id)}</p>
+            <p className="mt-0.5 truncate text-xs font-medium text-slate-600 sm:text-sm">{g.nome}</p>
+            {!g.ad_group_id && <p className="mt-1 text-[11px] font-medium text-amber-700">Entra no Google às 6h30</p>}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => { setEditor({ nome: '', bairros: [], tipos: [], preco_min: null, preco_max: null, publico: ['1001773'] }); setVitrine(''); }}
+          style={{ backgroundColor: '#ffffff' }}
+          className="rounded-2xl border border-dashed border-slate-300 p-3 text-left text-sm font-semibold text-blue-700 hover:border-blue-400 sm:p-4"
+        >
+          + Nova vitrine
+          <span className="mt-1 block text-xs font-normal text-slate-500">Por bairro, tipo e faixa de valor</span>
+        </button>
       </div>
+
+      {editor && (
+        <EditorVitrine
+          key={editor.id ?? 'nova'}
+          inicial={editor}
+          bairros={bairros}
+          tipos={tipos}
+          geo={geo}
+          onFechar={() => setEditor(null)}
+          onSalvo={(v) => {
+            setVits((l) => (l.some((x) => x.id === v.id) ? l.map((x) => (x.id === v.id ? { ...x, ...v, ad_group_id: x.ad_group_id } : x)) : [...l, v]));
+            setEditor(null);
+            resetar(() => { setVitrine(v.id); setModo('escolher'); });
+            setMsg({ tipo: 'ok', texto: 'Vitrine salva' });
+          }}
+          onArquivado={(id) => {
+            setVits((l) => l.filter((x) => x.id !== id));
+            setSel((s) => {
+              const n: Record<string, string[]> = {};
+              for (const [k, v] of Object.entries(s)) { const r = v.filter((x) => x !== id); if (r.length) n[k] = r; }
+              return n;
+            });
+            setEditor(null);
+            setVitrine('');
+            setMsg({ tipo: 'ok', texto: 'Vitrine arquivada' });
+          }}
+        />
+      )}
+
+      {vAtiva && !editor && (
+        <div style={{ backgroundColor: '#ffffff' }} className="mt-4 rounded-2xl border border-slate-200 p-3 shadow-sm sm:p-4">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="font-semibold text-slate-900">{vAtiva.nome}</p>
+              <p className="mt-0.5 text-sm text-slate-600">{resumoVitrine(vAtiva)}</p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Público: {vAtiva.publico.map((g) => geoNome.get(g) ?? g).join(', ')}
+              </p>
+            </div>
+            <button type="button"
+              onClick={() => setEditor({ id: vAtiva.id, nome: vAtiva.nome, bairros: vAtiva.bairros, tipos: vAtiva.tipos, preco_min: vAtiva.preco_min, preco_max: vAtiva.preco_max, publico: vAtiva.publico })}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Editar
+            </button>
+          </div>
+          <div className="mt-3 inline-flex rounded-lg border border-slate-200 p-0.5 text-sm">
+            {(['escolhidos', 'escolher'] as const).map((m) => (
+              <button key={m} type="button" onClick={() => resetar(() => setModo(m))}
+                className={`rounded-md px-3 py-1.5 font-medium ${modo === m ? 'bg-blue-600 text-white' : 'text-slate-600'}`}>
+                {m === 'escolhidos' ? `Escolhidos (${contagem(vAtiva.id)})` : 'Escolher pelos filtros da vitrine'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <input className={`${campo} col-span-2`} type="search" placeholder="Buscar rua, condomínio ou código" aria-label="Buscar"
@@ -197,7 +441,7 @@ export default function Vitrine({ imoveis, selecaoInicial }: { imoveis: Imovel[]
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
-        <span><b className="tabular-nums text-slate-900">{lista.length.toLocaleString('pt-BR')}</b> {vitrine ? 'imóveis nesta vitrine' : 'imóveis à venda'}</span>
+        <span><b className="tabular-nums text-slate-900">{lista.length.toLocaleString('pt-BR')}</b> {vitrine && modo === 'escolhidos' ? 'imóveis nesta vitrine' : 'imóveis à venda'}</span>
         <span><b className="tabular-nums text-slate-900">{totalEscolhidos}</b> escolhidos no total</span>
         {pendente && <span className="text-slate-400">Salvando…</span>}
         {!pendente && msg && <span className={msg.tipo === 'ok' ? 'text-emerald-700' : 'text-red-700'}>{msg.texto}</span>}
@@ -212,8 +456,8 @@ export default function Vitrine({ imoveis, selecaoInicial }: { imoveis: Imovel[]
       <div className="mt-4 grid gap-3">
         {lista.length === 0 && (
           <p className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
-            {vitrine
-              ? 'Nenhum imóvel nesta vitrine. Toque de novo no número da vitrine para ver todos e escolha pelos botões de região.'
+            {vitrine && modo === 'escolhidos'
+              ? 'Nenhum imóvel escolhido nesta vitrine ainda. Toque em "Escolher pelos filtros da vitrine".'
               : 'Nenhum imóvel com esses filtros.'}
           </p>
         )}
@@ -248,13 +492,13 @@ export default function Vitrine({ imoveis, selecaoInicial }: { imoveis: Imovel[]
                 {ficha && <p className="mt-0.5 text-sm tabular-nums text-slate-500">{ficha}</p>}
                 <p className="mt-0.5 text-xs text-slate-500">{nomeUnidade(i.unidade)}{i.gestor ? ` · ${i.gestor}` : ''}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {GRUPOS.map((gr) => {
-                    const ativo = g.includes(gr.k);
+                  {(vAtiva ? [vAtiva, ...vits.filter((x) => x.id !== vAtiva.id && g.includes(x.id))] : vits).map((gr) => {
+                    const ativo = g.includes(gr.id);
                     return (
-                      <button key={gr.k} type="button" aria-pressed={ativo} onClick={() => alternar(i.codigo, gr.k)}
+                      <button key={gr.id} type="button" aria-pressed={ativo} onClick={() => alternar(i.codigo, gr.id)}
                         className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${ativo ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}
                         style={ativo ? undefined : { backgroundColor: '#ffffff' }}>
-                        {ativo ? '✓ ' : '+ '}{gr.rotulo}
+                        {ativo ? '✓ ' : '+ '}{gr.nome}
                       </button>
                     );
                   })}
