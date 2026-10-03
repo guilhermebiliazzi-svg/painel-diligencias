@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation';
 import { exigirPerfil } from '@/lib/perfil';
 import BuscaUnidade from './busca';
 
-export const metadata = { title: 'Captação — Painel RE/MAX Ville' };
+export const metadata = { title: 'Captação — Painel REMAX Ville' };
 export const dynamic = 'force-dynamic';
 
 export default async function Captacao() {
