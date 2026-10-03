@@ -1055,7 +1055,7 @@ export default async function AdminDiligenciaPage({
         </section>
 
         <footer className="mt-8 text-center text-xs text-slate-400">
-          RE/MAX Ville — Painel admin
+          REMAX Ville — Painel admin
         </footer>
       </main>
     </div>
