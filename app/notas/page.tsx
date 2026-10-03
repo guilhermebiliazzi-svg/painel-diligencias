@@ -326,7 +326,7 @@ export default function NotasFiscais() {
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
       <header className="vj-top">
-        <a href="/cobrancas" className="vj-mark vj-marklink">RE/MAX <span>Ville</span></a>
+        <a href="/cobrancas" className="vj-mark vj-marklink">REMAX <span>Ville</span></a>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <div className="vj-crumb">Administração · Notas fiscais</div>
           <a href="/" className="vj-back">← Painel</a>
