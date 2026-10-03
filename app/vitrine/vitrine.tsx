@@ -351,6 +351,23 @@ export default function Vitrine({
     });
   }
 
+  // Sugestões de título: bairros e categorias dos imóveis marcados (bairro = curadoria de bairro;
+  // categoria = curadoria temática, ex.: Coberturas, Casas, Casas em condomínio).
+  const sugestoesCarrossel = useMemo(() => {
+    const sel = imoveis.filter((i) => carrossel.includes(i.codigo));
+    const cat = (t: string | null) => {
+      const x = (t ?? '').toLowerCase();
+      if (x.includes('cobertura')) return 'Coberturas';
+      if (x.includes('condom')) return 'Casas em condomínio';
+      if (x.includes('casa') || x.includes('sobrado')) return 'Casas';
+      if (x.includes('studio') || x.includes('flat') || x.includes('loft')) return 'Studios';
+      if (x.includes('garden')) return 'Gardens';
+      if (x.includes('apart')) return 'Apartamentos';
+      return '';
+    };
+    return unicos([...sel.map((i) => i.bairro), ...sel.map((i) => cat(i.tipo))]);
+  }, [imoveis, carrossel]);
+
   function enviarCarrossel() {
     setMsgCar(null);
     iniciarCar(async () => {
@@ -606,9 +623,12 @@ export default function Vitrine({
                 Carrossel Instagram: {carrossel.length}/{MAX_CARROSSEL}
                 {carrossel.length < MIN_CARROSSEL && <span className="font-normal text-pink-700"> · marque pelo menos {MIN_CARROSSEL}</span>}
               </span>
-              <input value={tituloCar} onChange={(e) => setTituloCar(e.target.value)} maxLength={40}
-                placeholder="Título (ex.: Jardim Paulista)" aria-label="Título do carrossel"
+              <input value={tituloCar} onChange={(e) => setTituloCar(e.target.value)} maxLength={40} list="sugestoes-carrossel"
+                placeholder="Título: bairro (Itaim Bibi) ou categoria (Coberturas, Casas)" aria-label="Título do carrossel"
                 className="min-w-0 flex-1 rounded-lg border border-pink-200 bg-white px-3 py-2 text-sm text-slate-900" />
+              <datalist id="sugestoes-carrossel">
+                {sugestoesCarrossel.map((t) => <option key={t} value={t} />)}
+              </datalist>
               <button type="button" disabled={enviandoCar || carrossel.length < MIN_CARROSSEL} onClick={enviarCarrossel}
                 className="rounded-lg bg-pink-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
                 {enviandoCar ? 'Enviando…' : 'Gerar carrossel'}
