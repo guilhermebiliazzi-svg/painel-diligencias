@@ -386,7 +386,7 @@ export default function ConferenciaCobranca() {
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
       <header className="vj-top">
-        <a href="/cobrancas" className="vj-mark vj-marklink">RE/MAX <span>Ville</span></a>
+        <a href="/cobrancas" className="vj-mark vj-marklink">REMAX <span>Ville</span></a>
         <div className="vj-crumb">Administração · Conferência de cobrança</div>
       </header>
 
@@ -723,7 +723,7 @@ export default function ConferenciaCobranca() {
   );
 }
 
-/* ---------- estilo (RE/MAX Ville: azul #003DA5, vermelho #DC1C2E) ---------- */
+/* ---------- estilo (REMAX Ville: azul #003DA5, vermelho #DC1C2E) ---------- */
 const CSS = `
 .vj-wrap{--azul:#003DA5;--azul-esc:#00286b;--verm:#DC1C2E;--bg:#F4F6FA;--card:#fff;--linha:#E4E9F2;--txt:#16233B;--mut:#5A6B85;--ok:#0F7B4F;
   min-height:100vh;background:var(--bg);color:var(--txt);
