@@ -4,8 +4,8 @@ import type { MetadataRoute } from 'next';
 // no celular (Android/Chrome). O ícone e o nome vêm daqui.
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Painel RE/MAX Ville',
-    short_name: 'RE/MAX Ville',
+    name: 'Painel REMAX Ville',
+    short_name: 'REMAX Ville',
     description: 'Painel administrativo — diligências, cobranças, repasses e notas.',
     start_url: '/',
     display: 'standalone',

@@ -6,7 +6,7 @@ export default function NotFound() {
   return (
     <main className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center px-6 py-12 text-center">
       <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-        RE/MAX Ville
+        REMAX Ville
       </p>
       <h1 className="mt-3 text-2xl font-semibold text-slate-900">
         Diligência não encontrada

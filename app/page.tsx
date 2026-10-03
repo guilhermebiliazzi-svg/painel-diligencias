@@ -6,7 +6,7 @@ import { exigirPerfil } from '@/lib/perfil';
 import { logoutAction } from './actions';
 import { getNav, type ItemNav, type IconeNav, type Cor } from '@/lib/nav';
 
-export const metadata = { title: 'Painel interno — RE/MAX Ville' };
+export const metadata = { title: 'Painel interno — REMAX Ville' };
 
 const COR_CHIP: Record<Cor, string> = {
   blue: 'bg-blue-100 text-blue-700',
@@ -41,6 +41,9 @@ function Icone({ nome }: { nome: IconeNav }) {
     case 'funil':
       // Funil: leads entrando largos e saindo estreitos.
       return (<svg {...common}><path d="M3 4h18l-7 8v6l-4 2v-8z" /></svg>);
+    case 'vitrine':
+      // Vitrine: anúncio com foto e preço de imóvel.
+      return (<svg {...common}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m3 15 5-5 4 4 3-3 6 6" /><circle cx="15.5" cy="8.5" r="1.5" /></svg>);
     case 'mais':
       return (<svg {...common}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>);
   }
@@ -102,7 +105,7 @@ export default async function Home() {
       <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">RE/MAX Ville — Painel interno</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">REMAX Ville — Painel interno</p>
             <h1 className="mt-1 text-2xl font-semibold text-slate-900 sm:text-3xl">Olá, {nome}</h1>
             <p className="mt-1 text-sm text-slate-600">Escolha uma área para continuar.</p>
           </div>
@@ -120,6 +123,12 @@ export default async function Home() {
           {perfil.is_admin && (
             <Link href="/sdr" style={{ backgroundColor: '#ffffff' }} className={`${BASE} ${HOVER}`}>
               <CardConteudo icone="funil" cor="blue" titulo="Funil do SDR" descricao="Leads da Eva: quem respondeu, qualificou, foi distribuído e visitou." disponivel />
+            </Link>
+          )}
+
+          {perfil.is_admin && (
+            <Link href="/vitrine" style={{ backgroundColor: '#ffffff' }} className={`${BASE} ${HOVER}`}>
+              <CardConteudo icone="vitrine" cor="violet" titulo="Vitrine Google Ads" descricao="Escolher os imóveis que aparecem nos anúncios por região do Google Ads." disponivel />
             </Link>
           )}
 
@@ -143,7 +152,7 @@ export default async function Home() {
         </section>
 
         <footer className="mt-10 text-center text-xs text-slate-400">
-          RE/MAX Ville — Jardins/Itaim, São Paulo · {perfil.email}
+          REMAX Ville — Jardins/Itaim, São Paulo · {perfil.email}
         </footer>
       </main>
     </div>

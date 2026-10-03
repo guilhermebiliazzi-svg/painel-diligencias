@@ -12,12 +12,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Painel de Diligências — RE/MAX Ville",
+  title: "Painel de Diligências — REMAX Ville",
   description: "Acompanhamento de diligência imobiliária",
   // Nome que aparece embaixo do ícone quando o app é aberto em tela cheia no iOS.
   appleWebApp: {
     capable: true,
-    title: "RE/MAX Ville",
+    title: "REMAX Ville",
     statusBarStyle: "default",
   },
 };
