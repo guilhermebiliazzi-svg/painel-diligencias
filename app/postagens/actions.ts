@@ -13,7 +13,7 @@ const WEBHOOK = 'https://villejds.app.n8n.cloud/webhook/postagem-painel';
 const MIN_FOTOS = 5;
 const MAX_FOTOS = 7;
 
-type Corretor = { id: number; email: string | null; phone: string | null; id_agente: string | null; foto_url: string | null; creci: string | null };
+type Corretor = { id: number; email: string | null; phone: string | null; id_agente: string | null; foto_url: string | null; creci: string | null; instagram_handle: string | null };
 
 // Corretor que a pessoa logada pode operar: admin → qualquer um; corretor → só ele.
 async function corretorPermitido(corretorId: number) {
@@ -21,7 +21,7 @@ async function corretorPermitido(corretorId: number) {
   const sb = supabaseAdmin();
   const { data } = await sb
     .from('corretores_associados')
-    .select('id,email,phone,id_agente,foto_url,creci')
+    .select('id,email,phone,id_agente,foto_url,creci,instagram_handle')
     .eq('id', corretorId)
     .eq('status', 'ativo')
     .maybeSingle();
@@ -30,6 +30,19 @@ async function corretorPermitido(corretorId: number) {
   const proprio = !!cor.email && cor.email.toLowerCase() === eu.email.toLowerCase();
   if (!eu.is_admin && !proprio) return { eu, cor: null, erro: 'Você só pode montar carrossel dos seus próprios imóveis.' };
   return { eu, cor, proprio, erro: null };
+}
+
+const limparHandle = (v: unknown) => String(v ?? '').trim().replace(/^@/, '').toLowerCase();
+
+// Salva/corrige o @ do Instagram do corretor (admin ou o próprio corretor).
+export async function salvarInstagram(corretorId: number, handle: string): Promise<Resultado> {
+  const { cor, erro } = await corretorPermitido(Number(corretorId));
+  if (erro || !cor) return { ok: false, erro: erro ?? 'Sem permissão.' };
+  const h = limparHandle(handle);
+  if (!/^[a-z0-9._]{1,30}$/.test(h)) return { ok: false, erro: 'Informe um @ válido (letras, números, ponto ou _).' };
+  const { error } = await supabaseAdmin().from('corretores_associados').update({ instagram_handle: h }).eq('id', cor.id);
+  if (error) return { ok: false, erro: 'Não foi possível salvar: ' + error.message };
+  return { ok: true };
 }
 
 async function avisarN8n(body: Record<string, unknown>): Promise<string | null> {
@@ -54,6 +67,8 @@ export async function gerarPostagem(corretorId: number, listingId: string, fotos
   // O slide final usa foto e CRECI do corretor; sem eles o gerador não cria o carrossel.
   const faltando = [!cor.foto_url ? 'foto de perfil' : '', !String(cor.creci || '').trim() ? 'CRECI' : ''].filter(Boolean);
   if (faltando.length) return { ok: false, erro: `O cadastro do corretor está sem ${faltando.join(' e ')}. Peça para a Eva salvar pelo WhatsApp antes de gerar.` };
+  // Sem o @ do Instagram o post sairia sem colaborador — não gera.
+  if (!limparHandle(cor.instagram_handle)) return { ok: false, erro: 'Informe o @ do Instagram do corretor (campo ao lado do nome) antes de gerar — ele é marcado como colaborador no post.' };
 
   const lid = String(listingId || '').trim();
   if (!/^[A-Za-z0-9-]{3,40}$/.test(lid)) return { ok: false, erro: 'Imóvel inválido.' };

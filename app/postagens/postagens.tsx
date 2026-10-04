@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { gerarPostagem, aprovarPrevia, aprovarEPostar, rejeitarPostagem } from './actions';
+import { gerarPostagem, aprovarPrevia, aprovarEPostar, rejeitarPostagem, salvarInstagram } from './actions';
 
 export type Corretor = {
   id: number;
@@ -89,6 +89,22 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
 
   const proprio = !!corretor?.email && corretor.email.toLowerCase() === meuEmail.toLowerCase();
   const perfilIncompleto = corretor ? !corretor.foto_url || !corretor.creci : false;
+  const [handle, setHandle] = useState(corretor?.instagram_handle ?? '');
+  const [handleSalvo, setHandleSalvo] = useState(corretor?.instagram_handle ?? '');
+  const semHandle = !handleSalvo;
+
+  const salvarHandle = () => {
+    if (!corretor) return;
+    setMsg(null);
+    start(async () => {
+      const r = await salvarInstagram(corretor.id, handle);
+      if (!r.ok) { setMsg({ tipo: 'erro', texto: r.erro || 'Não deu certo.' }); return; }
+      const limpo = handle.trim().replace(/^@/, '').toLowerCase();
+      setHandle(limpo);
+      setHandleSalvo(limpo);
+      setMsg({ tipo: 'ok', texto: `@${limpo} salvo. É esse perfil que entra como colaborador nos posts.` });
+    });
+  };
 
   const lista = useMemo(() => {
     const q = busca.trim().toLowerCase();
@@ -176,6 +192,32 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
             </div>
           )}
 
+          <section style={{ backgroundColor: '#ffffff' }} className={`rounded-2xl border p-4 shadow-sm ${semHandle ? 'border-amber-300' : 'border-slate-200'}`}>
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-0 flex-1">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500">Instagram de {corretor.apelido || corretor.nome} (colaborador no post)</label>
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="text-slate-400">@</span>
+                  <input
+                    value={handle}
+                    onChange={(e) => setHandle(e.target.value)}
+                    placeholder="usuario.do.instagram"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200 sm:max-w-xs"
+                  />
+                  <button type="button" onClick={salvarHandle} disabled={pendente || !handle.trim() || handle.trim().replace(/^@/, '').toLowerCase() === handleSalvo}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                    Salvar
+                  </button>
+                </div>
+              </div>
+              {semHandle ? (
+                <p className="text-sm text-amber-800">Sem o @ não dá para gerar o carrossel — o corretor precisa ser marcado como colaborador.</p>
+              ) : (
+                <p className="text-sm text-slate-500">O post sai no @remaxville com @{handleSalvo} como colaborador (ele aceita o convite no Instagram).</p>
+              )}
+            </div>
+          </section>
+
           {msg && (
             <div className={`rounded-2xl border p-4 text-sm ${msg.tipo === 'ok' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-700'}`}>
               {msg.texto}
@@ -227,11 +269,12 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-sm text-slate-700">
                           Marque de {MIN} a {MAX} fotos na ordem que preferir. <span className="font-semibold">{fotos.length}/{MAX}</span>
+                          {semHandle && <span className="ml-2 text-amber-700">Preencha o @ do Instagram acima para liberar.</span>}
                         </p>
                         <button
                           type="button"
                           onClick={gerar}
-                          disabled={pendente || fotos.length < MIN || emAndamento.has(im.listing_id)}
+                          disabled={pendente || semHandle || fotos.length < MIN || emAndamento.has(im.listing_id)}
                           className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:opacity-50"
                         >
                           {pendente ? 'Enviando…' : 'Gerar carrossel'}
