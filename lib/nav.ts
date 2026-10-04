@@ -3,7 +3,7 @@
 
 export type IconeNav = 'diligencias' | 'cobrancas' | 'repasse' | 'notas' | 'usuarios' | 'locador' | 'captacao' | 'funil' | 'vitrine' | 'mais';
 export type Cor = 'blue' | 'emerald' | 'violet' | 'amber' | 'slate';
-export type PermKey = 'pode_diligencias' | 'pode_cobrancas' | 'pode_repasse' | 'pode_notas' | 'pode_pagamentos' | 'pode_captacao';
+export type PermKey = 'pode_diligencias' | 'pode_cobrancas' | 'pode_repasse' | 'pode_notas' | 'pode_pagamentos' | 'pode_captacao' | 'pode_postagens';
 
 export type ItemNav = {
   chave: string; titulo: string; descricao: string; href: string;
@@ -31,6 +31,7 @@ export function getNav(): ItemNav[] {
     item('notas', 'Notas', 'Emissão e conciliação de NFS-e da administração.', 'PAINEL_URL_NOTAS', '/notas', 'notas', 'violet', 'pode_notas'),
     item('notas-comissao', 'Notas de comissão', 'NFS-e de corretagem sobre os recebimentos do Asaas e notas avulsas.', 'PAINEL_URL_NOTAS_COMISSAO', '/notas-comissao', 'notas', 'violet', 'pode_notas'),
     item('captacao', 'Captação', 'Quem consta ligado a uma unidade, e como falar com a pessoa.', 'PAINEL_URL_CAPTACAO', '/captacao', 'captacao', 'blue', 'pode_captacao'),
+    item('postagens', 'Postagens', 'Montar o carrossel de um imóvel para o Instagram escolhendo as fotos do anúncio.', 'PAINEL_URL_POSTAGENS', '/postagens', 'vitrine', 'violet', 'pode_postagens'),
     item('pagamentos', 'Pagamentos', 'Pagar boletos da imobiliária (IPTU/condomínio) pelo Banco Inter.', 'PAINEL_URL_PAGAMENTOS', '/pagamentos', 'cobrancas', 'slate', 'pode_pagamentos'),
   ];
 }
