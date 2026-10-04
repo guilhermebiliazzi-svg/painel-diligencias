@@ -59,7 +59,8 @@ async function carregar(email: string, isAdmin: boolean, corretorParam: string |
     if (e2) throw new Error(e2.message);
     imoveis = ((xml ?? []) as { listing_id: string; dados_jsonb: Dados }[]).map((r) => {
       const d = r.dados_jsonb || {};
-      const fotos = (d.fotos || []).map((f) => String(f.url || '')).filter((u) => /^https?:\/\//.test(u));
+      // A versão LargeWM tem a marca d'água da REMAX no meio da foto; Large é a mesma foto limpa.
+      const fotos = (d.fotos || []).map((f) => String(f.url || '').replace('/LargeWM/', '/Large/')).filter((u) => /^https?:\/\//.test(u));
       return {
         listing_id: r.listing_id,
         titulo: limpa(d.title),

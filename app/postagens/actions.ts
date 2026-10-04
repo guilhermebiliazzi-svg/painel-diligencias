@@ -13,7 +13,7 @@ const WEBHOOK = 'https://villejds.app.n8n.cloud/webhook/postagem-painel';
 const MIN_FOTOS = 5;
 const MAX_FOTOS = 7;
 
-type Corretor = { id: number; email: string | null; phone: string | null; id_agente: string | null };
+type Corretor = { id: number; email: string | null; phone: string | null; id_agente: string | null; foto_url: string | null; creci: string | null };
 
 // Corretor que a pessoa logada pode operar: admin → qualquer um; corretor → só ele.
 async function corretorPermitido(corretorId: number) {
@@ -21,7 +21,7 @@ async function corretorPermitido(corretorId: number) {
   const sb = supabaseAdmin();
   const { data } = await sb
     .from('corretores_associados')
-    .select('id,email,phone,id_agente')
+    .select('id,email,phone,id_agente,foto_url,creci')
     .eq('id', corretorId)
     .eq('status', 'ativo')
     .maybeSingle();
@@ -51,6 +51,9 @@ export async function gerarPostagem(corretorId: number, listingId: string, fotos
   const { eu, cor, proprio, erro } = await corretorPermitido(Number(corretorId));
   if (erro || !cor) return { ok: false, erro: erro ?? 'Sem permissão.' };
   if (!cor.phone || !cor.id_agente) return { ok: false, erro: 'Este corretor está sem WhatsApp ou ID de agente no cadastro.' };
+  // O slide final usa foto e CRECI do corretor; sem eles o gerador não cria o carrossel.
+  const faltando = [!cor.foto_url ? 'foto de perfil' : '', !String(cor.creci || '').trim() ? 'CRECI' : ''].filter(Boolean);
+  if (faltando.length) return { ok: false, erro: `O cadastro do corretor está sem ${faltando.join(' e ')}. Peça para a Eva salvar pelo WhatsApp antes de gerar.` };
 
   const lid = String(listingId || '').trim();
   if (!/^[A-Za-z0-9-]{3,40}$/.test(lid)) return { ok: false, erro: 'Imóvel inválido.' };
@@ -66,7 +69,8 @@ export async function gerarPostagem(corretorId: number, listingId: string, fotos
   if (String(dados.corretor_email || '').toLowerCase() !== String(cor.email || '').toLowerCase()) {
     return { ok: false, erro: 'Este imóvel não está no nome deste corretor.' };
   }
-  const urls = new Set((dados.fotos || []).map((f) => String(f.url || '')));
+  // Aceita a URL original (LargeWM) e a versão sem marca d'água (Large), que é a exibida na tela.
+  const urls = new Set((dados.fotos || []).flatMap((f) => { const u = String(f.url || ''); return [u, u.replace('/LargeWM/', '/Large/')]; }));
   if (escolhidas.some((f) => !urls.has(f))) return { ok: false, erro: 'Alguma foto escolhida não é do anúncio. Recarregue a página.' };
 
   // Já existe um carrossel em andamento para este imóvel?
