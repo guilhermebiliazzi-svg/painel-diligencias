@@ -26,6 +26,15 @@ type Dados = {
 };
 
 const limpa = (s: unknown) => String(s ?? '').replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+// Tipo do imóvel vem em inglês do XML da REMAX; mostramos em português.
+const TIPO_PT: Record<string, string> = {
+  'Residential / Apartment': 'Apartamento', 'Residential / Studio': 'Studio', 'Residential / Home': 'Casa',
+  'Residential / Condo': 'Casa em condomínio', 'Residential / Penthouse': 'Cobertura', 'Residential / Flat': 'Flat',
+  'Residential / Farm Ranch': 'Chácara / Sítio', 'Residential / Sobrado': 'Sobrado', 'Residential / Land Lot': 'Terreno',
+  'Commercial / Office': 'Sala comercial', 'Commercial / Building': 'Prédio comercial', 'Commercial / Edificio Comercial': 'Prédio comercial',
+  'Commercial / Business': 'Ponto comercial', 'Commercial / Land Lot': 'Terreno comercial', 'Commercial / Store': 'Loja', 'Commercial / Warehouse': 'Galpão',
+};
+const tipoPt = (s: unknown) => { const t = limpa(s); return TIPO_PT[t] ?? (t.split('/').pop() ?? t).trim(); };
 const num = (v: unknown) => {
   const n = Number(String(v ?? '').replace(/[^\d.]/g, ''));
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -64,7 +73,7 @@ async function carregar(email: string, isAdmin: boolean, corretorParam: string |
       return {
         listing_id: r.listing_id,
         titulo: limpa(d.title),
-        tipo: limpa(d.property_type),
+        tipo: tipoPt(d.property_type),
         endereco: [limpa(d.address), limpa(d.street_number)].filter(Boolean).join(', '),
         bairro: limpa(d.neighborhood),
         preco: num(d.list_price),
