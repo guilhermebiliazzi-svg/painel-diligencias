@@ -31,6 +31,7 @@ const STATUS: Record<string, { t: string; c: string }> = {
   em_qualificacao: { t: 'Em qualificação', c: 'bg-slate-100 text-slate-700' },
   qualificado: { t: 'Qualificado', c: 'bg-slate-100 text-slate-700' },
 };
+const ETAPA_CAP: Record<string, string> = { v1_agendada: 'V1 agendada', v1_realizada: 'V1 realizada', v2_agendada: 'V2 agendada', v2_realizada: 'V2 realizada', contrato_assinado: 'Contrato assinado', cancelada: 'Desistiu' };
 const INTENCAO: Record<string, string> = { compra: 'Compra', aluguel: 'Aluguel', venda: 'Venda (proprietário)' };
 const fmt = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const brl = (v: number | null) => (v == null ? null : 'R$ ' + Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 }));
@@ -52,11 +53,12 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const sb = supabaseAdmin();
 
-  const [{ data: lead }, { data: msgs }, { data: cors }, { data: outros }] = await Promise.all([
+  const [{ data: lead }, { data: msgs }, { data: cors }, { data: outros }, { data: etapasCap }] = await Promise.all([
     sb.from('sdr_leads').select('*').eq('id', id).maybeSingle(),
     sb.from('sdr_mensagens').select('id,created_at,direcao,interlocutor,telefone,template,conteudo').eq('lead_id', id).order('created_at', { ascending: false }).limit(20),
     sb.from('corretores_associados').select('phone,nome,apelido,foto_url').eq('status', 'ativo').not('phone', 'is', null).order('nome'),
     sb.from('sdr_leads').select('id,nome,imovel_anuncio_endereco,bairros').eq('status', 'aguardando_guilherme').neq('id', id).gte('updated_at', new Date(Date.now() - 7 * 864e5).toISOString()).order('cartao_enviado_em', { ascending: false }).limit(10),
+    sb.from('sdr_captacao_etapas').select('etapa,quando,created_at').eq('lead_id', id).order('created_at'),
   ]);
   if (!lead) notFound();
   const l = lead as Lead;
@@ -93,6 +95,8 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
             <Linha k="Resumo" v={l.resumo} />
             <Linha k="Corretor" v={l.corretor_phone ? nomeCor(l.corretor_phone) : null} />
             <Linha k="Fila" v={fila.length ? fila.map(nomeCor).join(' → ') : null} />
+            <Linha k="Captação" v={(etapasCap ?? []).length ? (etapasCap as { etapa: string; quando: string | null; created_at: string }[]).map((e) =>
+              (ETAPA_CAP[e.etapa] ?? e.etapa) + (e.quando ? ' ' + fmt.format(new Date(e.quando)) : '') + ' (' + fmt.format(new Date(e.created_at)).slice(0, 5) + ')').join(' → ') : null} />
             <Linha k="Arquivado" v={l.status === 'arquivado' ? l.motivo_arquivamento : null} />
             <Linha k="Entrou" v={fmt.format(new Date(l.created_at))} />
           </dl>
