@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Leads — Aliança RE/MAX</title>
+<title>Leads — Aliança REMAX</title>
 <style>
   :root{
     --tinta:#16202c; --fraca:#69788a; --linha:#e2e8f0; --fundo:#f6f8fa;
@@ -174,7 +174,7 @@
   var $ = function(id){ return document.getElementById(id); };
   var sb = null, sessao = null, dados = null, filtro = 'todas';
   var SUCURSAL = (location.pathname.split('/').filter(Boolean)[1] || '').toLowerCase();
-  var NOMES = {ville:'RE/MAX Ville', homemark:'RE/MAX Homemark', alcance:'RE/MAX Alcance'};
+  var NOMES = {ville:'REMAX Ville', homemark:'REMAX Homemark', alcance:'REMAX Alcance'};
   var COR   = {ville:'var(--ville)', homemark:'var(--homemark)', alcance:'var(--alcance)'};
 
   function esc(t){
@@ -277,7 +277,9 @@
           esc(r.nome) + (eu ? ' <span class="mini">(você)</span>' : '') + '</h3>' +
         '<div class="grande">' + num(r.total) + '</div>' +
         '<div class="mini">' + num(r.por_dono) + ' representação · ' +
-          num(r.por_roleta) + ' roleta · ' + num(r.por_aderencia) + ' aderência</div>' +
+          num(r.por_roleta) + ' roleta · ' + num(r.por_aderencia) + ' aderência' +
+          (Number(r.por_exclusivo || 0) ? ' · ' + num(r.por_exclusivo) + ' exclusivo' : '') +
+          (Number(r.por_outros || 0) ? ' · ' + num(r.por_outros) + ' outros' : '') + '</div>' +
         '<div class="mini" style="margin-top:7px">' +
           (pend ? '<span class="alerta">' + num(pend) + ' sem entrar no C2S</span>'
                 : num(r.entregues) + ' entregues') +
