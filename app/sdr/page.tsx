@@ -119,6 +119,16 @@ async function carregarClientes(dias: number | null): Promise<Lead[]> {
 
 type Captacao = { id: string; criado_em: string; evento: string; nome: string | null; telefone: string | null; intencao: string | null; tipo: string | null; bairro: string | null; endereco: string | null };
 type LeadCap = { id: string; telefone: string; status: string; corretor_phone: string | null; atribuido_em: string | null; feito_em: string | null; fila_corretores: string[] | null; created_at: string };
+type EtapaCap = { lead_id: string; etapa: string; quando: string | null; created_at: string };
+// Etapas da captação de venda (a Eva registra com o captador pelo WhatsApp). Só venda: locação não tem V1/V2.
+const ETAPAS_CAP = [
+  { k: 'v1_agendada', rotulo: 'V1 agendada' },
+  { k: 'v1_realizada', rotulo: 'V1 realizada' },
+  { k: 'v2_agendada', rotulo: 'V2 agendada' },
+  { k: 'v2_realizada', rotulo: 'V2 realizada' },
+  { k: 'contrato_assinado', rotulo: 'Contrato assinado' },
+] as const;
+const ordemCap = (k: string) => ETAPAS_CAP.findIndex((e) => e.k === k);
 
 async function carregarCaptacao(dias: number | null) {
   const sb = supabaseAdmin();
@@ -128,7 +138,13 @@ async function carregarCaptacao(dias: number | null) {
     sb.from('corretores_associados').select('phone,nome,apelido'),
   ]);
   const nomeCor = new Map(((cors ?? []) as { phone: string | null; nome: string; apelido: string | null }[]).map((c) => [fim8(c.phone), c.apelido?.trim() || c.nome.split(' ')[0]]));
-  return { cap: (cap ?? []) as Captacao[], leads: (lds ?? []) as LeadCap[], nomeCor };
+  const ids = ((lds ?? []) as LeadCap[]).map((l) => l.id);
+  const etapas: EtapaCap[] = [];
+  for (let i = 0; i < ids.length; i += 300) {
+    const { data } = await sb.from('sdr_captacao_etapas').select('lead_id,etapa,quando,created_at').in('lead_id', ids.slice(i, i + 300)).order('created_at');
+    etapas.push(...((data ?? []) as EtapaCap[]));
+  }
+  return { cap: (cap ?? []) as Captacao[], leads: (lds ?? []) as LeadCap[], nomeCor, etapas };
 }
 
 type Recrut = { id: string; criado_em: string; evento: string; nome: string | null; telefone: string | null; momento: string | null; bairro: string | null; c2s_lead_id: string | null; payload: Record<string, unknown> | null };
@@ -350,7 +366,7 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
 
 // ---------- funis de proprietário (venda / locação) ----------
 async function FunilProprietario({ dias, alugar }: { dias: number | null; alugar: boolean }) {
-  const { cap, leads, nomeCor } = await carregarCaptacao(dias);
+  const { cap, leads, nomeCor, etapas: etapasCap } = await carregarCaptacao(dias);
   const daIntencao = (c: Captacao) => (/^alug/i.test(String(c.intencao ?? '')) ? alugar : !alugar);
   const doFunil = cap.filter(daIntencao);
   const cliques = doFunil.filter((c) => c.evento === 'clique_whatsapp').length;
@@ -366,13 +382,40 @@ async function FunilProprietario({ dias, alugar }: { dias: number | null; alugar
   const comFila = contatos.filter((c) => leadDe(c));
   const assumiu = contatos.filter((c) => { const l = leadDe(c); return l && (l.atribuido_em || l.corretor_phone); });
   const feito = contatos.filter((c) => leadDe(c)?.feito_em);
+  // etapa mais avançada de cada lead (V1 → V2 → contrato), só venda
+  const nivel = new Map<string, number>();
+  const ultimaEt = new Map<string, EtapaCap>();
+  if (!alugar) for (const e of etapasCap) {
+    ultimaEt.set(e.lead_id, e);
+    const o = ordemCap(e.etapa);
+    if (o >= 0) nivel.set(e.lead_id, Math.max(nivel.get(e.lead_id) ?? -1, o));
+  }
+  const nivelDe = (c: Captacao) => { const l = leadDe(c); return l ? nivel.get(l.id) ?? -1 : -1; };
   const etapas: Etapa[] = [
     { rotulo: 'Cliques no WhatsApp da landing', n: cliques },
     { rotulo: 'Contatos (formulário ou conversa)', n: contatos.length },
     { rotulo: 'Fila de captadores definida', n: comFila.length },
     { rotulo: 'Captador assumiu', n: assumiu.length },
     { rotulo: 'Contato feito pelo captador', n: feito.length },
+    ...(alugar ? [] : ETAPAS_CAP.map((e, i) => ({ rotulo: e.rotulo, n: contatos.filter((c) => nivelDe(c) >= i).length }))),
   ];
+  // por captador (venda)
+  const agoraIso = desde(0);
+  type LinhaCap = { nome: string; assumiu: number; feito: number; niv: number[]; proxima: string | null };
+  const porCap = new Map<string, LinhaCap>();
+  if (!alugar) for (const c of assumiu) {
+    const l = leadDe(c)!;
+    const k = fim8(l.corretor_phone);
+    const r = porCap.get(k) ?? { nome: nomeCor.get(k) ?? '—', assumiu: 0, feito: 0, niv: ETAPAS_CAP.map(() => 0), proxima: null };
+    r.assumiu++;
+    if (l.feito_em) r.feito++;
+    const nv = nivel.get(l.id) ?? -1;
+    for (let i = 0; i <= nv; i++) r.niv[i]++;
+    const u = ultimaEt.get(l.id);
+    if (u && /_agendada$/.test(u.etapa) && u.quando && new Date(u.quando).toISOString() > agoraIso && (!r.proxima || u.quando < r.proxima)) r.proxima = u.quando;
+    porCap.set(k, r);
+  }
+  const linhasCap = [...porCap.values()].sort((a, b) => b.assumiu - a.assumiu);
 
   return (
     <>
@@ -386,13 +429,44 @@ async function FunilProprietario({ dias, alugar }: { dias: number | null; alugar
       <div className="mt-6 grid gap-4 lg:grid-cols-5">
         <div className="lg:col-span-3">
           <Secao titulo={`Funil — proprietários que querem ${alugar ? 'alugar' : 'vender'}`}>
-            <Funil etapas={etapas} nota="Vem da landing Anuncie na REMAX. Clique conta cada toque no botão de WhatsApp; contato conta pessoas (um telefone)." />
+            <Funil etapas={etapas} nota={'Vem da landing Anuncie na REMAX. Clique conta cada toque no botão de WhatsApp; contato conta pessoas (um telefone).' + (alugar ? '' : ' V1, V2 e contrato: a Eva registra pelo que o captador responde no WhatsApp.')} />
           </Secao>
         </div>
         <div className="lg:col-span-2">
           <Lista titulo="Por bairro" itens={contar(contatos, (c) => c.bairro || 'não informado')} />
         </div>
       </div>
+
+      {!alugar && linhasCap.length > 0 && (
+        <div className="mt-4">
+          <Secao titulo="Por captador">
+            <div className="-mx-5 overflow-x-auto px-5">
+              <table className="w-full min-w-[720px] text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+                    <th className="pb-2 font-medium">Captador</th>
+                    <th className="pb-2 text-right font-medium">Assumiu</th>
+                    <th className="pb-2 text-right font-medium">Contato</th>
+                    {ETAPAS_CAP.map((e) => <th key={e.k} className="pb-2 text-right font-medium">{e.rotulo}</th>)}
+                    <th className="pb-2 pl-3 font-medium">Próxima visita</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {linhasCap.map((r) => (
+                    <tr key={r.nome}>
+                      <td className="py-2 text-slate-900">{r.nome}</td>
+                      <td className="py-2 text-right tabular-nums">{r.assumiu}</td>
+                      <td className="py-2 text-right tabular-nums">{r.feito}</td>
+                      {r.niv.map((n, i) => <td key={i} className="py-2 text-right tabular-nums">{n}</td>)}
+                      <td className="whitespace-nowrap py-2 pl-3 tabular-nums text-slate-600">{r.proxima ? fmtData.format(new Date(r.proxima)) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Secao>
+        </div>
+      )}
 
       <div className="mt-4">
         <Secao titulo={`Proprietários do período (${contatos.length})`}>
@@ -411,7 +485,10 @@ async function FunilProprietario({ dias, alugar }: { dias: number | null; alugar
               <tbody className="divide-y divide-slate-100">
                 {contatos.map((c) => {
                   const l = leadDe(c);
-                  const st = !l ? ['Esperando você', 'ambar'] : l.feito_em ? ['Contato feito', 'verde'] : l.atribuido_em || l.corretor_phone ? ['Assumido', 'verde'] : l.status === 'em_cascata' ? ['Ofertando', 'azul'] : [STATUS_ROTULO[l.status] ?? l.status, 'cinza'];
+                  const ue = l ? ultimaEt.get(l.id) : undefined;
+                  const st = !l ? ['Esperando você', 'ambar']
+                    : ue ? (ue.etapa === 'cancelada' ? ['Desistiu', 'cinza'] : [(ETAPAS_CAP.find((e) => e.k === ue.etapa)?.rotulo ?? ue.etapa) + (ue.quando && /_agendada$/.test(ue.etapa) ? ' · ' + fmtData.format(new Date(ue.quando)) : ''), ue.etapa === 'contrato_assinado' ? 'roxo' : 'verde'])
+                    : l.feito_em ? ['Contato feito', 'verde'] : l.atribuido_em || l.corretor_phone ? ['Assumido', 'verde'] : l.status === 'em_cascata' ? ['Ofertando', 'azul'] : [STATUS_ROTULO[l.status] ?? l.status, 'cinza'];
                   return (
                     <tr key={c.id} className="align-top">
                       <td className="whitespace-nowrap py-2 tabular-nums text-slate-600">{fmtData.format(new Date(c.criado_em))}</td>
