@@ -37,6 +37,7 @@ type Lead = {
   min_ate_atribuicao: number | null;
   feito: boolean;
   referenciado: boolean;
+  corretor_phone: string | null;
 };
 
 type Etapa = { rotulo: string; n: number };
@@ -101,11 +102,11 @@ async function carregarClientes(dias: number | null): Promise<Lead[]> {
     [dias]
   );
   const ids = rows.map((r) => r.id);
-  const extra = new Map<string, { feito_em: string | null; origem: string | null; motivo: string | null }>();
+  const extra = new Map<string, { feito_em: string | null; origem: string | null; motivo: string | null; corretor_phone: string | null }>();
   for (let i = 0; i < ids.length; i += 300) {
-    const { data } = await supabaseAdmin().from('sdr_leads').select('id,feito_em,origem,motivo_arquivamento').in('id', ids.slice(i, i + 300));
-    for (const d of (data ?? []) as { id: string; feito_em: string | null; origem: string | null; motivo_arquivamento: string | null }[])
-      extra.set(d.id, { feito_em: d.feito_em, origem: d.origem, motivo: d.motivo_arquivamento });
+    const { data } = await supabaseAdmin().from('sdr_leads').select('id,feito_em,origem,motivo_arquivamento,corretor_phone').in('id', ids.slice(i, i + 300));
+    for (const d of (data ?? []) as { id: string; feito_em: string | null; origem: string | null; motivo_arquivamento: string | null; corretor_phone: string | null }[])
+      extra.set(d.id, { feito_em: d.feito_em, origem: d.origem, motivo: d.motivo_arquivamento, corretor_phone: d.corretor_phone });
   }
   return rows
     .filter((r) => extra.get(r.id)?.origem !== 'campanha' && !/^capta/i.test(r.fonte))
@@ -113,6 +114,7 @@ async function carregarClientes(dias: number | null): Promise<Lead[]> {
       ...r,
       valor: r.valor == null ? null : Number(r.valor),
       feito: !!extra.get(r.id)?.feito_em,
+      corretor_phone: extra.get(r.id)?.corretor_phone ?? null,
       referenciado: /referenciad/i.test(extra.get(r.id)?.motivo ?? r.motivo_arquivamento ?? ''),
     }));
 }
@@ -233,33 +235,62 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
   const diretos = leads.filter((l) => l.direto);
   const sdr = leads.filter((l) => !l.direto);
   const referenciados = sdr.filter((l) => l.referenciado);
+  // Funil sequencial: cada etapa conta só quem passou por todas as anteriores.
+  // "Corretor assumiu" = lead com corretor atribuído (o mesmo critério da tabela de aceite).
+  const assumiu = (l: Lead) => !!l.atribuido_em && !!l.corretor_phone;
+  const cartao = (l: Lead) => !!l.cartao_enviado_em || assumiu(l);
+  const contato = (l: Lead) => assumiu(l) && (l.feito || l.visita_agendada || l.proposta);
+  const visita = (l: Lead) => assumiu(l) && (l.visita_agendada || l.proposta);
   const etapas: Etapa[] = [
     { rotulo: 'Entraram no SDR', n: sdr.length },
-    { rotulo: 'Responderam a Eva', n: sdr.filter((l) => l.respondeu).length },
-    { rotulo: 'Qualificados', n: sdr.filter((l) => l.qualificado).length },
-    { rotulo: 'Cartão enviado a você', n: sdr.filter((l) => l.cartao_enviado_em).length },
-    { rotulo: 'Corretor assumiu', n: sdr.filter((l) => l.atribuido_em).length },
-    { rotulo: 'Contato feito', n: sdr.filter((l) => l.feito).length },
-    { rotulo: 'Visita agendada', n: sdr.filter((l) => l.visita_agendada).length },
-    { rotulo: 'Proposta', n: sdr.filter((l) => l.proposta).length },
+    { rotulo: 'Cartão enviado a você', n: sdr.filter(cartao).length },
+    { rotulo: 'Corretor assumiu', n: sdr.filter(assumiu).length },
+    { rotulo: 'Contato feito', n: sdr.filter(contato).length },
+    { rotulo: 'Visita agendada', n: sdr.filter(visita).length },
+    { rotulo: 'Proposta', n: sdr.filter((l) => assumiu(l) && l.proposta).length },
   ];
+  const responderam = sdr.filter((l) => l.respondeu).length;
+  const qualificados = sdr.filter((l) => l.qualificado).length;
 
-  // aceite por corretor (ofertas da cascata no período)
+  // Aceite por corretor: uma linha por lead oferecido a cada corretor (reoferta ao mesmo corretor conta uma vez).
+  // Aceitou = ficou com o lead. Recusou = disse não dentro dos 15 min. Resposta depois do prazo (sim ou não) = sem resposta.
   const ids = sdr.map((l) => l.id);
   const aceites: Record<string, { ofertas: number; sim: number; nao: number; sem: number }> = {};
   if (ids.length) {
     const sb = supabaseAdmin();
     const [{ data: atr }, { data: cors }] = await Promise.all([
-      sb.from('sdr_atribuicoes').select('lead_id,corretor_phone,resposta').in('lead_id', ids.slice(0, 600)),
+      sb.from('sdr_atribuicoes').select('lead_id,corretor_phone,resposta,oferecido_em,prazo_em,respondido_em').in('lead_id', ids.slice(0, 600)),
       sb.from('corretores_associados').select('phone,nome,apelido'),
     ]);
     const nomeCor = new Map(((cors ?? []) as { phone: string | null; nome: string; apelido: string | null }[]).map((c) => [fim8(c.phone), c.apelido?.trim() || c.nome.split(' ')[0]]));
-    for (const a of (atr ?? []) as { corretor_phone: string; resposta: string | null }[]) {
-      const k = nomeCor.get(fim8(a.corretor_phone)) ?? '…' + fim8(a.corretor_phone).slice(-4);
-      const r = (aceites[k] ??= { ofertas: 0, sim: 0, nao: 0, sem: 0 });
+    type Atr = { lead_id: string; corretor_phone: string; resposta: string | null; oferecido_em: string | null; prazo_em: string | null; respondido_em: string | null };
+    const noPrazo = (a: Atr) => {
+      if (!a.respondido_em) return false;
+      const lim = a.prazo_em ? new Date(a.prazo_em).getTime() : a.oferecido_em ? new Date(a.oferecido_em).getTime() + 15 * 60_000 : Infinity;
+      return new Date(a.respondido_em).getTime() <= lim;
+    };
+    const porLead = new Map(sdr.map((l) => [l.id, l]));
+    const pares = new Map<string, { k: string; lead: Lead; recusou: boolean }>();
+    for (const a of (atr ?? []) as Atr[]) {
+      const lead = porLead.get(a.lead_id);
+      if (!lead) continue;
+      const k = fim8(a.corretor_phone);
+      const chave = a.lead_id + ':' + k;
+      const p = pares.get(chave) ?? { k, lead, recusou: false };
+      if (a.resposta === 'nao' && noPrazo(a)) p.recusou = true;
+      pares.set(chave, p);
+    }
+    // quem ficou com o lead sem ter passado pela cascata (atribuição direta) também conta como oferta aceita
+    for (const l of sdr.filter(assumiu)) {
+      const chave = l.id + ':' + fim8(l.corretor_phone);
+      if (!pares.has(chave)) pares.set(chave, { k: fim8(l.corretor_phone), lead: l, recusou: false });
+    }
+    for (const p of pares.values()) {
+      const nome = nomeCor.get(p.k) ?? '…' + p.k.slice(-4);
+      const r = (aceites[nome] ??= { ofertas: 0, sim: 0, nao: 0, sem: 0 });
       r.ofertas++;
-      if (a.resposta === 'sim' || a.resposta === 'sim_atrasado') r.sim++;
-      else if (a.resposta === 'nao') r.nao++;
+      if (assumiu(p.lead) && fim8(p.lead.corretor_phone) === p.k) r.sim++;
+      else if (p.recusou) r.nao++;
       else r.sem++;
     }
   }
@@ -272,7 +303,7 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
     <>
       <section className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi rotulo="Leads recebidos" valor={leads.length} sub={`${diretos.length} direto ao gestor · ${sdr.length} no SDR`} />
-        <Kpi rotulo="Corretor assumiu" valor={etapas[4].n} sub={`${pct(etapas[4].n, sdr.length)}% dos que entraram no SDR`} />
+        <Kpi rotulo="Corretor assumiu" valor={etapas[2].n} sub={`${pct(etapas[2].n, sdr.length)}% dos que entraram no SDR`} />
         <Kpi rotulo="Referenciados" valor={referenciados.length} sub="para outras unidades REMAX" />
         <Kpi rotulo="Tempo até assumir" valor={fmtMin(medAtrib)} sub={`mediana · cartão em ${fmtMin(medCartao)}`} />
       </section>
@@ -280,7 +311,11 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
       <div className="mt-6 grid gap-4 lg:grid-cols-5">
         <div className="lg:col-span-3">
           <Secao titulo={`Funil — ${intencao === 'compra' ? 'compradores' : 'locatários'} no SDR`}>
-            <Funil etapas={etapas} nota={'"Responderam" conta quem mandou mensagem à Eva depois de chegar. Leads da carteira Ville vão direto ao gestor e ficam fora do funil (estão no total). Referenciados contam até "cartão enviado" e saem do funil aí.'} />
+            <Funil etapas={etapas} nota={'Cada etapa conta só quem passou pelas anteriores. Leads da carteira Ville vão direto ao gestor e ficam fora do funil (estão no total). Referenciados contam até "cartão enviado" e saem do funil aí.'} />
+            <p className="mt-3 text-sm text-slate-600">
+              Fora do funil: <strong className="tabular-nums text-slate-900">{responderam}</strong> responderam à Eva · <strong className="tabular-nums text-slate-900">{qualificados}</strong> qualificados (de {sdr.length}).
+              <span className="block text-xs text-slate-500">Há quem receba cartão sem responder à Eva (o portal já manda o que ele procura).</span>
+            </p>
           </Secao>
         </div>
         <div className="lg:col-span-2">
@@ -291,6 +326,7 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Lista titulo="Por fonte" itens={contar(leads, (l) => l.fonte)} />
         <Secao titulo="Aceite por corretor (ofertas no período)">
+          <p className="-mt-2 mb-3 text-xs text-slate-500">Aceitou = ficou com o lead (soma igual a &quot;Corretor assumiu&quot;). Resposta depois dos 15 min conta como sem resposta.</p>
           {tabAceite.length === 0 ? (
             <p className="text-sm text-slate-500">Nenhuma oferta no período.</p>
           ) : (
