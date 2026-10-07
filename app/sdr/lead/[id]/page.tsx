@@ -32,7 +32,8 @@ const STATUS: Record<string, { t: string; c: string }> = {
   qualificado: { t: 'Qualificado', c: 'bg-slate-100 text-slate-700' },
 };
 const ETAPA_CAP: Record<string, string> = { v1_agendada: 'V1 agendada', v1_realizada: 'V1 realizada', v2_agendada: 'V2 agendada', v2_realizada: 'V2 realizada', contrato_assinado: 'Contrato assinado', cancelada: 'Desistiu' };
-type Indicacao = { id: number; status: string; corretor_nome: string | null; corretor_whatsapp: string | null; unidade_nome: string | null; mlsid: string | null; percentual_referenciamento: number | null; criado_em: string; aceite_em: string | null; email_enviado_em: string | null; email_corretor: string | null; observacoes: string | null };
+type Indicacao = { id: number; status: string; corretor_nome: string | null; corretor_whatsapp: string | null; unidade_nome: string | null; mlsid: string | null; percentual_referenciamento: number | null; criado_em: string; aceite_em: string | null; email_enviado_em: string | null; email_corretor: string | null; observacoes: string | null;
+  followup_enviado_em: string | null; followup_respondido_em: string | null; followup_resposta: string | null; followup_contato: boolean | null; followup_visita: boolean | null };
 const STATUS_IND: Record<string, { t: string; c: string }> = {
   aguardando_aceite: { t: 'Aguardando aceite', c: 'bg-amber-100 text-amber-800' },
   aceito_aguardando_email: { t: 'Aceito · aguardando e-mail do corretor', c: 'bg-blue-100 text-blue-800' },
@@ -77,7 +78,7 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
   // Referenciamentos deste cliente (tabela indicacoes, mesmo telefone, a partir da chegada do lead)
   const fim8 = l.telefone.replace(/\D/g, '').slice(-8);
   const { data: inds } = await sb.from('indicacoes')
-    .select('id,status,corretor_nome,corretor_whatsapp,unidade_nome,mlsid,percentual_referenciamento,criado_em,aceite_em,email_enviado_em,email_corretor,observacoes,cliente_telefone')
+    .select('id,status,corretor_nome,corretor_whatsapp,unidade_nome,mlsid,percentual_referenciamento,criado_em,aceite_em,email_enviado_em,email_corretor,observacoes,cliente_telefone,followup_enviado_em,followup_respondido_em,followup_resposta,followup_contato,followup_visita')
     .like('cliente_telefone', '%' + fim8)
     .gte('criado_em', new Date(new Date(l.created_at).getTime() - 864e5).toISOString())
     .order('criado_em', { ascending: false });
@@ -148,6 +149,10 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
                 <Linha k="Pedido" v={fmt.format(new Date(r.criado_em))} />
                 <Linha k="Aceite" v={r.aceite_em ? fmt.format(new Date(r.aceite_em)) : null} />
                 <Linha k="E-mail" v={r.email_enviado_em ? fmt.format(new Date(r.email_enviado_em)) + (r.email_corretor ? ' · ' + r.email_corretor : '') : null} />
+                <Linha k="Follow-up" v={r.followup_enviado_em ? 'perguntado em ' + fmt.format(new Date(r.followup_enviado_em)) + (r.followup_respondido_em ? ' · respondeu ' + fmt.format(new Date(r.followup_respondido_em)) : ' · sem resposta') : null} />
+                <Linha k="Contato com o cliente" v={r.followup_contato == null ? null : r.followup_contato ? 'sim' : 'não'} />
+                <Linha k="Visita" v={r.followup_visita == null ? null : r.followup_visita ? 'agendada' : 'não'} />
+                <Linha k="Resposta do corretor" v={r.followup_resposta} />
                 <Linha k="Obs." v={r.observacoes} />
               </dl>
             </section>
