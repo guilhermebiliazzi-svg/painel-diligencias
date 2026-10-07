@@ -32,6 +32,17 @@ const STATUS: Record<string, { t: string; c: string }> = {
   qualificado: { t: 'Qualificado', c: 'bg-slate-100 text-slate-700' },
 };
 const ETAPA_CAP: Record<string, string> = { v1_agendada: 'V1 agendada', v1_realizada: 'V1 realizada', v2_agendada: 'V2 agendada', v2_realizada: 'V2 realizada', contrato_assinado: 'Contrato assinado', cancelada: 'Desistiu' };
+type Indicacao = { id: number; status: string; corretor_nome: string | null; corretor_whatsapp: string | null; unidade_nome: string | null; mlsid: string | null; percentual_referenciamento: number | null; criado_em: string; aceite_em: string | null; email_enviado_em: string | null; email_corretor: string | null; observacoes: string | null };
+const STATUS_IND: Record<string, { t: string; c: string }> = {
+  aguardando_aceite: { t: 'Aguardando aceite', c: 'bg-amber-100 text-amber-800' },
+  aceito_aguardando_email: { t: 'Aceito · aguardando e-mail do corretor', c: 'bg-blue-100 text-blue-800' },
+  email_enviado: { t: 'Aceito · dados enviados', c: 'bg-emerald-100 text-emerald-800' },
+  recusado: { t: 'Recusado', c: 'bg-red-100 text-red-700' },
+  sem_resposta: { t: 'Sem resposta', c: 'bg-slate-200 text-slate-700' },
+  convertida: { t: 'Convertida', c: 'bg-violet-100 text-violet-800' },
+  perdida: { t: 'Perdida', c: 'bg-slate-200 text-slate-700' },
+  cancelada: { t: 'Cancelada', c: 'bg-slate-200 text-slate-700' },
+};
 const INTENCAO: Record<string, string> = { compra: 'Compra', aluguel: 'Aluguel', venda: 'Venda (proprietário)' };
 const fmt = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const brl = (v: number | null) => (v == null ? null : 'R$ ' + Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 }));
@@ -62,6 +73,14 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
   ]);
   if (!lead) notFound();
   const l = lead as Lead;
+  // Referenciamentos deste cliente (tabela indicacoes, mesmo telefone, a partir da chegada do lead)
+  const fim8 = l.telefone.replace(/\D/g, '').slice(-8);
+  const { data: inds } = await sb.from('indicacoes')
+    .select('id,status,corretor_nome,corretor_whatsapp,unidade_nome,mlsid,percentual_referenciamento,criado_em,aceite_em,email_enviado_em,email_corretor,observacoes,cliente_telefone')
+    .like('cliente_telefone', '%' + fim8)
+    .gte('criado_em', new Date(new Date(l.created_at).getTime() - 864e5).toISOString())
+    .order('criado_em', { ascending: false });
+  const indicacoes = (inds ?? []) as Indicacao[];
   const corretores = (cors ?? []) as CorretorOpc[];
   const porPhone = new Map(corretores.map((c) => [c.phone, c]));
   const nomeCor = (p: string) => { const c = porPhone.get(p); return c ? (c.apelido?.trim() || c.nome.split(' ')[0]) : telFmt(p); };
@@ -101,6 +120,27 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
             <Linha k="Entrou" v={fmt.format(new Date(l.created_at))} />
           </dl>
         </header>
+
+        {indicacoes.map((r) => {
+          const si = STATUS_IND[r.status] ?? { t: r.status, c: 'bg-slate-100 text-slate-700' };
+          return (
+            <section key={r.id} style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-semibold text-slate-900">Referenciamento</h2>
+                <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${si.c}`}>{si.t}</span>
+              </div>
+              <dl className="mt-2 divide-y divide-slate-100">
+                <Linha k="Corretor" v={[r.corretor_nome, r.unidade_nome].filter(Boolean).join(' · ') + (r.corretor_whatsapp ? ' · ' + telFmt(r.corretor_whatsapp) : '')} />
+                <Linha k="Imóvel" v={r.mlsid ? 'ref. ' + r.mlsid : null} />
+                <Linha k="Percentual" v={r.percentual_referenciamento != null ? r.percentual_referenciamento + '%' : null} />
+                <Linha k="Pedido" v={fmt.format(new Date(r.criado_em))} />
+                <Linha k="Aceite" v={r.aceite_em ? fmt.format(new Date(r.aceite_em)) : null} />
+                <Linha k="E-mail" v={r.email_enviado_em ? fmt.format(new Date(r.email_enviado_em)) + (r.email_corretor ? ' · ' + r.email_corretor : '') : null} />
+                <Linha k="Obs." v={r.observacoes} />
+              </dl>
+            </section>
+          );
+        })}
 
         <Decisao
           modo="lead" id={l.id} corretores={corretores} filaAtual={fila}
