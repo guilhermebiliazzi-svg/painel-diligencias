@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import DocumentosContrato from "@/app/_components/DocumentosContrato";
+import ContaRepasse from "@/app/_components/ContaRepasse";
 
 type Contrato = Record<string, any>;
 
@@ -295,6 +296,8 @@ export default function EditarContrato() {
                 {salvando ? "Salvando…" : "Salvar alterações"}
               </button>
             </div>
+
+            <ContaRepasse contratoId={Number(c.id)} />
 
             <DocumentosContrato contratoId={Number(c.id)} />
           </>
