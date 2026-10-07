@@ -26,6 +26,20 @@ export async function GET(req: Request) {
     });
     if (!res.ok) return NextResponse.json({ error: "Falha ao calcular prévia", detail: await res.text() }, { status: 502 });
     const data = await res.json();
+    // status do boleto do inquilino desta competência (pago / a receber / em atraso)
+    if (data && !data.erro) {
+      try {
+        const sel = "id,vencimento,total,status_pgto,situacao_inter,data_recebimento,data_situacao,valor_recebido,valor_total_pago";
+        const filtro = data.cobranca_id
+          ? `id=eq.${Number(data.cobranca_id)}`
+          : `contrato_id=eq.${Number(contrato)}&competencia=eq.${comp}-01&situacao_inter=neq.CANCELADO`;
+        const cr = await fetch(`${SUPA}/rest/v1/adm_cobrancas?${filtro}&select=${sel}&order=id.desc&limit=1`, {
+          headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
+          cache: "no-store",
+        });
+        if (cr.ok) data.boleto = ((await cr.json()) as any[])[0] ?? null;
+      } catch { /* opcional */ }
+    }
     return NextResponse.json(data);
   } catch (e: any) {
     return NextResponse.json({ error: "Erro de rede", detail: String(e) }, { status: 502 });
