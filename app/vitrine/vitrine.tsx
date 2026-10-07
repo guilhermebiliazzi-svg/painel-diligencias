@@ -28,6 +28,7 @@ export type Vitrine = {
   preco_min: number | null;
   preco_max: number | null;
   publico: string[];
+  anunciar_ads: boolean;
 };
 
 export type GeoAlvo = { geo_id: string; nome: string; tipo: string | null };
@@ -172,6 +173,7 @@ function EditorVitrine({
       onSalvo({
         id: r.id, nome: d.nome.trim(), ad_group_id: null, bairros: d.bairros, tipos: d.tipos,
         preco_min: d.preco_min || null, preco_max: d.preco_max || null, publico: d.publico,
+        anunciar_ads: d.anunciar_ads === true,
       });
     });
   }
@@ -219,6 +221,16 @@ function EditorVitrine({
         <p className="-mt-2 text-xs text-slate-500">
           O Google só separa São Paulo por distritos (ex.: Brooklin entra em Santo Amaro ou Campo Belo; Vila Olímpia em Itaim Bibi).
         </p>
+        <label className="flex items-start gap-2.5 rounded-lg border border-slate-200 p-3">
+          <input type="checkbox" className="mt-0.5 size-4 accent-blue-600" checked={d.anunciar_ads === true}
+            onChange={(e) => setD({ ...d, anunciar_ads: e.target.checked })} />
+          <span>
+            <span className="block text-sm font-semibold text-slate-900">Anunciar no Google Ads</span>
+            <span className="block text-xs text-slate-500">
+              Ligado: a vitrine vira um grupo da campanha de imóveis (entra no Google às 6h30). Desligado: fica só para o Instagram e o grupo, se existir, é pausado.
+            </span>
+          </span>
+        </label>
       </div>
       {erro && <p className="mt-3 text-sm text-red-700">{erro}</p>}
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -399,12 +411,14 @@ export default function Vitrine({
           >
             <p className="text-2xl font-semibold tabular-nums text-slate-900">{contagem(g.id)}</p>
             <p className="mt-0.5 truncate text-xs font-medium text-slate-600 sm:text-sm">{g.nome}</p>
-            {!g.ad_group_id && <p className="mt-1 text-[11px] font-medium text-amber-700">Entra no Google às 6h30</p>}
+            {!g.anunciar_ads
+              ? <p className="mt-1 text-[11px] font-medium text-slate-500">Só Instagram</p>
+              : !g.ad_group_id && <p className="mt-1 text-[11px] font-medium text-amber-700">Entra no Google às 6h30</p>}
           </button>
         ))}
         <button
           type="button"
-          onClick={() => { setEditor({ nome: '', bairros: [], tipos: [], preco_min: null, preco_max: null, publico: ['1001773'] }); setVitrine(''); }}
+          onClick={() => { setEditor({ nome: '', bairros: [], tipos: [], preco_min: null, preco_max: null, publico: ['1001773'], anunciar_ads: false }); setVitrine(''); }}
           style={{ backgroundColor: '#ffffff' }}
           className="rounded-2xl border border-dashed border-slate-300 p-3 text-left text-sm font-semibold text-blue-700 hover:border-blue-400 sm:p-4"
         >
@@ -450,9 +464,12 @@ export default function Vitrine({
               <p className="mt-0.5 text-xs text-slate-500">
                 Público: {vAtiva.publico.map((g) => geoNome.get(g) ?? g).join(', ')}
               </p>
+              <p className={`mt-0.5 text-xs font-medium ${vAtiva.anunciar_ads ? 'text-blue-700' : 'text-slate-500'}`}>
+                {vAtiva.anunciar_ads ? 'Anuncia no Google Ads' : 'Não anuncia no Google Ads (só Instagram)'}
+              </p>
             </div>
             <button type="button"
-              onClick={() => setEditor({ id: vAtiva.id, nome: vAtiva.nome, bairros: vAtiva.bairros, tipos: vAtiva.tipos, preco_min: vAtiva.preco_min, preco_max: vAtiva.preco_max, publico: vAtiva.publico })}
+              onClick={() => setEditor({ id: vAtiva.id, nome: vAtiva.nome, bairros: vAtiva.bairros, tipos: vAtiva.tipos, preco_min: vAtiva.preco_min, preco_max: vAtiva.preco_max, publico: vAtiva.publico, anunciar_ads: vAtiva.anunciar_ads })}
               className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
               Editar
             </button>
@@ -547,7 +564,7 @@ export default function Vitrine({
                 {ficha && <p className="mt-0.5 text-sm tabular-nums text-slate-500">{ficha}</p>}
                 <p className="mt-0.5 text-xs text-slate-500">{nomeUnidade(i.unidade)}{i.gestor ? ` · ${i.gestor}` : ''}</p>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Google Ads</span>
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Vitrines</span>
                   {vits.length === 0 && <span className="text-xs text-slate-400">crie uma vitrine acima</span>}
                   {(vAtiva ? [vAtiva, ...vits.filter((x) => x.id !== vAtiva.id && g.includes(x.id))] : vits).map((gr) => {
                     const ativo = g.includes(gr.id);

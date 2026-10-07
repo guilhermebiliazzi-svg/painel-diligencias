@@ -1,8 +1,8 @@
 'use server';
 
-// Vitrine Google Ads — grava as vitrines (grupos de anúncio da campanha
-// "Imóveis à venda por região") e em quais vitrines cada imóvel aparece.
-// Só admin. A sincronização diária do n8n cria os grupos novos no Google Ads.
+// Vitrine — grava as vitrines e em quais vitrines cada imóvel aparece. Só admin.
+// Só as vitrines marcadas "Anunciar no Google Ads" viram grupo da campanha
+// "Imóveis à venda por região" (a sincronização diária do n8n cria/pausa os grupos).
 import { exigirAdmin } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
@@ -40,6 +40,7 @@ export type VitrineEntrada = {
   preco_min: number | null;
   preco_max: number | null;
   publico: string[];
+  anunciar_ads?: boolean;
 };
 
 const lista = (v: unknown, max: number) =>
@@ -69,6 +70,8 @@ export async function salvarVitrine(entrada: VitrineEntrada): Promise<Resultado>
     preco_min,
     preco_max,
     publico,
+    // Só vitrines marcadas vão para o Google Ads (as demais servem só ao Instagram).
+    anunciar_ads: entrada.anunciar_ads === true,
     atualizado_em: new Date().toISOString(),
     atualizado_por: eu.email,
   };

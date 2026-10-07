@@ -35,7 +35,7 @@ async function carregar() {
   }
   const { data: vit, error: e3 } = await sb
     .from('ads_vitrines')
-    .select('id,nome,ad_group_id,bairros,tipos,preco_min,preco_max,publico')
+    .select('id,nome,ad_group_id,bairros,tipos,preco_min,preco_max,publico,anunciar_ads')
     .eq('ativo', true)
     .order('ordem')
     .order('criado_em');
