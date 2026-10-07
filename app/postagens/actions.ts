@@ -94,7 +94,7 @@ export async function gerarPostagem(corretorId: number, listingId: string, fotos
     .select('id,status')
     .eq('listing_id', lid)
     .eq('corretor_id', cor.id)
-    .in('status', ['novo', 'gerando', 'previa_pronta', 'aguardando_admin'])
+    .in('status', ['novo', 'gerando', 'textos_prontos', 'gerando_previa', 'previa_pronta', 'aguardando_admin'])
     .limit(1);
   if (aberto && aberto.length) return { ok: false, erro: 'Já existe um carrossel deste imóvel em andamento. Veja em "Carrosséis recentes".' };
 
@@ -169,9 +169,42 @@ export async function aprovarEPostar(pedidoId: string): Promise<Resultado> {
 export async function rejeitarPostagem(pedidoId: string): Promise<Resultado> {
   const { p, erro } = await pedidoPermitido(pedidoId);
   if (erro || !p) return { ok: false, erro: erro ?? 'Sem permissão.' };
-  if (!['previa_pronta', 'aguardando_admin', 'erro'].includes(p.status)) return { ok: false, erro: 'Este pedido não pode ser cancelado agora.' };
+  if (!['textos_prontos', 'previa_pronta', 'aguardando_admin', 'erro'].includes(p.status)) return { ok: false, erro: 'Este pedido não pode ser cancelado agora.' };
   const sb = supabaseAdmin();
   await sb.from('postagem_pedidos').update({ status: 'rejeitado', atualizado_em: new Date().toISOString() }).eq('id', p.id);
   if (p.criativo_id) await sb.from('criativos_imoveis').update({ status: 'rejeitado' }).eq('id', p.criativo_id).neq('status', 'postado');
+  return { ok: true };
+}
+
+// Textos que a IA escreveu, revisados pelo corretor antes da prévia.
+export type TextosCarrossel = { destaques: string[]; descricao_bairro: string; cta_texto: string; caption: string };
+const LIM = { destaque: 110, bairro: 320, cta: 260, caption: 2200 };
+
+// Salva os textos revisados e pede a prévia (o n8n só renderiza os slides, sem chamar a IA de novo).
+export async function gerarPrevia(pedidoId: string, t: TextosCarrossel): Promise<Resultado> {
+  const { p, erro } = await pedidoPermitido(pedidoId);
+  if (erro || !p) return { ok: false, erro: erro ?? 'Sem permissão.' };
+  if (!p.criativo_id || p.status !== 'textos_prontos') return { ok: false, erro: 'Os textos deste carrossel não estão aguardando revisão.' };
+  const limpa = (v: unknown) => String(v ?? '').replace(/\s+/g, ' ').trim();
+  const destaques = (Array.isArray(t?.destaques) ? t.destaques : []).map(limpa);
+  if (destaques.some((d) => !d)) return { ok: false, erro: 'Preencha o texto de todas as fotos (ou mantenha o da IA).' };
+  if (destaques.some((d) => d.length > LIM.destaque)) return { ok: false, erro: `O texto de cada foto pode ter até ${LIM.destaque} caracteres.` };
+  const bairro = limpa(t?.descricao_bairro), cta = limpa(t?.cta_texto);
+  const caption = String(t?.caption ?? '').trim();
+  if (!bairro || !cta || !caption) return { ok: false, erro: 'Descrição do bairro, convite e legenda não podem ficar vazios.' };
+  if (bairro.length > LIM.bairro || cta.length > LIM.cta || caption.length > LIM.caption) return { ok: false, erro: 'Algum texto passou do limite de caracteres.' };
+
+  const sb = supabaseAdmin();
+  const { data: atual } = await sb.from('criativos_imoveis').select('destaques').eq('id', p.criativo_id).maybeSingle();
+  const qtd = Array.isArray((atual as { destaques?: unknown[] } | null)?.destaques) ? ((atual as { destaques: unknown[] }).destaques.length) : destaques.length;
+  if (destaques.length !== qtd) return { ok: false, erro: 'A quantidade de textos não confere com as fotos. Recarregue a página.' };
+  const { error } = await sb.from('criativos_imoveis').update({ destaques, descricao_bairro: bairro, cta_texto: cta, caption }).eq('id', p.criativo_id);
+  if (error) return { ok: false, erro: 'Não foi possível salvar os textos: ' + error.message };
+  await sb.from('postagem_pedidos').update({ status: 'gerando_previa', atualizado_em: new Date().toISOString() }).eq('id', p.id).eq('status', 'textos_prontos');
+  const falha = await avisarN8n({ evento: 'gerar_previa', pedido_id: p.id });
+  if (falha) {
+    await sb.from('postagem_pedidos').update({ status: 'textos_prontos' }).eq('id', p.id);
+    return { ok: false, erro: falha };
+  }
   return { ok: true };
 }

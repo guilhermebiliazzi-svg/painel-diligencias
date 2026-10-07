@@ -2,7 +2,8 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { gerarPostagem, aprovarPrevia, aprovarEPostar, rejeitarPostagem, salvarInstagram } from './actions';
+import { useEffect } from 'react';
+import { gerarPostagem, aprovarPrevia, aprovarEPostar, rejeitarPostagem, salvarInstagram, gerarPrevia } from './actions';
 
 export type Corretor = {
   id: number;
@@ -41,7 +42,11 @@ export type Pedido = {
   criado_por: string;
   origem: string;
   fotos: string[];
-  criativo: { id: number; status: string | null; pngs_carrossel_urls: string[] | null; post_ig_url: string | null; erro_msg: string | null } | null;
+  criativo: {
+    id: number; status: string | null; pngs_carrossel_urls: string[] | null; post_ig_url: string | null; erro_msg: string | null;
+    destaques?: string[] | null; descricao_bairro?: string | null; cta_texto?: string | null; caption?: string | null;
+    fotos_originais_urls?: string[] | null; ordem_fotos?: number[] | null;
+  } | null;
 };
 
 const MIN = 5;
@@ -49,7 +54,9 @@ const MAX = 7;
 
 const STATUS: Record<string, string> = {
   novo: 'Na fila',
-  gerando: 'Gerando os slides (2 a 4 min)',
+  gerando: 'Escrevendo os textos (cerca de 1 min)',
+  textos_prontos: 'Textos prontos — revise e gere a prévia',
+  gerando_previa: 'Gerando a prévia (1 a 3 min)',
   previa_pronta: 'Prévia pronta — aguardando o corretor',
   aguardando_admin: 'Aguardando aprovação final',
   postando: 'Publicando no Instagram',
@@ -113,7 +120,14 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
   }, [imoveis, busca]);
 
   const imovelAberto = imoveis.find((i) => i.listing_id === aberto) ?? null;
-  const emAndamento = new Set(pedidos.filter((p) => ['novo', 'gerando', 'previa_pronta', 'aguardando_admin', 'postando'].includes(statusDoPedido(p))).map((p) => p.listing_id));
+  // Enquanto algo está sendo gerado, atualiza a lista sozinho para os textos/prévia aparecerem.
+  const gerandoAlgo = pedidos.some((p) => ['novo', 'gerando', 'gerando_previa'].includes(p.status));
+  useEffect(() => {
+    if (!gerandoAlgo) return;
+    const t = setInterval(() => router.refresh(), 15000);
+    return () => clearInterval(t);
+  }, [gerandoAlgo, router]);
+  const emAndamento = new Set(pedidos.filter((p) => ['novo', 'gerando', 'textos_prontos', 'gerando_previa', 'previa_pronta', 'aguardando_admin', 'postando'].includes(statusDoPedido(p))).map((p) => p.listing_id));
 
   const abrir = (id: string) => {
     setAberto(id === aberto ? null : id);
@@ -138,8 +152,8 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
         return;
       }
       setMsg({ tipo: 'ok', texto: proprio || !isAdmin
-        ? 'Pedido enviado! Em alguns minutos a prévia aparece aqui embaixo e no seu WhatsApp.'
-        : 'Pedido enviado! Em alguns minutos a prévia aparece aqui embaixo e no WhatsApp do admin (pula o corretor).' });
+        ? 'Pedido enviado! Em cerca de 1 minuto os textos aparecem aqui embaixo para você revisar e gerar a prévia.'
+        : 'Pedido enviado! Em cerca de 1 minuto os textos aparecem aqui embaixo para revisar; a prévia vai direto para o admin (pula o corretor).' });
       setAberto(null);
       setFotos([]);
       router.refresh();
@@ -318,7 +332,7 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
                 const pngs = p.criativo?.pngs_carrossel_urls || [];
                 const podeAprovarPrevia = st === 'previa_pronta';
                 const podePostar = isAdmin && (st === 'previa_pronta' || st === 'aguardando_admin');
-                const podeCancelar = ['previa_pronta', 'aguardando_admin', 'erro'].includes(st);
+                const podeCancelar = ['textos_prontos', 'previa_pronta', 'aguardando_admin', 'erro'].includes(st);
                 return (
                   <div key={p.id} style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -334,6 +348,21 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
                     </div>
                     {(p.erro_msg || p.criativo?.erro_msg) && st === 'erro' && (
                       <p className="mt-2 text-sm text-red-700">{p.erro_msg || p.criativo?.erro_msg}</p>
+                    )}
+                    {st === 'textos_prontos' && p.criativo && (
+                      <RevisarTextos
+                        pedidoId={p.id}
+                        criativo={p.criativo}
+                        pendente={pendente}
+                        onGerar={(t) => {
+                          setMsg(null);
+                          start(async () => {
+                            const r = await gerarPrevia(p.id, t);
+                            setMsg(r.ok ? { tipo: 'ok', texto: 'Textos salvos! A prévia fica pronta em 1 a 3 minutos e chega para aprovação.' } : { tipo: 'erro', texto: r.erro || 'Não deu certo.' });
+                            router.refresh();
+                          });
+                        }}
+                      />
                     )}
                     {pngs.length > 0 && (
                       <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
@@ -381,6 +410,68 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
           )}
         </>
       )}
+    </div>
+  );
+}
+
+type Textos = { destaques: string[]; descricao_bairro: string; cta_texto: string; caption: string };
+
+// Revisão dos textos que a IA escreveu, antes de renderizar a prévia.
+function RevisarTextos({ criativo, pendente, onGerar }: {
+  pedidoId: string;
+  criativo: NonNullable<Pedido['criativo']>;
+  pendente: boolean;
+  onGerar: (t: Textos) => void;
+}) {
+  const fotos = criativo.fotos_originais_urls || [];
+  const ordem = criativo.ordem_fotos && criativo.ordem_fotos.length ? criativo.ordem_fotos : fotos.map((_, i) => i + 1);
+  const fotoDoSlide = (slide: number) => fotos[(ordem[slide] ?? slide + 1) - 1] || '';
+  const [destaques, setDestaques] = useState<string[]>(criativo.destaques || []);
+  const [bairro, setBairro] = useState(criativo.descricao_bairro || '');
+  const [cta, setCta] = useState(criativo.cta_texto || '');
+  const [caption, setCaption] = useState(criativo.caption || '');
+  const campo = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200';
+  const contador = (v: string, max: number) => <span className={`text-xs ${v.length > max ? 'text-red-600' : 'text-slate-400'}`}>{v.length}/{max}</span>;
+
+  return (
+    <div className="mt-3 space-y-4 rounded-xl border border-violet-200 bg-violet-50/40 p-3">
+      <p className="text-sm text-slate-700">A IA escreveu os textos abaixo. Ajuste o que quiser e clique em <strong>Gerar prévia</strong>.</p>
+      <div className="flex items-center gap-3">
+        {fotoDoSlide(0) && <img src={fotoDoSlide(0)} alt="" className="size-16 shrink-0 rounded-lg object-cover" />}
+        <p className="text-xs text-slate-500">Capa (foto 1): usa o título do imóvel, sem texto de destaque.</p>
+      </div>
+      {destaques.map((d, i) => (
+        <div key={i} className="flex gap-3">
+          {fotoDoSlide(i + 1) && <img src={fotoDoSlide(i + 1)} alt="" className="size-16 shrink-0 rounded-lg object-cover" />}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-600">Foto {i + 2}</label>
+              {contador(d, 110)}
+            </div>
+            <textarea rows={2} value={d} onChange={(e) => setDestaques((a) => a.map((x, j) => (j === i ? e.target.value : x)))} className={campo} />
+          </div>
+        </div>
+      ))}
+      <div>
+        <div className="flex items-center justify-between"><label className="text-xs font-semibold text-slate-600">Sobre o bairro</label>{contador(bairro, 320)}</div>
+        <textarea rows={3} value={bairro} onChange={(e) => setBairro(e.target.value)} className={campo} />
+      </div>
+      <div>
+        <div className="flex items-center justify-between"><label className="text-xs font-semibold text-slate-600">Convite para visita (último slide)</label>{contador(cta, 260)}</div>
+        <textarea rows={3} value={cta} onChange={(e) => setCta(e.target.value)} className={campo} />
+      </div>
+      <div>
+        <div className="flex items-center justify-between"><label className="text-xs font-semibold text-slate-600">Legenda do post no Instagram</label>{contador(caption, 2200)}</div>
+        <textarea rows={6} value={caption} onChange={(e) => setCaption(e.target.value)} className={campo} />
+      </div>
+      <button
+        type="button"
+        disabled={pendente}
+        onClick={() => onGerar({ destaques, descricao_bairro: bairro, cta_texto: cta, caption })}
+        className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:opacity-50"
+      >
+        {pendente ? 'Enviando…' : 'Gerar prévia'}
+      </button>
     </div>
   );
 }

@@ -97,7 +97,7 @@ async function carregar(email: string, isAdmin: boolean, corretorParam: string |
     if (ids.length) {
       const { data: cri } = await sb
         .from('criativos_imoveis')
-        .select('id,status,pngs_carrossel_urls,post_ig_url,erro_msg')
+        .select('id,status,pngs_carrossel_urls,post_ig_url,erro_msg,destaques,descricao_bairro,cta_texto,caption,fotos_originais_urls,ordem_fotos')
         .in('id', ids);
       for (const c of (cri ?? []) as NonNullable<Pedido['criativo']>[]) criativos.set(c.id, c);
     }
