@@ -5,6 +5,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import DocumentosContrato, { type DocumentosContratoHandle } from "@/app/_components/DocumentosContrato";
+import { FormConta, contaVazia, resumoConta, type ContaForm } from "@/app/_components/ContaRepasse";
+import { normalizarConta } from "@/lib/bancos";
 
 type Pessoa = { id: number; nome: string; cpf_cnpj: string | null };
 type Imovel = {
@@ -78,6 +80,47 @@ export default function NovoContrato() {
 
   const docsRef = useRef<DocumentosContratoHandle>(null);
 
+  // conta de repasse do locador
+  const [contaModo, setContaModo] = useState<string>("nova"); // "nova" | "depois" | id de conta existente
+  const [contaForm, setContaForm] = useState<ContaForm>(contaVazia());
+  const [contaAuto, setContaAuto] = useState(true); // titular/CPF ainda seguem o locador
+  const [contasLocador, setContasLocador] = useState<(ContaForm & { id: number })[]>([]);
+
+  // contas já cadastradas do locador escolhido (para reaproveitar)
+  useEffect(() => {
+    setContasLocador([]);
+    if (!locadorSel || locadorSel === NOVO) {
+      setContaModo((m) => (m === "nova" || m === "depois" ? m : "nova"));
+      return;
+    }
+    let vivo = true;
+    fetch(`/api/adm/contas-bancarias?locador=${locadorSel}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!vivo) return;
+        const lista = (d?.contas || []) as (ContaForm & { id: number })[];
+        setContasLocador(lista);
+        setContaModo(lista.length ? String(lista[lista.length - 1].id) : "nova");
+      })
+      .catch(() => {});
+    return () => {
+      vivo = false;
+    };
+  }, [locadorSel]);
+
+  // titular/CPF da conta nova acompanham o locador até a pessoa mexer neles
+  useEffect(() => {
+    if (!contaAuto) return;
+    const lo =
+      locadorSel === NOVO
+        ? { nome: locadorNovo.nome, cpf: locadorNovo.cpf_cnpj }
+        : (() => {
+            const p = listas?.locadores.find((x) => String(x.id) === locadorSel);
+            return { nome: p?.nome || "", cpf: p?.cpf_cnpj || "" };
+          })();
+    setContaForm((f) => ({ ...f, titular: lo.nome, cpf_cnpj: lo.cpf }));
+  }, [contaAuto, locadorSel, locadorNovo.nome, locadorNovo.cpf_cnpj, listas]);
+
   useEffect(() => {
     (async () => {
       try {
@@ -125,6 +168,14 @@ export default function NovoContrato() {
     if (!c.valor_primeiro_aluguel) return setErro("Informe o valor do aluguel.");
     if (!c.data_inicio) return setErro("Informe a data de início.");
     if (!c.dia_vencimento) return setErro("Informe o dia de vencimento.");
+    let conta: ContaForm | null = null;
+    if (contaModo === "nova") {
+      const n = normalizarConta(contaForm);
+      if (!n.ok) return setErro(n.error + " (ou escolha “Cadastrar depois”).");
+      conta = contaForm;
+    } else if (contaModo !== "depois") {
+      conta = contasLocador.find((x) => String(x.id) === contaModo) || null;
+    }
     if (imovelEscolhido?.contrato_ativo &&
         !window.confirm(`Este imóvel já tem o contrato ativo #${imovelEscolhido.contrato_ativo}. Criar outro mesmo assim?`)) return;
 
@@ -139,6 +190,7 @@ export default function NovoContrato() {
           imovel,
           locatario,
           contrato: { ...c, valor_atual_aluguel: c.valor_primeiro_aluguel },
+          conta,
         }),
       });
       const d = await r.json().catch(() => ({}));
@@ -263,6 +315,37 @@ export default function NovoContrato() {
                     <label className="vj-f"><span>Dia venc. IPTU</span><input type="number" min="1" max="31" value={imovelNovo.dia_venc_iptu} onChange={(e) => setImovelNovo({ ...imovelNovo, dia_venc_iptu: e.target.value })} /></label>
                   </div>
                 </>
+              )}
+            </section>
+
+            {/* Conta de repasse */}
+            <section className="vj-card">
+              <h2 className="vj-h2">Conta para repasse (dados bancários do locador)</h2>
+              <div className="vj-grid">
+                <label className="vj-f vj-larga">
+                  <span>Conta</span>
+                  <select value={contaModo} onChange={(e) => setContaModo(e.target.value)}>
+                    {contasLocador.map((k) => (
+                      <option key={k.id} value={String(k.id)}>
+                        Usar a já cadastrada: {k.titular} — {resumoConta(k)}
+                      </option>
+                    ))}
+                    <option value="nova">Cadastrar conta nova</option>
+                    <option value="depois">Cadastrar depois</option>
+                  </select>
+                  {contaModo === "depois" && (
+                    <small className="vj-alerta">Sem conta, o repasse por Pix não sai. Dá para cadastrar depois no Editar contrato.</small>
+                  )}
+                </label>
+              </div>
+              {contaModo === "nova" && (
+                <FormConta
+                  v={contaForm}
+                  onChange={(v) => {
+                    if (v.titular !== contaForm.titular || v.cpf_cnpj !== contaForm.cpf_cnpj) setContaAuto(false);
+                    setContaForm(v);
+                  }}
+                />
               )}
             </section>
 
