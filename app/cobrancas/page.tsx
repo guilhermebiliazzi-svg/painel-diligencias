@@ -79,6 +79,16 @@ export default function FechamentoMes() {
   const [linhas, setLinhas] = useState<Linha[]>([]);
   const [prevMap, setPrevMap] = useState<Record<number, Linha>>({});
   const [avisos, setAvisos] = useState<Aviso[]>([]);
+  // apólices vencendo (30 dias) ou vencidas — independe da competência
+  const [apolices, setApolices] = useState<
+    { seguro_id: number; contrato_id: number; locatario: string; vigencia_fim: string; cor: "amarelo" | "vermelho"; detalhe: string }[]
+  >([]);
+  useEffect(() => {
+    fetch("/api/adm/apolices-alertas", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setApolices(d?.alertas || []))
+      .catch(() => {});
+  }, []);
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -300,6 +310,7 @@ export default function FechamentoMes() {
         <a href="/cobrancas" className="vj-mark vj-marklink">REMAX <span>Ville</span></a>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <div className="vj-crumb">Administração · Fechamento do mês</div>
+          <a href="/contratos/novo" className="vj-back">+ Novo contrato</a>
           <a href="/" className="vj-back">← Painel</a>
         </div>
       </header>
@@ -331,6 +342,26 @@ export default function FechamentoMes() {
                   {a.data_evento.split("-").reverse().slice(0, 2).join("/")}
                 </span>
               </div>
+            ))}
+          </section>
+        )}
+
+        {/* apólices vencendo / vencidas */}
+        {apolices.length > 0 && (
+          <section className="vj-avisos">
+            {apolices.map((a) => (
+              <a
+                key={a.seguro_id}
+                href={`/contratos/editar?id=${a.contrato_id}`}
+                className={`vj-aviso vj-aviso-${a.cor}`}
+                style={{ textDecoration: "none" }}
+              >
+                <span className="vj-aviso-tag">Apólice</span>
+                <span className="vj-aviso-txt">
+                  <b>{a.locatario}</b> (contrato #{a.contrato_id}) — {a.detalhe}
+                </span>
+                <span className="vj-aviso-data">{a.vigencia_fim.split("-").reverse().join("/")}</span>
+              </a>
             ))}
           </section>
         )}
