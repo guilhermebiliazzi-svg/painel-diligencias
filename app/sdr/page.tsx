@@ -255,7 +255,7 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
   // Aceite por corretor: uma linha por lead oferecido a cada corretor (reoferta ao mesmo corretor conta uma vez).
   // Aceitou = ficou com o lead. Recusou = disse não dentro dos 15 min. Resposta depois do prazo (sim ou não) = sem resposta.
   const ids = sdr.map((l) => l.id);
-  const aceites: Record<string, { ofertas: number; sim: number; nao: number; sem: number }> = {};
+  const aceites: Record<string, { ofertas: number; sim: number; nao: number; sem: number; tarde: number }> = {};
   if (ids.length) {
     const sb = supabaseAdmin();
     const [{ data: atr }, { data: cors }] = await Promise.all([
@@ -270,28 +270,29 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
       return new Date(a.respondido_em).getTime() <= lim;
     };
     const porLead = new Map(sdr.map((l) => [l.id, l]));
-    const pares = new Map<string, { k: string; lead: Lead; recusou: boolean }>();
+    const pares = new Map<string, { k: string; lead: Lead; recusou: boolean; tarde: boolean }>();
     for (const a of (atr ?? []) as Atr[]) {
       const lead = porLead.get(a.lead_id);
       if (!lead) continue;
       const k = fim8(a.corretor_phone);
       const chave = a.lead_id + ':' + k;
-      const p = pares.get(chave) ?? { k, lead, recusou: false };
+      const p = pares.get(chave) ?? { k, lead, recusou: false, tarde: false };
       if (a.resposta === 'nao' && noPrazo(a)) p.recusou = true;
+      if ((a.resposta === 'sim' || a.resposta === 'sim_atrasado') && !noPrazo(a)) p.tarde = true;
       pares.set(chave, p);
     }
     // quem ficou com o lead sem ter passado pela cascata (atribuição direta) também conta como oferta aceita
     for (const l of sdr.filter(assumiu)) {
       const chave = l.id + ':' + fim8(l.corretor_phone);
-      if (!pares.has(chave)) pares.set(chave, { k: fim8(l.corretor_phone), lead: l, recusou: false });
+      if (!pares.has(chave)) pares.set(chave, { k: fim8(l.corretor_phone), lead: l, recusou: false, tarde: false });
     }
     for (const p of pares.values()) {
       const nome = nomeCor.get(p.k) ?? '…' + p.k.slice(-4);
-      const r = (aceites[nome] ??= { ofertas: 0, sim: 0, nao: 0, sem: 0 });
+      const r = (aceites[nome] ??= { ofertas: 0, sim: 0, nao: 0, sem: 0, tarde: 0 });
       r.ofertas++;
       if (assumiu(p.lead) && fim8(p.lead.corretor_phone) === p.k) r.sim++;
       else if (p.recusou) r.nao++;
-      else r.sem++;
+      else { r.sem++; if (p.tarde) r.tarde++; }
     }
   }
   const tabAceite = Object.entries(aceites).sort((a, b) => b[1].ofertas - a[1].ofertas);
@@ -326,7 +327,7 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Lista titulo="Por fonte" itens={contar(leads, (l) => l.fonte)} />
         <Secao titulo="Aceite por corretor (ofertas no período)">
-          <p className="-mt-2 mb-3 text-xs text-slate-500">Aceitou = ficou com o lead (soma igual a &quot;Corretor assumiu&quot;). Resposta depois dos 15 min conta como sem resposta.</p>
+          <p className="-mt-2 mb-3 text-xs text-slate-500">Aceitou = ficou com o lead (soma igual a &quot;Corretor assumiu&quot;). Resposta depois dos 15 min conta como sem resposta; &quot;Aceitou tarde&quot; mostra quantos desses disseram sim fora do prazo (já incluídos em sem resposta).</p>
           {tabAceite.length === 0 ? (
             <p className="text-sm text-slate-500">Nenhuma oferta no período.</p>
           ) : (
@@ -338,6 +339,7 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
                   <th className="pb-2 text-right font-medium">Aceitou</th>
                   <th className="pb-2 text-right font-medium">Recusou</th>
                   <th className="pb-2 text-right font-medium">Sem resp.</th>
+                  <th className="pb-2 text-right font-medium">Aceitou tarde</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -348,6 +350,7 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
                     <td className="py-1.5 text-right tabular-nums text-emerald-700">{r.sim}</td>
                     <td className="py-1.5 text-right tabular-nums text-slate-600">{r.nao}</td>
                     <td className="py-1.5 text-right tabular-nums text-slate-600">{r.sem}</td>
+                    <td className="py-1.5 text-right tabular-nums text-amber-700">{r.tarde}</td>
                   </tr>
                 ))}
               </tbody>
