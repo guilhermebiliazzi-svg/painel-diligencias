@@ -124,3 +124,32 @@ export async function ofertarCaptacao(captacaoId: string, phones: string[]): Pro
   const r = await ofertar(novo.id, fila);
   return { ...r, leadId: novo.id };
 }
+
+// Referenciar: pede aceite ao corretor do imóvel (outra unidade REMAX), 25% sobre a perna da indicação.
+// Quem executa é o SDR no n8n (mesmo fluxo do comando "referenciar" no WhatsApp), chamado pelo
+// webhook sdr-painel-acao com o lead explícito — não há como cair em outro lead.
+const WEBHOOK_ACAO = 'https://villejds.app.n8n.cloud/webhook/sdr-painel-acao';
+const CHAVE_ACAO = 'ville-sdr-painel-7c2e9a41f0b84d6e';
+
+export async function referenciar(leadId: string, ref: string): Promise<Resultado> {
+  const eu = await exigirAdmin();
+  const lead = await lerLead(leadId);
+  if (!lead) return { ok: false, erro: 'Lead não encontrado.' };
+  if (['atribuido', 'visita_agendada', 'encerrado', 'arquivado'].includes(lead.status)) return { ok: false, erro: 'Este lead não está mais aberto.' };
+  const refLimpa = String(ref ?? '').trim().replace(/[^A-Za-z0-9#\-]/g, '');
+  try {
+    const r = await fetch(WEBHOOK_ACAO, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-chave': CHAVE_ACAO },
+      body: JSON.stringify({ acao: 'referenciar', lead_id: leadId, ref: refLimpa, por: eu.email }),
+      cache: 'no-store',
+    });
+    const j = (await r.json().catch(() => ({}))) as { ok?: boolean; resposta?: string };
+    if (!r.ok) return { ok: false, erro: 'O SDR não respondeu (' + r.status + '). Nada foi enviado.' };
+    const resposta = String(j.resposta ?? '').trim();
+    const deuCerto = /pedido de aceite|enviei|referenciado/i.test(resposta) && !/n[aã]o (consegui|foi|enviei)|erro|sem contato|não achei/i.test(resposta);
+    return deuCerto ? { ok: true, msg: resposta } : { ok: false, erro: resposta || 'Não consegui referenciar. Nada foi enviado.' };
+  } catch {
+    return { ok: false, erro: 'O SDR não respondeu. Nada foi enviado — tente de novo em instantes.' };
+  }
+}

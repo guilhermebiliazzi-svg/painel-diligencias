@@ -4,9 +4,10 @@
 // Ofertar / Segurar / Descartar. Sem texto livre, sem chance de cair em outro lead.
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { ofertar, ofertarCaptacao, segurar, descartar, type Resultado } from './actions';
+import { ofertar, ofertarCaptacao, segurar, descartar, referenciar, type Resultado } from './actions';
 
 export type CorretorOpc = { phone: string; nome: string; apelido: string | null; foto_url: string | null };
+export type ImovelRef = { ref: string; rotulo: string; parceiro: string | null };
 
 type Props = {
   modo: 'lead' | 'captacao';
@@ -17,17 +18,20 @@ type Props = {
   podeSegurar: boolean;
   podeDescartar: boolean;
   emCascata: boolean;
+  imoveisRef?: ImovelRef[];
 };
 
 const nz = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-export default function Decisao({ modo, id, corretores, filaAtual, podeOfertar, podeSegurar, podeDescartar, emCascata }: Props) {
+export default function Decisao({ modo, id, corretores, filaAtual, podeOfertar, podeSegurar, podeDescartar, emCascata, imoveisRef = [] }: Props) {
   const router = useRouter();
   const [fila, setFila] = useState<string[]>([]);
   const [busca, setBusca] = useState('');
   const [pend, start] = useTransition();
   const [res, setRes] = useState<Resultado | null>(null);
   const [confirmaDescarte, setConfirmaDescarte] = useState(false);
+  const [refEscolhida, setRefEscolhida] = useState(imoveisRef[0]?.ref ?? '');
+  const [confirmaRef, setConfirmaRef] = useState(false);
 
   const porPhone = useMemo(() => new Map(corretores.map((c) => [c.phone, c])), [corretores]);
   const visiveis = useMemo(() => {
@@ -46,6 +50,7 @@ export default function Decisao({ modo, id, corretores, filaAtual, podeOfertar, 
       if (r.ok) {
         setFila([]);
         setConfirmaDescarte(false);
+        setConfirmaRef(false);
         if (r.leadId) router.replace('/sdr/lead/' + r.leadId);
         else router.refresh();
       }
@@ -107,6 +112,32 @@ export default function Decisao({ modo, id, corretores, filaAtual, podeOfertar, 
             className="mt-4 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">
             {pend ? 'Gravando…' : fila.length ? `Ofertar para ${fila.map(rotulo).join(' → ')}` : 'Ofertar'}
           </button>
+        </section>
+      )}
+
+      {modo === 'lead' && podeDescartar && imoveisRef.length > 0 && (
+        <section style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
+          <h2 className="text-sm font-semibold text-slate-900">Referenciar ao corretor do imóvel</h2>
+          <p className="mt-1 text-xs text-slate-500">Para cliente fora da nossa região: o corretor da outra unidade recebe o pedido de aceite (25% sobre a perna da indicação). Se aceitar, o lead é arquivado aqui como referenciado.</p>
+          <div className="mt-3 space-y-2">
+            {imoveisRef.map((i) => (
+              <label key={i.ref} className="flex items-start gap-2 text-sm text-slate-800">
+                <input type="radio" name="ref" className="mt-1" checked={refEscolhida === i.ref} onChange={() => { setRefEscolhida(i.ref); setConfirmaRef(false); }} />
+                <span className="min-w-0 break-words">{i.rotulo}{i.parceiro ? ' — ' + i.parceiro : ''} <span className="text-slate-400">(ref. {i.ref})</span></span>
+              </label>
+            ))}
+          </div>
+          {!confirmaRef ? (
+            <button type="button" disabled={pend || !refEscolhida} onClick={() => setConfirmaRef(true)}
+              className="mt-3 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-800 disabled:opacity-40">
+              Referenciar
+            </button>
+          ) : (
+            <button type="button" disabled={pend} onClick={() => rodar(() => referenciar(id, refEscolhida))}
+              className="mt-3 w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">
+              {pend ? 'Enviando…' : 'Confirmar: enviar pedido de aceite'}
+            </button>
+          )}
         </section>
       )}
 
