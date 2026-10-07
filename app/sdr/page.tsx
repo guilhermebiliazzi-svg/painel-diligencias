@@ -117,8 +117,9 @@ async function carregarClientes(dias: number | null): Promise<Lead[]> {
     }));
 }
 
-type Captacao = { id: string; criado_em: string; evento: string; nome: string | null; telefone: string | null; intencao: string | null; tipo: string | null; bairro: string | null; endereco: string | null };
-type LeadCap = { id: string; telefone: string; status: string; intencao: string | null; corretor_phone: string | null; atribuido_em: string | null; feito_em: string | null; fila_corretores: string[] | null; created_at: string };
+type Captacao = { id: string; criado_em: string; evento: string; nome: string | null; telefone: string | null; intencao: string | null; tipo: string | null; bairro: string | null; endereco: string | null; canal?: string };
+type LeadCap = { id: string; telefone: string; status: string; intencao: string | null; corretor_phone: string | null; atribuido_em: string | null; feito_em: string | null; fila_corretores: string[] | null; created_at: string;
+  nome: string | null; fonte: string | null; tipologia: string | null; bairros: string[] | null; imovel_anuncio_endereco: string | null };
 type EtapaCap = { lead_id: string; etapa: string; quando: string | null; created_at: string };
 // Etapas da captação de venda (a Eva registra com o captador pelo WhatsApp). Só venda: locação não tem V1/V2.
 const ETAPAS_CAP = [
@@ -134,7 +135,7 @@ async function carregarCaptacao(dias: number | null) {
   const sb = supabaseAdmin();
   const [{ data: cap }, { data: lds }, { data: cors }] = await Promise.all([
     sb.from('captacao_leads').select('id,criado_em,evento,nome,telefone,intencao,tipo,bairro,endereco').gte('criado_em', desde(dias)).order('criado_em', { ascending: false }).limit(2000),
-    sb.from('sdr_leads').select('id,telefone,status,intencao,corretor_phone,atribuido_em,feito_em,fila_corretores,created_at').eq('origem', 'campanha').ilike('fonte', 'Capta%').gte('created_at', desde(dias === null ? null : dias + 2)),
+    sb.from('sdr_leads').select('id,telefone,status,intencao,corretor_phone,atribuido_em,feito_em,fila_corretores,created_at,nome,fonte,tipologia,bairros,imovel_anuncio_endereco').ilike('fonte', 'Capta%').gte('created_at', desde(dias === null ? null : dias + 2)),
     sb.from('corretores_associados').select('phone,nome,apelido'),
   ]);
   const nomeCor = new Map(((cors ?? []) as { phone: string | null; nome: string; apelido: string | null }[]).map((c) => [fim8(c.phone), c.apelido?.trim() || c.nome.split(' ')[0]]));
@@ -382,6 +383,20 @@ async function FunilProprietario({ dias, alugar }: { dias: number | null; alugar
     const atual = porTel.get(k);
     if (!atual || (atual.evento !== 'formulario' && c.evento === 'formulario') || (!atual.endereco && c.endereco)) porTel.set(k, { ...atual, ...c, nome: c.nome || atual?.nome || null });
   }
+  // proprietários que chegaram por outros canais (portais, site, WhatsApp da Eva): o SDR transforma o lead em captação
+  const inicio = desde(dias);
+  for (const l of leads) {
+    const k = fim8(l.telefone);
+    if (porTel.has(k) || l.created_at < inicio) continue;
+    if (/^alug/i.test(String(l.intencao ?? '')) !== alugar) continue;
+    const canal = String(l.fonte ?? '').replace(/^capta[cç][aã]o\s*[—-]\s*/i, '');
+    if (/landing/i.test(canal)) continue;
+    porTel.set(k, {
+      id: 'lead-' + l.id, criado_em: l.created_at, evento: 'sdr', nome: l.nome, telefone: l.telefone, intencao: l.intencao,
+      tipo: String(l.tipologia ?? '').replace(/^capta[cç][aã]o \(propriet[aá]rio\):\s*/i, '') || null,
+      bairro: l.bairros?.[0] ?? null, endereco: l.imovel_anuncio_endereco, canal: canal || 'SDR',
+    });
+  }
   const contatos = [...porTel.values()].sort((a, b) => b.criado_em.localeCompare(a.criado_em));
   const leadDe = (c: Captacao) => leads.find((l) => fim8(l.telefone) === fim8(c.telefone));
   const comFila = contatos.filter((c) => leadDe(c));
@@ -434,7 +449,7 @@ async function FunilProprietario({ dias, alugar }: { dias: number | null; alugar
       <div className="mt-6 grid gap-4 lg:grid-cols-5">
         <div className="lg:col-span-3">
           <Secao titulo={`Funil — proprietários que querem ${alugar ? 'alugar' : 'vender'}`}>
-            <Funil etapas={etapas} nota={'Vem da landing Anuncie na REMAX. Clique conta cada toque no botão de WhatsApp; contato conta pessoas (um telefone).' + (alugar ? '' : ' V1, V2 e contrato: a Eva registra pelo que o captador responde no WhatsApp.')} />
+            <Funil etapas={etapas} nota={'Vem da landing Anuncie na REMAX e dos outros canais (portais, site, WhatsApp da Eva). Clique conta cada toque no botão de WhatsApp; contato conta pessoas (um telefone).' + (alugar ? '' : ' V1, V2 e contrato: a Eva registra pelo que o captador responde no WhatsApp.')} />
           </Secao>
         </div>
         <div className="lg:col-span-2">
@@ -501,7 +516,7 @@ async function FunilProprietario({ dias, alugar }: { dias: number | null; alugar
                         <Link href={l ? `/sdr/lead/${l.id}` : `/sdr/captacao/${c.id}`} className="text-blue-700 underline">{c.nome || 'Proprietário'}</Link>
                       </td>
                       <td className="py-2 text-slate-600">{[c.tipo, c.bairro].filter(Boolean).join(' · ') || '—'}{c.endereco && <span className="block text-xs text-slate-500">{c.endereco}</span>}</td>
-                      <td className="py-2 text-slate-600">{c.evento === 'formulario' ? 'Formulário' : 'WhatsApp'}</td>
+                      <td className="py-2 text-slate-600">{c.evento === 'formulario' ? 'Formulário' : c.evento === 'sdr' ? c.canal : 'WhatsApp'}</td>
                       <td className="py-2"><Selo texto={st[0]} tom={st[1] as 'verde'} /></td>
                       <td className="py-2 text-slate-600">{l?.corretor_phone ? nomeCor.get(fim8(l.corretor_phone)) ?? '—' : '—'}</td>
                     </tr>
