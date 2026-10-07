@@ -118,7 +118,7 @@ async function carregarClientes(dias: number | null): Promise<Lead[]> {
 }
 
 type Captacao = { id: string; criado_em: string; evento: string; nome: string | null; telefone: string | null; intencao: string | null; tipo: string | null; bairro: string | null; endereco: string | null };
-type LeadCap = { id: string; telefone: string; status: string; corretor_phone: string | null; atribuido_em: string | null; feito_em: string | null; fila_corretores: string[] | null; created_at: string };
+type LeadCap = { id: string; telefone: string; status: string; intencao: string | null; corretor_phone: string | null; atribuido_em: string | null; feito_em: string | null; fila_corretores: string[] | null; created_at: string };
 type EtapaCap = { lead_id: string; etapa: string; quando: string | null; created_at: string };
 // Etapas da captação de venda (a Eva registra com o captador pelo WhatsApp). Só venda: locação não tem V1/V2.
 const ETAPAS_CAP = [
@@ -134,7 +134,7 @@ async function carregarCaptacao(dias: number | null) {
   const sb = supabaseAdmin();
   const [{ data: cap }, { data: lds }, { data: cors }] = await Promise.all([
     sb.from('captacao_leads').select('id,criado_em,evento,nome,telefone,intencao,tipo,bairro,endereco').gte('criado_em', desde(dias)).order('criado_em', { ascending: false }).limit(2000),
-    sb.from('sdr_leads').select('id,telefone,status,corretor_phone,atribuido_em,feito_em,fila_corretores,created_at').eq('origem', 'campanha').ilike('fonte', 'Capta%').gte('created_at', desde(dias === null ? null : dias + 2)),
+    sb.from('sdr_leads').select('id,telefone,status,intencao,corretor_phone,atribuido_em,feito_em,fila_corretores,created_at').eq('origem', 'campanha').ilike('fonte', 'Capta%').gte('created_at', desde(dias === null ? null : dias + 2)),
     sb.from('corretores_associados').select('phone,nome,apelido'),
   ]);
   const nomeCor = new Map(((cors ?? []) as { phone: string | null; nome: string; apelido: string | null }[]).map((c) => [fim8(c.phone), c.apelido?.trim() || c.nome.split(' ')[0]]));
@@ -367,7 +367,12 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
 // ---------- funis de proprietário (venda / locação) ----------
 async function FunilProprietario({ dias, alugar }: { dias: number | null; alugar: boolean }) {
   const { cap, leads, nomeCor, etapas: etapasCap } = await carregarCaptacao(dias);
-  const daIntencao = (c: Captacao) => (/^alug/i.test(String(c.intencao ?? '')) ? alugar : !alugar);
+  // venda × locação: vale a intenção do lead (cadastro do SDR) quando existe; senão, o que veio da landing
+  const leadDoTel = new Map(leads.map((l) => [fim8(l.telefone), l]));
+  const daIntencao = (c: Captacao) => {
+    const i = leadDoTel.get(fim8(c.telefone))?.intencao || c.intencao;
+    return /^alug/i.test(String(i ?? '')) ? alugar : !alugar;
+  };
   const doFunil = cap.filter(daIntencao);
   const cliques = doFunil.filter((c) => c.evento === 'clique_whatsapp').length;
   // contatos = pessoas (telefone) que mandaram formulário ou começaram conversa no WhatsApp
