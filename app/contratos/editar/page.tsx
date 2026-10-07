@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import DocumentosContrato from "@/app/_components/DocumentosContrato";
 
 type Contrato = Record<string, any>;
 
@@ -43,6 +44,13 @@ export default function EditarContrato() {
     const p = new URLSearchParams(window.location.search);
     const cid = p.get("id");
     setId(cid);
+    if (p.get("novo")) {
+      setMsg(
+        p.get("falhas")
+          ? `Contrato criado. ${p.get("falhas")} documento(s) não subiram — anexe de novo abaixo.`
+          : "Contrato criado. Confira os dados e os documentos abaixo."
+      );
+    }
     if (!cid) {
       setErro("Informe o contrato: ?id=NN");
       setCarregando(false);
@@ -98,7 +106,10 @@ export default function EditarContrato() {
     <div className="vj-wrap">
       <header className="vj-top">
         <a href="/cobrancas" className="vj-mark vj-marklink">REMAX <span>Ville</span></a>
-        <div className="vj-crumb">Administração · Editar contrato</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div className="vj-crumb">Administração · Editar contrato</div>
+          <a href="/contratos/novo" className="vj-novo">+ Novo contrato</a>
+        </div>
       </header>
 
       <main className="vj-main">
@@ -284,6 +295,8 @@ export default function EditarContrato() {
                 {salvando ? "Salvando…" : "Salvar alterações"}
               </button>
             </div>
+
+            <DocumentosContrato contratoId={Number(c.id)} />
           </>
         )}
       </main>
@@ -299,6 +312,8 @@ const CSS = `
 .vj-mark{font-family:Archivo,sans-serif;font-weight:800;letter-spacing:.5px;color:#fff;text-decoration:none}
 .vj-mark span{font-weight:400}
 .vj-crumb{font-size:14px;opacity:.9}
+.vj-novo{color:#fff;font-size:13px;font-weight:600;text-decoration:none;border:1px solid rgba(255,255,255,.5);border-radius:8px;padding:5px 10px}
+.vj-novo:hover{background:rgba(255,255,255,.12)}
 .vj-main{max-width:900px;margin:0 auto;padding:24px 20px 60px}
 .vj-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
 .vj-h1{font-family:Archivo,sans-serif;font-size:28px;margin:0}
