@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { exigirAdmin } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import Decisao, { type CorretorOpc } from '../../decisao';
+import Decisao, { type CorretorOpc, type ImovelRef } from '../../decisao';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Lead — SDR REMAX Ville' };
@@ -64,12 +64,13 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const sb = supabaseAdmin();
 
-  const [{ data: lead }, { data: msgs }, { data: cors }, { data: outros }, { data: etapasCap }] = await Promise.all([
+  const [{ data: lead }, { data: msgs }, { data: cors }, { data: outros }, { data: etapasCap }, { data: imvs }] = await Promise.all([
     sb.from('sdr_leads').select('*').eq('id', id).maybeSingle(),
     sb.from('sdr_mensagens').select('id,created_at,direcao,interlocutor,telefone,template,conteudo').eq('lead_id', id).order('created_at', { ascending: false }).limit(20),
     sb.from('corretores_associados').select('phone,nome,apelido,foto_url').eq('status', 'ativo').not('phone', 'is', null).order('nome'),
     sb.from('sdr_leads').select('id,nome,imovel_anuncio_endereco,bairros').eq('status', 'aguardando_guilherme').neq('id', id).gte('updated_at', new Date(Date.now() - 7 * 864e5).toISOString()).order('cartao_enviado_em', { ascending: false }).limit(10),
     sb.from('sdr_captacao_etapas').select('etapa,quando,created_at').eq('lead_id', id).order('created_at'),
+    sb.from('sdr_imoveis_lead').select('ref,endereco,parceiro_nome,parceiro_origem').eq('lead_id', id).not('ref', 'is', null),
   ]);
   if (!lead) notFound();
   const l = lead as Lead;
@@ -88,6 +89,17 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
   const aberto = ['aguardando_guilherme', 'em_cascata'].includes(l.status) && !l.corretor_phone;
   const fila = l.fila_corretores ?? [];
   const wa = 'https://wa.me/' + l.telefone.replace(/\D/g, '');
+  // Imóveis que dá para referenciar: o do anúncio + os de parceiros (outras unidades) enviados ao cliente.
+  const vistos = new Set<string>();
+  const imoveisRef: ImovelRef[] = [];
+  if (l.imovel_anuncio_ref) { vistos.add(l.imovel_anuncio_ref); imoveisRef.push({ ref: l.imovel_anuncio_ref, rotulo: 'Anúncio: ' + (l.imovel_anuncio_endereco || l.imovel_anuncio_ref), parceiro: null }); }
+  for (const i of (imvs ?? []) as { ref: string; endereco: string | null; parceiro_nome: string | null; parceiro_origem: string | null }[]) {
+    if (!i.ref || vistos.has(i.ref) || i.parceiro_origem === 'ville') continue;
+    vistos.add(i.ref);
+    imoveisRef.push({ ref: i.ref, rotulo: i.endereco || i.ref, parceiro: i.parceiro_nome });
+  }
+  const anunc = imoveisRef[0];
+  if (anunc && anunc.parceiro == null) anunc.parceiro = ((imvs ?? []) as { ref: string; parceiro_nome: string | null }[]).find((i) => i.ref === anunc.ref)?.parceiro_nome ?? null;
 
   return (
     <main style={{ backgroundColor: '#f8fafc' }} className="min-h-screen px-4 py-6">
@@ -146,6 +158,7 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
           modo="lead" id={l.id} corretores={corretores} filaAtual={fila}
           podeOfertar={aberto} podeSegurar={aberto} emCascata={l.status === 'em_cascata'}
           podeDescartar={!['atribuido', 'visita_agendada', 'encerrado', 'arquivado'].includes(l.status)}
+          imoveisRef={imoveisRef}
         />
 
         {!aberto && (
