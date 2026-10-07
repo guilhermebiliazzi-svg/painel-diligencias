@@ -22,7 +22,37 @@ type Previa = {
     liquido: number;
   };
   erro?: string;
+  boleto?: Boleto | null;
 };
+type Boleto = {
+  id: number;
+  vencimento: string | null;
+  total: number | null;
+  status_pgto: string | null;
+  situacao_inter: string | null;
+  data_recebimento: string | null;
+  data_situacao: string | null;
+  valor_recebido: number | null;
+  valor_total_pago: number | null;
+};
+
+const dataBR = (d?: string | null) => (d ? d.slice(0, 10).split("-").reverse().join("/") : "");
+// Situação do boleto do inquilino: pago, a receber, em atraso, cancelado ou não emitido.
+function situacaoBoleto(b?: Boleto | null): { pago: boolean; texto: string; cor: string; fundo: string } {
+  if (!b) return { pago: false, texto: "Boleto não emitido para esta competência", cor: "#5A6B85", fundo: "#F1F4F9" };
+  const sit = String(b.situacao_inter || "").toUpperCase();
+  const valor = Number(b.valor_recebido ?? b.valor_total_pago ?? 0);
+  if (b.status_pgto === "pago" || sit === "RECEBIDO" || sit === "MARCADO_RECEBIDO") {
+    const quando = dataBR(b.data_recebimento || b.data_situacao);
+    const manual = sit === "MARCADO_RECEBIDO" ? " (baixa manual)" : "";
+    return { pago: true, texto: `Pago${quando ? ` em ${quando}` : ""}${valor ? ` · ${brl(valor)}` : ""}${manual}`, cor: "#0F7B4F", fundo: "#EAF7F0" };
+  }
+  if (sit === "CANCELADO") return { pago: false, texto: "Boleto cancelado", cor: "#5A6B85", fundo: "#F1F4F9" };
+  const venc = b.vencimento ? new Date(b.vencimento + "T23:59:59") : null;
+  if (sit === "ATRASADO" || (venc && venc.getTime() < Date.now()))
+    return { pago: false, texto: `Em atraso · venceu ${dataBR(b.vencimento)}`, cor: "#8B1A24", fundo: "#FDECEE" };
+  return { pago: false, texto: `Aguardando pagamento · vence ${dataBR(b.vencimento)}`, cor: "#8A5A00", fundo: "#FFF6E0" };
+}
 
 const brl = (n: number) =>
   (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -196,6 +226,14 @@ export default function Repasse() {
             <section className="vj-card vj-cab">
               <div><small>Proprietário</small><b>{previa.cabecalho.locador}</b></div>
               <div><small>Imóvel</small><b>{previa.cabecalho.imovel}</b></div>
+              {(() => {
+                const s = situacaoBoleto(previa.boleto);
+                return (
+                  <div><small>Boleto do inquilino</small>
+                    <span className="vj-bol" style={{ color: s.cor, background: s.fundo }}>{s.pago ? "✓ " : ""}{s.texto}</span>
+                  </div>
+                );
+              })()}
             </section>
 
             {/* Recebimentos */}
@@ -272,6 +310,10 @@ export default function Repasse() {
               </div>
             )}
 
+            {!situacaoBoleto(previa.boleto).pago && (
+              <div className="vj-card vj-erro">O boleto do inquilino desta competência ainda não consta como pago. Confira antes de repassar.</div>
+            )}
+
             <div className="vj-acoes">
               <button className="vj-btn vj-gerar" onClick={salvar} disabled={salvando}>
                 {salvando ? "Gerando…" : salvo?.exists ? "Regerar recibo (sobrescreve)" : "Salvar e gerar recibo"}
@@ -330,6 +372,8 @@ const CSS = `
 .vj-acoes{margin-top:4px}
 .vj-erro{border-color:#F5C2C7;background:#FDECEE;color:#8B1A24}
 .vj-ok{border-color:#BCE3D0;background:#EAF7F0;color:#0F7B4F}
+.vj-cab b{display:block}
+.vj-bol{display:inline-block;margin-top:2px;padding:4px 10px;border-radius:999px;font-weight:700;font-size:14px}
 .vj-link-recibo{color:#003DA5;font-weight:700;text-decoration:underline}
 @media (max-width:640px){.vj-sel{flex-direction:column;align-items:stretch}.vj-vlr{width:110px}}
 `;
