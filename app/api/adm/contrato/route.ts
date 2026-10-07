@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { acessoContratos } from "@/lib/adm-acesso";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,8 +26,10 @@ const CAMPOS_EDITAVEIS = new Set([
 ]);
 
 // GET /api/adm/contrato?id=15  → contrato + nome do imóvel/locatário
+// GET /api/adm/contrato?listas=1 → locadores, imóveis e locatários (para a tela "Novo contrato")
 export async function GET(req: Request) {
   if (!SUPA || !KEY) return NextResponse.json({ error: "Supabase não configurado." }, { status: 500 });
+  if (new URL(req.url).searchParams.get("listas")) return listas();
   const id = new URL(req.url).searchParams.get("id");
   if (!id || !/^\d+$/.test(id)) return NextResponse.json({ error: "id inválido." }, { status: 400 });
 
@@ -88,4 +92,162 @@ export async function PATCH(req: Request) {
   } catch (e: any) {
     return NextResponse.json({ error: "Erro de rede", detail: String(e) }, { status: 502 });
   }
+}
+
+// ------------------------------------------------------------------------------------
+// Novo contrato
+// ------------------------------------------------------------------------------------
+
+const so = (v: unknown) => String(v ?? "").replace(/\D/g, "");
+const txt = (v: unknown, max = 200) => {
+  const s = String(v ?? "").trim();
+  return s ? s.slice(0, max) : null;
+};
+const inteiro = (v: unknown) => {
+  const s = String(v ?? "").trim();
+  return /^\d+$/.test(s) ? Number(s) : null;
+};
+
+async function listas() {
+  const ac = await acessoContratos();
+  if (!ac.ok) return NextResponse.json({ error: ac.error }, { status: ac.status });
+  const sb = supabaseAdmin();
+  const [lo, im, la, ct] = await Promise.all([
+    sb.from("adm_locadores").select("id,nome,cpf_cnpj").order("nome"),
+    sb.from("adm_imoveis").select("id,locador_id,rua,numero,complemento,bairro").order("rua"),
+    sb.from("adm_locatarios").select("id,nome,cpf_cnpj").order("nome"),
+    sb.from("adm_contratos").select("id,imovel_id").eq("status", "ativo"),
+  ]);
+  const err = lo.error || im.error || la.error || ct.error;
+  if (err) return NextResponse.json({ error: "Falha ao carregar listas.", detail: err.message }, { status: 502 });
+  const ativoPorImovel = new Map<number, number>();
+  for (const c of ct.data || []) ativoPorImovel.set(c.imovel_id as number, c.id as number);
+  return NextResponse.json({
+    locadores: lo.data || [],
+    locatarios: la.data || [],
+    imoveis: (im.data || []).map((i) => ({ ...i, contrato_ativo: ativoPorImovel.get(i.id as number) ?? null })),
+  });
+}
+
+// POST /api/adm/contrato
+// body: {
+//   locador:   { id } | { novo: { nome, cpf_cnpj, email, telefone } }          (ignorado se imóvel existente)
+//   imovel:    { id } | { novo: { rua, numero, complemento, bairro, cep, cidade, estado, tipo_imovel, ... } }
+//   locatario: { id } | { novo: { nome, cpf_cnpj, email, telefone } }
+//   contrato:  { campos editáveis... }
+// }
+// Cria na ordem locador → imóvel → locatário → contrato; se algo falhar no meio,
+// apaga o que acabou de criar (não deixa cadastro órfão).
+export async function POST(req: Request) {
+  const ac = await acessoContratos();
+  if (!ac.ok) return NextResponse.json({ error: ac.error }, { status: ac.status });
+
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Corpo inválido." }, { status: 400 });
+  }
+
+  const sb = supabaseAdmin();
+  const criados: { tabela: string; id: number }[] = [];
+  const desfazer = async () => {
+    for (const c of criados.reverse()) await sb.from(c.tabela).delete().eq("id", c.id);
+  };
+  const falha = async (msg: string, status = 400, detail?: string) => {
+    await desfazer();
+    return NextResponse.json({ error: msg, ...(detail ? { detail } : {}) }, { status });
+  };
+
+  // pessoa (locador/locatário): existente ou nova (barra CPF/CNPJ repetido)
+  async function pessoa(tabela: "adm_locadores" | "adm_locatarios", entrada: any, rotulo: string) {
+    const idExist = inteiro(entrada?.id);
+    if (idExist) {
+      const { data } = await sb.from(tabela).select("id").eq("id", idExist).maybeSingle();
+      if (!data) return { erro: `${rotulo} #${idExist} não encontrado.` };
+      return { id: idExist };
+    }
+    const n = entrada?.novo || {};
+    const nome = txt(n.nome);
+    if (!nome) return { erro: `Informe o nome do ${rotulo.toLowerCase()}.` };
+    const doc = so(n.cpf_cnpj);
+    if (doc) {
+      const { data: todos } = await sb.from(tabela).select("id,nome,cpf_cnpj");
+      const igual = (todos || []).find((p: any) => so(p.cpf_cnpj) === doc);
+      if (igual) return { erro: `${rotulo} com esse CPF/CNPJ já existe: ${igual.nome} (#${igual.id}). Selecione na lista.` };
+    }
+    const { data, error } = await sb
+      .from(tabela)
+      .insert({ nome, cpf_cnpj: txt(n.cpf_cnpj, 30), email: txt(n.email, 150), telefone: txt(n.telefone, 40) })
+      .select("id")
+      .single();
+    if (error || !data) return { erro: `Falha ao cadastrar ${rotulo.toLowerCase()}.`, detail: error?.message };
+    criados.push({ tabela, id: data.id as number });
+    return { id: data.id as number };
+  }
+
+  // 1) imóvel (e locador, se o imóvel for novo)
+  let imovelId = inteiro(body?.imovel?.id);
+  if (imovelId) {
+    const { data } = await sb.from("adm_imoveis").select("id").eq("id", imovelId).maybeSingle();
+    if (!data) return falha(`Imóvel #${imovelId} não encontrado.`);
+  } else {
+    const loc = await pessoa("adm_locadores", body?.locador, "Locador");
+    if ("erro" in loc) return falha(loc.erro as string, 400, (loc as any).detail);
+    const n = body?.imovel?.novo || {};
+    const rua = txt(n.rua);
+    const numero = txt(n.numero, 20);
+    if (!rua || !numero) return falha("Informe rua e número do imóvel.");
+    const cidade = txt(n.cidade, 80) || "São Paulo";
+    const estado = (txt(n.estado, 2) || "SP").toUpperCase();
+    const complemento = txt(n.complemento, 80);
+    const bairro = txt(n.bairro, 80);
+    const { data, error } = await sb
+      .from("adm_imoveis")
+      .insert({
+        locador_id: loc.id,
+        rua,
+        numero,
+        complemento,
+        bairro,
+        cidade,
+        estado,
+        cep: txt(n.cep, 10),
+        tipo_imovel: txt(n.tipo_imovel, 40),
+        nro_contribuinte: txt(n.nro_contribuinte, 30),
+        administradora: txt(n.administradora, 120),
+        dia_venc_condominio: inteiro(n.dia_venc_condominio),
+        dia_venc_iptu: inteiro(n.dia_venc_iptu),
+        endereco_completo: [`${rua}, ${numero}`, complemento, bairro, `${cidade}/${estado}`].filter(Boolean).join(" - "),
+      })
+      .select("id")
+      .single();
+    if (error || !data) return falha("Falha ao cadastrar o imóvel.", 502, error?.message);
+    criados.push({ tabela: "adm_imoveis", id: data.id as number });
+    imovelId = data.id as number;
+  }
+
+  // 2) locatário
+  const lt = await pessoa("adm_locatarios", body?.locatario, "Locatário");
+  if ("erro" in lt) return falha(lt.erro as string, 400, (lt as any).detail);
+
+  // 3) contrato
+  const c = body?.contrato || {};
+  const ins: Record<string, any> = { imovel_id: imovelId, locatario_id: lt.id };
+  for (const [k, v] of Object.entries(c)) {
+    if (!CAMPOS_EDITAVEIS.has(k)) continue;
+    ins[k] = v === "" ? null : v;
+  }
+  if (!ins.valor_primeiro_aluguel && !ins.valor_atual_aluguel) return falha("Informe o valor do aluguel.");
+  if (!ins.valor_atual_aluguel) ins.valor_atual_aluguel = ins.valor_primeiro_aluguel;
+  if (!ins.valor_primeiro_aluguel) ins.valor_primeiro_aluguel = ins.valor_atual_aluguel;
+  if (!ins.data_inicio) return falha("Informe a data de início.");
+  if (!ins.data_vigencia_atual) ins.data_vigencia_atual = ins.data_inicio;
+  if (!ins.dia_vencimento) return falha("Informe o dia de vencimento.");
+  if (!ins.status) ins.status = "ativo";
+
+  const { data: novo, error } = await sb.from("adm_contratos").insert(ins).select("id").single();
+  if (error || !novo) return falha("Falha ao criar o contrato.", 502, error?.message);
+
+  return NextResponse.json({ ok: true, id: novo.id });
 }
