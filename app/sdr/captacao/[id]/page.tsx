@@ -6,6 +6,7 @@ import { exigirAdmin } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { leadDaCaptacao } from '@/app/sdr/lead-captacao';
 import Decisao, { type CorretorOpc } from '../../decisao';
+import ReferenciarCaptacao from './referenciar';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Captação — SDR REMAX Ville' };
@@ -36,7 +37,13 @@ export default async function CaptacaoSdr({ params }: { params: Promise<{ id: st
         <header style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-semibold text-slate-900">{c.nome || 'Proprietário'}</h1>
-            <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">Captação · esperando você</span>
+            {c.referenciado_em ? (
+              <span className="rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-medium text-violet-800">Captação · referenciada</span>
+            ) : c.descartado_em ? (
+              <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">Captação · descartada</span>
+            ) : (
+              <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">Captação · esperando você</span>
+            )}
           </div>
           <dl className="mt-3 space-y-1.5 text-sm">
             {tel && <div className="flex gap-3"><dt className="w-24 text-slate-500">Telefone</dt><dd><a href={'https://wa.me/' + tel55} target="_blank" className="text-blue-700 underline">{telFmt(tel55)}</a></dd></div>}
@@ -45,9 +52,16 @@ export default async function CaptacaoSdr({ params }: { params: Promise<{ id: st
             <div className="flex gap-3"><dt className="w-24 text-slate-500">Entrou</dt><dd className="text-slate-900">{fmt.format(new Date(c.criado_em))}</dd></div>
           </dl>
         </header>
-        {tel ? (
-          <Decisao modo="captacao" id={c.id} corretores={(cors ?? []) as CorretorOpc[]} filaAtual={[]}
-            podeOfertar podeSegurar={false} podeDescartar={false} emCascata={false} />
+        {c.referenciado_em ? (
+          <p className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-800">Referenciada em {fmt.format(new Date(c.referenciado_em))}. O aceite e o e-mail seguem pela Eva; acompanhe em Referenciamentos.</p>
+        ) : c.descartado_em ? (
+          <p className="rounded-xl bg-slate-100 px-4 py-3 text-sm text-slate-600">Descartada em {fmt.format(new Date(c.descartado_em))}.</p>
+        ) : tel ? (
+          <>
+            <Decisao modo="captacao" id={c.id} corretores={(cors ?? []) as CorretorOpc[]} filaAtual={[]}
+              podeOfertar podeSegurar={false} podeDescartar emCascata={false} />
+            <ReferenciarCaptacao id={c.id} />
+          </>
         ) : (
           <p className="rounded-xl bg-slate-100 px-4 py-3 text-sm text-slate-600">Esta captação não tem telefone (foi só um clique no WhatsApp).</p>
         )}
