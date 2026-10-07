@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import DocumentosLocador from "../_components/DocumentosLocador";
 import PixRepasse from "./pix-repasse";
+import ListaRepasses from "./lista-repasses";
 
 type Contrato = { id: number; locatario: string; endereco: string };
 type Linha = { descricao: string; categoria: string; valor: number | string };
@@ -79,6 +80,7 @@ export default function Repasse() {
   const [deducoes, setDeducoes] = useState<Linha[]>([]);
   const [taxaAdm, setTaxaAdm] = useState<number>(0);
   const [avulsas, setAvulsas] = useState<Linha[]>([]);
+  const [recarregarLista, setRecarregarLista] = useState(0);
 
   useEffect(() => {
     fetch("/api/adm/contratos")
@@ -87,8 +89,9 @@ export default function Repasse() {
       .catch(() => {});
   }, []);
 
-  async function calcular() {
-    if (!contratoId) return;
+  async function calcular(id?: number) {
+    const cid = id ?? contratoId;
+    if (!cid) return;
     setCarregando(true);
     setErro(null);
     setPrevia(null);
@@ -96,7 +99,7 @@ export default function Repasse() {
     setReciboUrl(null);
     setMsg(null);
     try {
-      const res = await fetch(`/api/adm/repasse-previa?contrato=${contratoId}&competencia=${competencia}`);
+      const res = await fetch(`/api/adm/repasse-previa?contrato=${cid}&competencia=${competencia}`);
       const d = (await res.json()) as Previa;
       if (!res.ok || d.erro) {
         setErro(d.erro || "Falha ao calcular.");
@@ -108,7 +111,7 @@ export default function Repasse() {
         setAvulsas([]);
         // já existe recibo salvo desta competência? (para abrir sem regerar)
         try {
-          const rs = await fetch(`/api/adm/repasse-salvo?contrato=${contratoId}&competencia=${competencia}`).then((r) => r.json());
+          const rs = await fetch(`/api/adm/repasse-salvo?contrato=${cid}&competencia=${competencia}`).then((r) => r.json());
           if (rs?.exists) { setSalvo(rs); if (rs.download_url) setReciboUrl(rs.download_url); }
         } catch { /* opcional */ }
       }
@@ -165,6 +168,7 @@ export default function Repasse() {
       else {
         setMsg(`Recibo gerado. Líquido: ${brl(totais.liquido)}`);
         setReciboUrl(d?.download_url || d?.pdf_url || null);
+        setRecarregarLista((n) => n + 1);
         setSalvo({ exists: true, repasse_id: d?.repasse_id, total_liquido: totais.liquido, download_url: d?.download_url || d?.pdf_url || null, pago: salvo?.pago, atualizado_em: new Date().toISOString() });
       }
     } catch {
@@ -214,16 +218,26 @@ export default function Repasse() {
             <span>Competência</span>
             <input type="month" value={competencia} onChange={(e) => setCompetencia(e.target.value)} />
           </label>
-          <button className="vj-btn vj-primary" disabled={!contratoId || carregando} onClick={calcular}>
+          <button className="vj-btn vj-primary" disabled={!contratoId || carregando} onClick={() => calcular()}>
             {carregando ? "Calculando…" : "Calcular repasse"}
           </button>
         </section>
 
-        {erro && <div className="vj-card vj-erro">{erro}</div>}
+        <ListaRepasses
+          competencia={competencia}
+          recarregar={recarregarLista}
+          onAbrir={(id) => {
+            setContratoId(id);
+            calcular(id);
+            setTimeout(() => document.getElementById("vj-detalhe")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+          }}
+        />
+
+        {erro && <div id="vj-detalhe" className="vj-card vj-erro">{erro}</div>}
 
         {previa && (
           <>
-            <section className="vj-card vj-cab">
+            <section id="vj-detalhe" className="vj-card vj-cab">
               <div><small>Proprietário</small><b>{previa.cabecalho.locador}</b></div>
               <div><small>Imóvel</small><b>{previa.cabecalho.imovel}</b></div>
               {(() => {
