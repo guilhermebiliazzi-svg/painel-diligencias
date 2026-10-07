@@ -4,7 +4,7 @@
 // Ofertar / Segurar / Descartar. Sem texto livre, sem chance de cair em outro lead.
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { ofertar, ofertarCaptacao, segurar, descartar, referenciar, type Resultado } from './actions';
+import { ofertar, ofertarCaptacao, segurar, descartar, descartarCaptacao, referenciar, type Resultado } from './actions';
 
 export type CorretorOpc = { phone: string; nome: string; apelido: string | null; foto_url: string | null };
 export type ImovelRef = { ref: string; rotulo: string; parceiro: string | null };
@@ -156,7 +156,7 @@ export default function Decisao({ modo, id, corretores, filaAtual, podeOfertar, 
             </button>
           )}
           {podeDescartar && confirmaDescarte && (
-            <button type="button" disabled={pend} onClick={() => rodar(() => descartar(id))}
+            <button type="button" disabled={pend} onClick={() => rodar(() => (modo === 'captacao' ? descartarCaptacao(id) : descartar(id)))}
               className="rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">
               Confirmar descarte
             </button>

@@ -119,7 +119,7 @@ async function carregarClientes(dias: number | null): Promise<Lead[]> {
     }));
 }
 
-type Captacao = { id: string; criado_em: string; evento: string; nome: string | null; telefone: string | null; intencao: string | null; tipo: string | null; bairro: string | null; endereco: string | null; canal?: string };
+type Captacao = { id: string; criado_em: string; evento: string; nome: string | null; telefone: string | null; intencao: string | null; tipo: string | null; bairro: string | null; endereco: string | null; canal?: string; descartado_em?: string | null; referenciado_em?: string | null };
 type LeadCap = { id: string; telefone: string; status: string; intencao: string | null; corretor_phone: string | null; atribuido_em: string | null; feito_em: string | null; fila_corretores: string[] | null; created_at: string;
   nome: string | null; fonte: string | null; tipologia: string | null; bairros: string[] | null; imovel_anuncio_endereco: string | null };
 type EtapaCap = { lead_id: string; etapa: string; quando: string | null; created_at: string };
@@ -136,7 +136,7 @@ const ordemCap = (k: string) => ETAPAS_CAP.findIndex((e) => e.k === k);
 async function carregarCaptacao(dias: number | null) {
   const sb = supabaseAdmin();
   const [{ data: cap }, { data: lds }, { data: cors }] = await Promise.all([
-    sb.from('captacao_leads').select('id,criado_em,evento,nome,telefone,intencao,tipo,bairro,endereco').gte('criado_em', desde(dias)).order('criado_em', { ascending: false }).limit(2000),
+    sb.from('captacao_leads').select('id,criado_em,evento,nome,telefone,intencao,tipo,bairro,endereco,descartado_em,referenciado_em').gte('criado_em', desde(dias)).order('criado_em', { ascending: false }).limit(2000),
     sb.from('sdr_leads').select('id,telefone,status,intencao,corretor_phone,atribuido_em,feito_em,fila_corretores,created_at,nome,fonte,tipologia,bairros,imovel_anuncio_endereco').ilike('fonte', 'Capta%').gte('created_at', desde(dias === null ? null : dias + 2)),
     sb.from('corretores_associados').select('phone,nome,apelido'),
   ]);
@@ -420,7 +420,7 @@ async function FunilProprietario({ dias, alugar }: { dias: number | null; alugar
   for (const c of doFunil.filter((c) => c.evento !== 'clique_whatsapp' && c.telefone)) {
     const k = fim8(c.telefone);
     const atual = porTel.get(k);
-    if (!atual || (atual.evento !== 'formulario' && c.evento === 'formulario') || (!atual.endereco && c.endereco)) porTel.set(k, { ...atual, ...c, nome: c.nome || atual?.nome || null });
+    if (!atual || (atual.evento !== 'formulario' && c.evento === 'formulario') || (!atual.endereco && c.endereco)) porTel.set(k, { ...atual, ...c, nome: c.nome || atual?.nome || null, descartado_em: c.descartado_em || atual?.descartado_em || null, referenciado_em: c.referenciado_em || atual?.referenciado_em || null });
   }
   // proprietários que chegaram por outros canais (portais, site, WhatsApp da Eva): o SDR transforma o lead em captação
   const inicio = desde(dias);
@@ -481,7 +481,7 @@ async function FunilProprietario({ dias, alugar }: { dias: number | null; alugar
       <section className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi rotulo="Contatos" valor={contatos.length} sub={`${contatos.filter((c) => c.evento === 'formulario').length} por formulário`} />
         <Kpi rotulo="Captador assumiu" valor={assumiu.length} sub={`${pct(assumiu.length, contatos.length)}% dos contatos`} />
-        <Kpi rotulo="Esperando você" valor={contatos.filter((c) => !leadDe(c)).length} sub="sem fila definida" />
+        <Kpi rotulo="Esperando você" valor={contatos.filter((c) => !leadDe(c) && !c.descartado_em && !c.referenciado_em).length} sub="sem fila definida" />
         <Kpi rotulo="Cliques no WhatsApp" valor={cliques} sub={`${pct(contatos.length, cliques)}% viraram contato`} />
       </section>
 
@@ -545,7 +545,7 @@ async function FunilProprietario({ dias, alugar }: { dias: number | null; alugar
                 {contatos.map((c) => {
                   const l = leadDe(c);
                   const ue = l ? ultimaEt.get(l.id) : undefined;
-                  const st = !l ? ['Esperando você', 'ambar']
+                  const st = !l ? (c.referenciado_em ? ['Referenciada', 'roxo'] : c.descartado_em ? ['Descartada', 'cinza'] : ['Esperando você', 'ambar'])
                     : ue ? (ue.etapa === 'cancelada' ? ['Desistiu', 'cinza'] : [(ETAPAS_CAP.find((e) => e.k === ue.etapa)?.rotulo ?? ue.etapa) + (ue.quando && /_agendada$/.test(ue.etapa) ? ' · ' + fmtData.format(new Date(ue.quando)) : ''), ue.etapa === 'contrato_assinado' ? 'roxo' : 'verde'])
                     : l.feito_em ? ['Contato feito', 'verde'] : l.atribuido_em || l.corretor_phone ? ['Assumido', 'verde'] : l.status === 'em_cascata' ? ['Ofertando', 'azul'] : [STATUS_ROTULO[l.status] ?? l.status, 'cinza'];
                   return (

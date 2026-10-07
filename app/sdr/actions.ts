@@ -153,3 +153,84 @@ export async function referenciar(leadId: string, ref: string): Promise<Resultad
     return { ok: false, erro: 'O SDR não respondeu. Nada foi enviado — tente de novo em instantes.' };
   }
 }
+
+// ---------- Captação da landing sem lead: descartar / referenciar ----------
+type CaptacaoMin = { id: string; nome: string | null; telefone: string | null; intencao: string | null; tipo: string | null; bairro: string | null; endereco: string | null; descartado_em: string | null; referenciado_em: string | null };
+
+async function lerCaptacao(id: string): Promise<CaptacaoMin | null> {
+  const { data } = await supabaseAdmin().from('captacao_leads')
+    .select('id,nome,telefone,intencao,tipo,bairro,endereco,descartado_em,referenciado_em').eq('id', id).maybeSingle();
+  return (data as CaptacaoMin | null) ?? null;
+}
+const fim8tel = (t: string | null) => String(t ?? '').replace(/\D/g, '').slice(-8);
+
+// Descarta a captação (todos os registros do mesmo telefone: formulário e WhatsApp).
+export async function descartarCaptacao(captacaoId: string): Promise<Resultado> {
+  await exigirAdmin();
+  const c = await lerCaptacao(captacaoId);
+  if (!c) return { ok: false, erro: 'Captação não encontrada.' };
+  const sb = supabaseAdmin();
+  const q = sb.from('captacao_leads').update({ descartado_em: new Date().toISOString() });
+  const f8 = fim8tel(c.telefone);
+  const { error } = f8.length === 8 ? await q.like('telefone', '%' + f8).is('descartado_em', null) : await q.eq('id', c.id);
+  if (error) return { ok: false, erro: 'Não foi possível descartar: ' + error.message };
+  return { ok: true, msg: 'Captação descartada.' };
+}
+
+export type DadosRefCaptacao = { corretor_nome: string; corretor_whatsapp: string; unidade: string; email: string; regiao: string };
+
+// Referencia a captação para um corretor de outra unidade REMAX (25% da perna da indicação).
+// O painel grava a indicação; o n8n (sdr-painel-acao) manda o convite (modelo referenciamento_captacao).
+// O aceite e o e-mail seguem o mesmo fluxo da Eva do referenciamento de cliente.
+export async function referenciarCaptacao(captacaoId: string, d: DadosRefCaptacao): Promise<Resultado> {
+  const eu = await exigirAdmin();
+  const c = await lerCaptacao(captacaoId);
+  if (!c) return { ok: false, erro: 'Captação não encontrada.' };
+  if (c.referenciado_em) return { ok: false, erro: 'Esta captação já foi referenciada.' };
+  const nome = String(d?.corretor_nome ?? '').trim();
+  let wa = String(d?.corretor_whatsapp ?? '').replace(/\D/g, '');
+  if (wa.length === 10 || wa.length === 11) wa = '55' + wa;
+  const unidade = String(d?.unidade ?? '').trim();
+  const email = String(d?.email ?? '').trim().toLowerCase();
+  const regiao = String(d?.regiao ?? '').trim();
+  if (!nome || !unidade || !regiao) return { ok: false, erro: 'Preencha nome do corretor, unidade e cidade/região.' };
+  if (!/^55\d{10,11}$/.test(wa)) return { ok: false, erro: 'WhatsApp do corretor inválido (DDD + número).' };
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { ok: false, erro: 'E-mail inválido.' };
+  const sb = supabaseAdmin();
+  const { data: aberta } = await sb.from('indicacoes').select('id').eq('corretor_whatsapp', wa).in('status', ['aguardando_aceite', 'aceito_aguardando_email']).limit(1);
+  if (aberta && aberta.length) return { ok: false, erro: 'Este corretor já tem um referenciamento aguardando aceite. Espere ele responder antes de mandar outro.' };
+  const tel = String(c.telefone ?? '').replace(/\D/g, '');
+  const imovel = [c.tipo, c.endereco, c.bairro && c.bairro !== 'Outro' ? c.bairro : ''].filter(Boolean).join(' · ');
+  const { data: ind, error } = await sb.from('indicacoes').insert({
+    direcao: 'saida', tipo_indicacao: 'captacao', captacao_id: c.id,
+    cliente_nome: c.nome, cliente_telefone: tel ? (tel.length <= 11 ? '55' + tel : tel) : null,
+    cidade: regiao, tipo_transacao: /^alug/i.test(String(c.intencao ?? '')) ? 'locacao' : 'venda',
+    corretor_nome: nome, corretor_whatsapp: wa, unidade_nome: unidade, email_corretor: email || null,
+    percentual_referenciamento: 25, status: 'aguardando_aceite',
+    observacoes: 'Imóvel: ' + (imovel || 'não informado') + ' | pedido por ' + eu.email,
+  }).select('id').single();
+  if (error || !ind) return { ok: false, erro: 'Não foi possível registrar: ' + (error?.message ?? '') };
+  let resposta = '';
+  let ok = false;
+  try {
+    const r = await fetch(WEBHOOK_ACAO, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-chave': CHAVE_ACAO },
+      body: JSON.stringify({ acao: 'referenciar_captacao', indicacao_id: ind.id }),
+      cache: 'no-store',
+    });
+    const j = (await r.json().catch(() => ({}))) as { ok?: boolean; resposta?: string };
+    ok = r.ok && j.ok === true;
+    resposta = String(j.resposta ?? '');
+  } catch {
+    resposta = 'o n8n não respondeu';
+  }
+  if (!ok) {
+    await sb.from('indicacoes').update({ status: 'cancelada', observacoes: 'Imóvel: ' + (imovel || 'não informado') + ' | convite não saiu: ' + resposta }).eq('id', ind.id);
+    return { ok: false, erro: 'O convite ao corretor não saiu (' + (resposta || 'erro') + '). Nada ficou pendente — confira o WhatsApp e tente de novo.' };
+  }
+  const f8 = fim8tel(c.telefone);
+  const q = sb.from('captacao_leads').update({ referenciado_em: new Date().toISOString(), indicacao_id: ind.id });
+  if (f8.length === 8) await q.like('telefone', '%' + f8); else await q.eq('id', c.id);
+  return { ok: true, msg: 'Convite enviado a ' + nome + '. Quando ele aceitar, a Eva pede o e-mail e manda os dados do proprietário.' };
+}
