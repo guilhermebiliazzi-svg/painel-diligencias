@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { acessoContratos } from "@/lib/adm-acesso";
+import { normalizarConta } from "@/lib/bancos";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -135,6 +136,7 @@ async function listas() {
 //   imovel:    { id } | { novo: { rua, numero, complemento, bairro, cep, cidade, estado, tipo_imovel, ... } }
 //   locatario: { id } | { novo: { nome, cpf_cnpj, email, telefone } }
 //   contrato:  { campos editáveis... }
+//   conta?:    { titular, cpf_cnpj, banco_ispb, agencia, conta, tipo_conta }  (conta de repasse do locador)
 // }
 // Cria na ordem locador → imóvel → locatário → contrato; se algo falhar no meio,
 // apaga o que acabou de criar (não deixa cadastro órfão).
@@ -147,6 +149,14 @@ export async function POST(req: Request) {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Corpo inválido." }, { status: 400 });
+  }
+
+  // conta de repasse: valida antes de criar qualquer coisa
+  let contaRepasse: Record<string, any> | null = null;
+  if (body?.conta) {
+    const n = normalizarConta(body.conta);
+    if (!n.ok) return NextResponse.json({ error: n.error }, { status: 400 });
+    contaRepasse = n.dados;
   }
 
   const sb = supabaseAdmin();
@@ -248,6 +258,19 @@ export async function POST(req: Request) {
 
   const { data: novo, error } = await sb.from("adm_contratos").insert(ins).select("id").single();
   if (error || !novo) return falha("Falha ao criar o contrato.", 502, error?.message);
+  criados.push({ tabela: "adm_contratos", id: novo.id as number });
+
+  // 4) conta de repasse do locador, ligada a este contrato
+  if (contaRepasse) {
+    const { data: im } = await sb.from("adm_imoveis").select("locador_id").eq("id", imovelId).maybeSingle();
+    const { error: eConta } = await sb.from("adm_contas_bancarias").insert({
+      contrato_id: novo.id,
+      imovel_id: imovelId,
+      locador_id: (im as any)?.locador_id ?? null,
+      ...contaRepasse,
+    });
+    if (eConta) return falha("Falha ao salvar a conta bancária.", 502, eConta.message);
+  }
 
   return NextResponse.json({ ok: true, id: novo.id });
 }
