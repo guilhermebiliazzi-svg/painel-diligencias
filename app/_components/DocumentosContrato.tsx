@@ -7,7 +7,7 @@
 // O arquivo vai DIRETO do navegador para o Storage (URL assinada) — sem limite da Vercel.
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { CATEGORIAS_DOC, TIPOS_SEGURO, nomeTipoSeguro, ALERTA_APOLICE_DIAS } from "@/lib/contrato-documentos";
+import { CATEGORIAS_DOC, TIPOS_SEGURO, nomeTipoSeguro, ALERTA_APOLICE_DIAS, mesCurto } from "@/lib/contrato-documentos";
 
 type Doc = {
   id: number;
@@ -30,6 +30,11 @@ type Seguro = {
   vigencia_fim: string | null;
   ativo: boolean;
   dias: number | null;
+  cobrar_no_boleto?: boolean;
+  valor_mensal?: number | string | null;
+  parcelas_total?: number | string | null;
+  cobranca_inicio?: string | null;
+  premio?: number | string | null;
 };
 type Apolice = {
   seguro_id?: number | null;
@@ -43,7 +48,8 @@ type ItemFila = { key: string; file: File; categoria: string; apolice?: Apolice 
 
 export type DocumentosContratoHandle = {
   temFila: () => boolean;
-  enviarFila: (contratoId: number) => Promise<{ enviados: number; falhas: string[] }>;
+  // vinculos: apólice nova da fila desse tipo vai para o seguro já criado (ex.: { residencial: 12 })
+  enviarFila: (contratoId: number, vinculos?: Record<string, number>) => Promise<{ enviados: number; falhas: string[] }>;
 };
 
 const LIMITE_BYTES = 50 * 1024 * 1024; // limite padrão do Supabase Storage
@@ -98,6 +104,18 @@ function Selo({ s }: { s: Seguro }) {
   return <span className="vj-dc-selo vj-dc-selo-ok">Em dia</span>;
 }
 
+function resumoCobranca(s: Seguro): string {
+  const brl = (v: unknown) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : null;
+  };
+  if (!s.cobrar_no_boleto) return "Inquilino paga direto à seguradora";
+  const v = brl(s.valor_mensal);
+  if (!v) return "No boleto — falta o valor da parcela";
+  if (s.parcelas_total) return `No boleto: ${s.parcelas_total}× de ${v}, a partir de ${mesCurto(s.cobranca_inicio || null)}`;
+  return `No boleto: ${v} por mês`;
+}
+
 const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: number | null }>(
   function DocumentosContrato({ contratoId }, ref) {
     const [docs, setDocs] = useState<Doc[]>([]);
@@ -144,14 +162,15 @@ const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: nu
       ref,
       () => ({
         temFila: () => filaRef.current.length > 0,
-        enviarFila: async (id: number) => {
+        enviarFila: async (id: number, vinculos?: Record<string, number>) => {
           const falhas: string[] = [];
           let enviados = 0;
           // vários arquivos da MESMA apólice nova -> uma apólice só
           const criadas = new Map<Apolice, number>();
           for (const it of filaRef.current) {
             try {
-              const jaCriada = it.apolice ? criadas.get(it.apolice) : undefined;
+              const vinc = it.apolice && !it.apolice.seguro_id && it.apolice.tipo ? vinculos?.[it.apolice.tipo] : undefined;
+              const jaCriada = it.apolice ? criadas.get(it.apolice) ?? vinc : undefined;
               const r = await enviarArquivo(id, it.file, it.categoria, jaCriada ? { seguro_id: jaCriada } : it.apolice);
               if (it.apolice && r.seguro_id) criadas.set(it.apolice, r.seguro_id);
               enviados++;
@@ -218,7 +237,7 @@ const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: nu
       await carregar();
     }
 
-    async function salvarSeguro(s: Seguro, extra?: { ativo?: boolean }) {
+    async function salvarSeguro(s: Seguro, extra?: { ativo?: boolean }, comCobranca = false) {
       if (!contratoId) return;
       const r = await fetch("/api/adm/contrato-documentos", {
         method: "POST",
@@ -231,10 +250,23 @@ const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: nu
           numero_apolice: s.numero_apolice,
           vigencia_inicio: s.vigencia_inicio,
           vigencia_fim: s.vigencia_fim,
+          ...(comCobranca
+            ? {
+                cobrar_no_boleto: !!s.cobrar_no_boleto,
+                valor_mensal: s.valor_mensal ?? "",
+                parcelas_total: s.parcelas_total ?? "",
+                cobranca_inicio: s.cobranca_inicio ? String(s.cobranca_inicio).slice(0, 7) : "",
+                premio: s.premio ?? "",
+              }
+            : {}),
           ...extra,
         }),
       });
-      if (!r.ok) setErro((await r.json().catch(() => ({})))?.error || "Falha ao salvar a apólice.");
+      if (!r.ok) {
+        setErro((await r.json().catch(() => ({})))?.error || "Falha ao salvar a apólice.");
+        return; // mantém o formulário aberto para corrigir
+      }
+      setErro(null);
       setEditSeg(null);
       await carregar();
     }
@@ -352,6 +384,7 @@ const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: nu
                               {" "}
                               — vigência {fmtData(s.vigencia_inicio)} → {fmtData(s.vigencia_fim)}
                             </small>
+                            <div className="vj-dc-cob">{resumoCobranca(s)}</div>
                           </div>
                           <Selo s={s} />
                         </div>
@@ -361,14 +394,36 @@ const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: nu
                             <label>Nº apólice<input value={editSeg.numero_apolice ?? ""} onChange={(e) => setEditSeg({ ...editSeg, numero_apolice: e.target.value })} /></label>
                             <label>Início<input type="date" value={editSeg.vigencia_inicio ?? ""} onChange={(e) => setEditSeg({ ...editSeg, vigencia_inicio: e.target.value })} /></label>
                             <label>Fim<input type="date" value={editSeg.vigencia_fim ?? ""} onChange={(e) => setEditSeg({ ...editSeg, vigencia_fim: e.target.value })} /></label>
+                            <label className="vj-dc-form-larga">
+                              Como o inquilino paga
+                              <select
+                                value={editSeg.cobrar_no_boleto ? "boleto" : "direto"}
+                                onChange={(e) => setEditSeg({ ...editSeg, cobrar_no_boleto: e.target.value === "boleto" })}
+                              >
+                                <option value="boleto">Cobrado no boleto do aluguel</option>
+                                <option value="direto">Paga direto à seguradora (não entra no boleto)</option>
+                              </select>
+                            </label>
+                            {editSeg.cobrar_no_boleto && (
+                              <>
+                                <label>Valor da parcela (R$)<input type="number" step="0.01" value={editSeg.valor_mensal ?? ""} onChange={(e) => setEditSeg({ ...editSeg, valor_mensal: e.target.value })} /></label>
+                                <label>
+                                  Qtde. de parcelas
+                                  <input type="number" min="1" max="120" value={editSeg.parcelas_total ?? ""} onChange={(e) => setEditSeg({ ...editSeg, parcelas_total: e.target.value })} />
+                                  <small className="vj-dc-mut">Em branco = todo mês (ex.: fiança).</small>
+                                </label>
+                                <label>1ª cobrança (mês)<input type="month" value={editSeg.cobranca_inicio ? String(editSeg.cobranca_inicio).slice(0, 7) : ""} onChange={(e) => setEditSeg({ ...editSeg, cobranca_inicio: e.target.value })} /></label>
+                              </>
+                            )}
+                            <label>Prêmio total (R$)<input type="number" step="0.01" value={editSeg.premio ?? ""} onChange={(e) => setEditSeg({ ...editSeg, premio: e.target.value })} /></label>
                             <div className="vj-dc-form-acoes">
-                              <button type="button" className="vj-dc-btn" onClick={() => salvarSeguro(editSeg)}>Salvar</button>
+                              <button type="button" className="vj-dc-btn" onClick={() => salvarSeguro(editSeg, undefined, true)}>Salvar</button>
                               <button type="button" className="vj-dc-link" onClick={() => setEditSeg(null)}>Cancelar</button>
                             </div>
                           </div>
                         ) : (
                           <div className="vj-dc-seg-acoes">
-                            <button type="button" className="vj-dc-link" onClick={() => setEditSeg(s)}>Editar vigência</button>
+                            <button type="button" className="vj-dc-link" onClick={() => setEditSeg(s)}>Editar</button>
                             {s.ativo ? (
                               <button type="button" className="vj-dc-link" onClick={() => window.confirm("Encerrar esta apólice? Ela sai dos alertas de vencimento.") && salvarSeguro(s, { ativo: false })}>Encerrar</button>
                             ) : (
@@ -507,6 +562,7 @@ const CSS_DC = `
 .vj-dc-seg{border:1px solid var(--linha,#E4E9F2);background:#fff;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
 .vj-dc-seg-cab{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px}
 .vj-dc-seg-acoes{display:flex;gap:14px}
+.vj-dc-cob{font-size:12px;color:var(--txt,#16233B);margin-top:2px}
 .vj-dc-selo{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}
 .vj-dc-selo-ok{background:#EAF7F0;color:#0F7B4F}
 .vj-dc-selo-amar{background:#FFF8E6;color:#7A5B00}
