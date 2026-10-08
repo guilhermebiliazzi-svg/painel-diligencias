@@ -10,7 +10,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { acessoContratos } from "@/lib/adm-acesso";
-import { CATEGORIAS_VALIDAS, TIPOS_SEGURO_VALIDOS, diasAte } from "@/lib/contrato-documentos";
+import { CATEGORIAS_VALIDAS, TIPOS_SEGURO_VALIDOS, diasAte, normalizarCobrancaSeguro } from "@/lib/contrato-documentos";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -71,7 +71,7 @@ export async function GET(req: Request) {
       .order("criado_em", { ascending: false }),
     sb
       .from("adm_seguros")
-      .select("id,tipo,seguradora,numero_apolice,vigencia_inicio,vigencia_fim,ativo")
+      .select("id,tipo,seguradora,numero_apolice,vigencia_inicio,vigencia_fim,ativo,cobrar_no_boleto,valor_mensal,parcelas_total,cobranca_inicio,premio")
       .eq("contrato_id", contrato)
       .order("ativo", { ascending: false })
       .order("vigencia_fim", { ascending: false, nullsFirst: false }),
@@ -214,6 +214,12 @@ export async function POST(req: Request) {
       updated_at: new Date().toISOString(),
     };
     if (typeof body.ativo === "boolean") patch.ativo = body.ativo;
+    // cobrança do inquilino (no boleto em N parcelas, ou pago direto à seguradora)
+    if ("cobrar_no_boleto" in body) {
+      const sc = normalizarCobrancaSeguro(body);
+      if (!sc.ok) return erro(sc.error);
+      Object.assign(patch, sc.dados);
+    }
     const { data, error } = await sb
       .from("adm_seguros")
       .update(patch)
