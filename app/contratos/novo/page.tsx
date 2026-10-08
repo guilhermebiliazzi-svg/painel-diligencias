@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import DocumentosContrato, { type DocumentosContratoHandle } from "@/app/_components/DocumentosContrato";
 import { FormConta, contaVazia, resumoConta, type ContaForm } from "@/app/_components/ContaRepasse";
 import { normalizarConta } from "@/lib/bancos";
+import { normalizarCobrancaSeguro } from "@/lib/contrato-documentos";
 
 type Pessoa = { id: number; nome: string; cpf_cnpj: string | null };
 type Imovel = {
@@ -79,6 +80,21 @@ export default function NovoContrato() {
   const set = (k: string, v: any) => setC((p) => ({ ...p, [k]: v }));
 
   const docsRef = useRef<DocumentosContratoHandle>(null);
+
+  // seguro residencial do inquilino
+  const [seg, setSeg] = useState({
+    tem: false,
+    seguradora: "",
+    numero_apolice: "",
+    vigencia_inicio: "",
+    vigencia_fim: "",
+    premio: "",
+    cobrar_no_boleto: true,
+    valor_mensal: "",
+    parcelas_total: "12",
+    cobranca_inicio: "",
+  });
+  const mesPrimeiroAluguel = String(c.data_primeiro_aluguel || c.data_inicio || "").slice(0, 7);
 
   // conta de repasse do locador
   const [contaModo, setContaModo] = useState<string>("nova"); // "nova" | "depois" | id de conta existente
@@ -176,6 +192,12 @@ export default function NovoContrato() {
     } else if (contaModo !== "depois") {
       conta = contasLocador.find((x) => String(x.id) === contaModo) || null;
     }
+    let seguro: Record<string, any> | null = null;
+    if (seg.tem) {
+      seguro = { ...seg, cobranca_inicio: seg.cobranca_inicio || mesPrimeiroAluguel };
+      const sc = normalizarCobrancaSeguro(seguro);
+      if (!sc.ok) return setErro(sc.error);
+    }
     if (imovelEscolhido?.contrato_ativo &&
         !window.confirm(`Este imóvel já tem o contrato ativo #${imovelEscolhido.contrato_ativo}. Criar outro mesmo assim?`)) return;
 
@@ -191,6 +213,7 @@ export default function NovoContrato() {
           locatario,
           contrato: { ...c, valor_atual_aluguel: c.valor_primeiro_aluguel },
           conta,
+          seguro,
         }),
       });
       const d = await r.json().catch(() => ({}));
@@ -204,7 +227,7 @@ export default function NovoContrato() {
       let aviso = "";
       if (docsRef.current?.temFila()) {
         setEtapa("Enviando documentos…");
-        const res = await docsRef.current.enviarFila(id);
+        const res = await docsRef.current.enviarFila(id, d.seguro_id ? { residencial: d.seguro_id } : undefined);
         if (res.falhas.length) aviso = "&falhas=" + res.falhas.length;
       }
       window.location.href = `/contratos/editar?id=${id}&novo=1${aviso}`;
@@ -433,6 +456,60 @@ export default function NovoContrato() {
               </div>
               {mostraValidadeGarantia && (
                 <p className="vj-nota">A vigência da apólice vai no quadro <b>Apólices</b> abaixo — é ela que dispara o alerta de 30 dias.</p>
+              )}
+            </section>
+
+            {/* Seguro residencial */}
+            <section className="vj-card">
+              <h2 className="vj-h2">Seguro residencial</h2>
+              <div className="vj-grid">
+                <label className="vj-f vj-check">
+                  <input type="checkbox" checked={seg.tem} onChange={(e) => setSeg({ ...seg, tem: e.target.checked })} />
+                  <span>Este contrato tem seguro residencial</span>
+                </label>
+                {seg.tem && (
+                  <>
+                    <label className="vj-f"><span>Seguradora</span>
+                      <input value={seg.seguradora} onChange={(e) => setSeg({ ...seg, seguradora: e.target.value })} />
+                    </label>
+                    <label className="vj-f"><span>Nº da apólice</span>
+                      <input value={seg.numero_apolice} onChange={(e) => setSeg({ ...seg, numero_apolice: e.target.value })} />
+                    </label>
+                    <label className="vj-f"><span>Vigência início</span>
+                      <input type="date" value={seg.vigencia_inicio} onChange={(e) => setSeg({ ...seg, vigencia_inicio: e.target.value })} />
+                    </label>
+                    <label className="vj-f"><span>Vigência fim</span>
+                      <input type="date" value={seg.vigencia_fim} onChange={(e) => setSeg({ ...seg, vigencia_fim: e.target.value })} />
+                      <small>Alerta de vencimento 30 dias antes.</small>
+                    </label>
+                    <label className="vj-f vj-larga"><span>Como o inquilino paga</span>
+                      <select value={seg.cobrar_no_boleto ? "boleto" : "direto"} onChange={(e) => setSeg({ ...seg, cobrar_no_boleto: e.target.value === "boleto" })}>
+                        <option value="boleto">Cobrado no boleto do aluguel</option>
+                        <option value="direto">Paga direto à seguradora (não entra no boleto)</option>
+                      </select>
+                    </label>
+                    {seg.cobrar_no_boleto && (
+                      <>
+                        <label className="vj-f"><span>Valor da parcela (R$) *</span>
+                          <input type="number" step="0.01" value={seg.valor_mensal} onChange={(e) => setSeg({ ...seg, valor_mensal: e.target.value })} />
+                        </label>
+                        <label className="vj-f"><span>Qtde. de parcelas a cobrar *</span>
+                          <input type="number" min="1" max="120" value={seg.parcelas_total} onChange={(e) => setSeg({ ...seg, parcelas_total: e.target.value })} />
+                        </label>
+                        <label className="vj-f"><span>1ª cobrança (mês)</span>
+                          <input type="month" value={seg.cobranca_inicio || mesPrimeiroAluguel} onChange={(e) => setSeg({ ...seg, cobranca_inicio: e.target.value })} />
+                          <small>Padrão: mês do primeiro aluguel. Depois da última parcela, o seguro sai do boleto sozinho.</small>
+                        </label>
+                      </>
+                    )}
+                    <label className="vj-f"><span>Prêmio total (R$)</span>
+                      <input type="number" step="0.01" value={seg.premio} onChange={(e) => setSeg({ ...seg, premio: e.target.value })} />
+                    </label>
+                  </>
+                )}
+              </div>
+              {seg.tem && (
+                <p className="vj-nota">O PDF da apólice pode ser anexado em <b>Documentos → Apólices</b> abaixo (escolha o tipo “Seguro residencial”); ele fica ligado a este seguro.</p>
               )}
             </section>
 
