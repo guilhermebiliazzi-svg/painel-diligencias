@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { acessoContratos } from "@/lib/adm-acesso";
 import { normalizarConta } from "@/lib/bancos";
+import { normalizarCobrancaSeguro } from "@/lib/contrato-documentos";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -137,6 +138,8 @@ async function listas() {
 //   locatario: { id } | { novo: { nome, cpf_cnpj, email, telefone } }
 //   contrato:  { campos editáveis... }
 //   conta?:    { titular, cpf_cnpj, banco_ispb, agencia, conta, tipo_conta }  (conta de repasse do locador)
+//   seguro?:   { seguradora, numero_apolice, vigencia_inicio, vigencia_fim, premio,
+//                cobrar_no_boleto, valor_mensal, parcelas_total, cobranca_inicio:"YYYY-MM" }  (seguro residencial)
 // }
 // Cria na ordem locador → imóvel → locatário → contrato; se algo falhar no meio,
 // apaga o que acabou de criar (não deixa cadastro órfão).
@@ -157,6 +160,22 @@ export async function POST(req: Request) {
     const n = normalizarConta(body.conta);
     if (!n.ok) return NextResponse.json({ error: n.error }, { status: 400 });
     contaRepasse = n.dados;
+  }
+  // seguro residencial: valida antes também
+  let seguroRes: Record<string, any> | null = null;
+  if (body?.seguro) {
+    const sc = normalizarCobrancaSeguro(body.seguro);
+    if (!sc.ok) return NextResponse.json({ error: sc.error }, { status: 400 });
+    const d = (v: unknown) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v ?? "")) ? String(v) : null);
+    seguroRes = {
+      tipo: "residencial",
+      ativo: true,
+      seguradora: txt(body.seguro.seguradora, 120),
+      numero_apolice: txt(body.seguro.numero_apolice, 120),
+      vigencia_inicio: d(body.seguro.vigencia_inicio),
+      vigencia_fim: d(body.seguro.vigencia_fim),
+      ...sc.dados,
+    };
   }
 
   const sb = supabaseAdmin();
@@ -263,14 +282,31 @@ export async function POST(req: Request) {
   // 4) conta de repasse do locador, ligada a este contrato
   if (contaRepasse) {
     const { data: im } = await sb.from("adm_imoveis").select("locador_id").eq("id", imovelId).maybeSingle();
-    const { error: eConta } = await sb.from("adm_contas_bancarias").insert({
-      contrato_id: novo.id,
-      imovel_id: imovelId,
-      locador_id: (im as any)?.locador_id ?? null,
-      ...contaRepasse,
-    });
-    if (eConta) return falha("Falha ao salvar a conta bancária.", 502, eConta.message);
+    const { data: ct, error: eConta } = await sb
+      .from("adm_contas_bancarias")
+      .insert({
+        contrato_id: novo.id,
+        imovel_id: imovelId,
+        locador_id: (im as any)?.locador_id ?? null,
+        ...contaRepasse,
+      })
+      .select("id")
+      .single();
+    if (eConta || !ct) return falha("Falha ao salvar a conta bancária.", 502, eConta?.message);
+    criados.push({ tabela: "adm_contas_bancarias", id: ct.id as number });
   }
 
-  return NextResponse.json({ ok: true, id: novo.id });
+  // 5) seguro residencial do inquilino
+  let seguroId: number | null = null;
+  if (seguroRes) {
+    const { data: sg, error: eSeg } = await sb
+      .from("adm_seguros")
+      .insert({ contrato_id: novo.id, ...seguroRes })
+      .select("id")
+      .single();
+    if (eSeg || !sg) return falha("Falha ao salvar o seguro residencial.", 502, eSeg?.message);
+    seguroId = sg.id as number;
+  }
+
+  return NextResponse.json({ ok: true, id: novo.id, seguro_id: seguroId });
 }
