@@ -566,8 +566,26 @@ export async function gerarParecer(fd: FormData) {
   const diligencia_id = String(fd.get('diligencia_id') || '');
   if (!diligencia_id) throw new Error('diligencia_id ausente');
 
+  // Quando o modal veio pré-preenchido do cadastro e o nome não foi alterado,
+  // manda a lista estruturada (um item por comprador) em vez do texto concatenado.
+  let compradores: CompradorParecer[] | null = null;
+  try {
+    const cj = fd.get('compradores_json');
+    if (cj) {
+      const arr = JSON.parse(String(cj));
+      if (Array.isArray(arr) && arr.length) {
+        compradores = arr
+          .map((c: Record<string, unknown>) => ({ nome: String(c?.nome ?? '').trim(), cpf: String(c?.cpf ?? '').trim() }))
+          .filter((c) => c.nome);
+      }
+    }
+  } catch {
+    compradores = null;
+  }
+
   const payload = {
     diligencia_id,
+    ...(compradores && compradores.length ? { compradores } : {}),
     comprador_nome: (fd.get('comprador_nome') as string) || null,
     comprador_cpf: (fd.get('comprador_cpf') as string) || null,
     comprador_qualificacao: (fd.get('comprador_qualificacao') as string) || null,
@@ -726,6 +744,129 @@ export async function carregarNegocio(diligencia_id: string): Promise<{
   const precoRaw = r.rows[0].preco;
   const precoNum = precoRaw === null || precoRaw === undefined ? NaN : Number(precoRaw);
   return { ok: true, negocio, preco: isFinite(precoNum) ? precoNum : null, vendedores };
+}
+
+// Pré-preenchimento do modal "Gerar parecer": compradores do cadastro
+// (dados_completos.compradoresPF/PJ, com o cônjuge coproprietário) e o negócio da
+// ficha "Dados do negócio". Diligências antigas caem nas colunas compradores/preco.
+export type CompradorParecer = { nome: string; cpf: string };
+export type DadosParecer = {
+  comprador_nome: string;
+  comprador_cpf: string;
+  comprador_qualificacao: string;
+  preco: string;
+  forma_pagamento: string;
+  compradores: CompradorParecer[];
+  origem: 'cadastro' | 'legado' | 'vazio';
+};
+
+function brl(n: number): string {
+  return 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function numBR(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'number') return isFinite(v) ? v : null;
+  const t = String(v).trim();
+  const n = Number(/,\d{1,2}$/.test(t) ? t.replace(/\./g, '').replace(',', '.') : t.replace(/[^\d.]/g, ''));
+  return isFinite(n) ? n : null;
+}
+const PARCELA_TXT: Record<string, string> = {
+  sinal: 'sinal',
+  recursos_proprios: 'recursos próprios',
+  fgts: 'FGTS',
+  financiamento: 'financiamento bancário',
+  a_vista: 'saldo à vista',
+};
+const REGIME_TXT: Record<string, string> = {
+  comunhao_parcial: 'comunhão parcial',
+  comunhao_universal: 'comunhão universal',
+  separacao_total: 'separação total',
+  separacao_convencional: 'separação convencional',
+  separacao_obrigatoria: 'separação obrigatória',
+  participacao_final_aquestos: 'participação final nos aquestos',
+};
+
+export async function carregarDadosParecer(diligencia_id: string): Promise<DadosParecer> {
+  const vazio: DadosParecer = {
+    comprador_nome: '', comprador_cpf: '', comprador_qualificacao: '', preco: '',
+    forma_pagamento: '', compradores: [], origem: 'vazio',
+  };
+  if (!diligencia_id) return vazio;
+  try {
+    const r = await pool.query(
+      `SELECT dados_completos, compradores, preco FROM diligencias WHERE id = $1`,
+      [diligencia_id]
+    );
+    if (r.rows.length === 0) return vazio;
+    const dc = parseObj(r.rows[0].dados_completos);
+    const negocio = parseObj(dc.negocio);
+
+    const lista: CompradorParecer[] = [];
+    let qualificacao = '';
+    const pf = Array.isArray(dc.compradoresPF) ? (dc.compradoresPF as Record<string, unknown>[]) : [];
+    pf.forEach((p, i) => {
+      const nome = String(p?.pf_nome ?? '').trim();
+      if (!nome) return;
+      lista.push({ nome, cpf: String(p?.pf_cpf ?? '').trim() });
+      const cj = parseObj(p?.pf_conjuge);
+      const cjNome = String(cj.nome ?? '').trim();
+      const copro = cjNome && (cj.participacao === 'coproprietario' || cj.proprietario === true);
+      if (copro) lista.push({ nome: cjNome, cpf: String(cj.cpf ?? '').trim() });
+      if (i === 0) {
+        const nac = String(p?.pf_nacionalidade ?? '').trim().toLowerCase();
+        const prof = String(p?.pf_profissao ?? '').trim().toLowerCase();
+        const ec = String(p?.pf_estado_civil ?? '').trim().toLowerCase();
+        const reg = REGIME_TXT[String(p?.pf_regime_bens ?? '')] || String(p?.pf_regime_bens ?? '').replace(/_/g, ' ');
+        const partes = [nac, prof, ec].filter(Boolean);
+        let q = partes.join(', ');
+        if (/^casad/.test(ec) && reg) q += ' sob ' + reg;
+        if (cjNome && /^casad|^uni/.test(ec)) q += copro ? ` (com ${cjNome}, também compradora)` : ` com ${cjNome}`;
+        qualificacao = q;
+      }
+    });
+    const pj = Array.isArray(dc.compradoresPJ) ? (dc.compradoresPJ as Record<string, unknown>[]) : [];
+    pj.forEach((p) => {
+      const nome = String(p?.pj_nome ?? '').trim();
+      if (nome) lista.push({ nome, cpf: String(p?.pj_cnpj ?? '').trim() });
+    });
+
+    let origem: DadosParecer['origem'] = lista.length ? 'cadastro' : 'vazio';
+    if (!lista.length) {
+      const leg = r.rows[0].compradores;
+      const arr = Array.isArray(leg) ? leg : (typeof leg === 'string' ? (() => { try { return JSON.parse(leg); } catch { return []; } })() : []);
+      (Array.isArray(arr) ? arr : []).forEach((c: Record<string, unknown>) => {
+        const nome = String(c?.nome ?? '').trim();
+        if (nome) lista.push({ nome, cpf: String(c?.cpf ?? c?.cpf_cnpj ?? '').trim() });
+      });
+      if (lista.length) origem = 'legado';
+    }
+
+    const preco = numBR(negocio.preco) ?? numBR(r.rows[0].preco);
+    const pag = parseObj(negocio.pagamento);
+    const parcelas = Array.isArray(pag.parcelas) ? (pag.parcelas as Record<string, unknown>[]) : [];
+    const forma = parcelas
+      .map((x, i) => {
+        const v = numBR(x?.valor);
+        const rot = String(x?.rotulo ?? '').trim() || PARCELA_TXT[String(x?.tipo ?? '')] || String(x?.tipo ?? 'parcela');
+        const mom = String(x?.momento ?? '').trim();
+        const momOk = mom && mom.toLowerCase() !== rot.toLowerCase() && !/^financiamento banc/i.test(mom);
+        return (i === 0 ? rot.charAt(0).toUpperCase() + rot.slice(1) : rot) + (v !== null ? ' de ' + brl(v) : '') + (momOk ? ' — ' + mom.charAt(0).toLowerCase() + mom.slice(1) : '');
+      })
+      .filter(Boolean)
+      .join('; ');
+
+    return {
+      comprador_nome: lista.map((c) => c.nome).join(' e '),
+      comprador_cpf: lista.map((c) => c.cpf).filter(Boolean).join(' / '),
+      comprador_qualificacao: qualificacao,
+      preco: preco !== null ? String(Math.round(preco)) : '',
+      forma_pagamento: forma,
+      compradores: lista,
+      origem,
+    };
+  } catch {
+    return vazio;
+  }
 }
 
 export async function salvarNegocio(
