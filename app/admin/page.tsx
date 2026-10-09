@@ -126,14 +126,23 @@ export default async function AdminHome({
               Diligências
             </h1>
           </div>
-          <form action={logoutAction}>
-            <button
-              type="submit"
-              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          <div className="flex items-center gap-2">
+            {/* rota (route.ts), não página: <a> em vez de <Link> */}
+            <a
+              href="/admin/nova-diligencia"
+              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-blue-700"
             >
-              Sair
-            </button>
-          </form>
+              + Nova diligência
+            </a>
+            <form action={logoutAction}>
+              <button
+                type="submit"
+                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Sair
+              </button>
+            </form>
+          </div>
         </header>
 
         {/* Cards de resumo */}
