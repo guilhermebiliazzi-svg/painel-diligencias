@@ -22,6 +22,7 @@ import { GerarParecer } from '../../GerarParecer';
 import { GerarCCV } from '../../GerarCCV';
 import { FichaNegocio } from '../../FichaNegocio';
 import { EmitirCobranca } from '../../EmitirCobranca';
+import { EnviarArquivoCard } from '../../EnviarArquivoCard';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -740,6 +741,8 @@ function CardAdmin({
             </div>
           </details>
         )}
+        {/* Envio direto: arquivo do computador/celular -> pasta do Drive do card */}
+        {r.pasta_id && <EnviarArquivoCard certidaoId={r.certidao_id} temPdf={!!r.drive_file_id} />}
         <details className="relative">
           <summary className="cursor-pointer list-none rounded-md border border-blue-300 bg-white px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50">
             {r.drive_file_id ? 'Trocar PDF' : 'Vincular PDF'}
