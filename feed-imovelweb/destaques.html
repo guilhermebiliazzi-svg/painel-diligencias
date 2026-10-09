@@ -19,6 +19,9 @@
   .topo{display:flex;align-items:flex-start;gap:16px}
   h1{margin:0 0 2px;font-size:17px;font-weight:650}
   .sub{color:var(--fraco);font-size:13px}
+  .contagem{align-self:center;font-size:14px;color:var(--fraco);white-space:nowrap}
+  .contagem b{color:inherit;font-weight:700;font-variant-numeric:tabular-nums}
+  .contagem.filtrado b{color:#003DA5}
   .quem{margin-left:auto;text-align:right;font-size:12.5px;color:var(--fraco);white-space:nowrap}
   .quem a{color:var(--azul);text-decoration:none;margin-left:8px}
   .barra{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
@@ -186,6 +189,7 @@
       <option value="maior">Maior valor</option>
       <option value="menor">Menor valor</option>
     </select>
+    <div class="contagem" id="contagem"></div>
   </div>
 </header>
 
@@ -499,6 +503,13 @@
       return semAcento(it.t + ' ' + it.e + ' ' + it.c).indexOf(termo) >= 0;
     });
     visiveis = ordenar(visiveis);
+
+    // Quantos imoveis o filtro atual mostra (o subtitulo e sempre o total).
+    var filtrado = visiveis.length !== itens.length;
+    $('contagem').classList.toggle('filtrado', filtrado);
+    $('contagem').innerHTML = filtrado
+      ? '<b>' + num(visiveis.length) + '</b> de ' + num(itens.length) + ' imóveis neste filtro'
+      : 'Todos os <b>' + num(itens.length) + '</b> imóveis';
 
     if (!visiveis.length) {
       $('lista').innerHTML = '<div class="vazio">Nada encontrado com esses filtros.</div>';
