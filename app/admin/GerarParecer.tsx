@@ -2,11 +2,13 @@
 
 // app/admin/GerarParecer.tsx
 // Botão "Gerar parecer" no cabeçalho da diligência. Abre um formulário com os
-// dados do negócio (comprador, preço, forma de pagamento), dispara o workflow B
+// dados do negócio (comprador, preço, forma de pagamento) já pré-preenchidos a partir
+// do cadastro (carregarDadosParecer), dispara o workflow B
 // (fire-and-forget) e acompanha o resultado pelo /api/parecer-status.
 
 import { useState, useEffect, useRef, useTransition, useCallback } from 'react';
-import { gerarParecer, liberarParecer } from './actions';
+import { gerarParecer, liberarParecer, carregarDadosParecer } from './actions';
+import type { DadosParecer } from './actions';
 
 type ParecerStatus = {
   id: string;
@@ -25,6 +27,8 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
   const [liberando, setLiberando] = useState(false);
   const [parecer, setParecer] = useState<ParecerStatus>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const [dados, setDados] = useState<DadosParecer | null>(null);
+  const [carregandoDados, setCarregandoDados] = useState(false);
 
   const carregar = useCallback(async (): Promise<ParecerStatus> => {
     try {
@@ -61,16 +65,34 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gerando]);
 
+  async function abrir() {
+    setErro(null);
+    setDados(null);
+    setOpen(true);
+    setCarregandoDados(true);
+    try {
+      setDados(await carregarDadosParecer(diligenciaId));
+    } catch {
+      setDados(null);
+    } finally {
+      setCarregandoDados(false);
+    }
+  }
+
   function fechar() {
     if (pending) return;
     setOpen(false);
     setErro(null);
+    setDados(null);
     formRef.current?.reset();
   }
 
   function submeter(fd: FormData) {
     setErro(null);
     fd.set('diligencia_id', diligenciaId);
+    if (dados && dados.compradores.length && String(fd.get('comprador_nome') || '') === dados.comprador_nome) {
+      fd.set('compradores_json', JSON.stringify(dados.compradores));
+    }
     startTransition(async () => {
       try {
         await gerarParecer(fd);
@@ -152,7 +174,7 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
         )}
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={abrir}
           disabled={ineditavel}
           className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
             ineditavel
@@ -187,18 +209,25 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
             </div>
 
             <p className="mb-3 rounded-md bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
-              ℹ O parecer é gerado a partir das certidões já levantadas. Os campos abaixo
-              completam os dados do negócio. O resultado sai como rascunho, para sua revisão.
+              ℹ O parecer é gerado a partir das certidões já levantadas.{' '}
+              {dados?.origem === 'cadastro'
+                ? 'Os dados abaixo vieram do cadastro da diligência e da ficha “Dados do negócio” — confira e gere.'
+                : 'Os campos abaixo completam os dados do negócio.'}{' '}
+              O resultado sai como rascunho, para sua revisão.
             </p>
 
-            <form ref={formRef} action={submeter} className="space-y-3">
+            {carregandoDados ? (
+              <p className="py-6 text-center text-xs text-slate-500">Carregando dados da diligência…</p>
+            ) : (
+            <form key={dados ? 'cheio' : 'vazio'} ref={formRef} action={submeter} className="space-y-3">
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-700">Comprador</label>
                 <input
                   type="text"
                   name="comprador_nome"
+                  defaultValue={dados?.comprador_nome ?? ''}
                   required
-                  maxLength={160}
+                  maxLength={300}
                   disabled={pending}
                   placeholder="Nome completo do comprador"
                   className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-50"
@@ -211,7 +240,8 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
                   <input
                     type="text"
                     name="comprador_cpf"
-                    maxLength={20}
+                    defaultValue={dados?.comprador_cpf ?? ''}
+                    maxLength={80}
                     disabled={pending}
                     placeholder="000.000.000-00"
                     className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-50"
@@ -222,6 +252,7 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
                   <input
                     type="number"
                     name="preco"
+                    defaultValue={dados?.preco ?? ''}
                     required
                     min={0}
                     step={1}
@@ -237,7 +268,8 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
                 <input
                   type="text"
                   name="forma_pagamento"
-                  maxLength={160}
+                  defaultValue={dados?.forma_pagamento ?? ''}
+                  maxLength={400}
                   disabled={pending}
                   placeholder="Ex.: financiamento bancário com alienação fiduciária"
                   className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-50"
@@ -251,7 +283,8 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
                 <input
                   type="text"
                   name="comprador_qualificacao"
-                  maxLength={200}
+                  defaultValue={dados?.comprador_qualificacao ?? ''}
+                  maxLength={300}
                   disabled={pending}
                   placeholder="Ex.: brasileiro, casado, comunhão parcial"
                   className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-50"
@@ -284,6 +317,7 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
                 </button>
               </div>
             </form>
+            )}
           </div>
         </div>
       )}
