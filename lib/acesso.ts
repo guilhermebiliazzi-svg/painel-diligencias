@@ -25,14 +25,12 @@ export type Tela =
   | 'locador'
   | 'usuarios';
 
-export type Area = 'juridico' | 'comercial' | 'marketing' | 'financeiro' | 'administracao';
+export type Area = 'venda' | 'administracao' | 'sistema';
 
 export const AREAS: { chave: Area; titulo: string; descricao: string }[] = [
-  { chave: 'juridico', titulo: 'Jurídico', descricao: 'Diligências, certidões e documentos do negócio.' },
-  { chave: 'comercial', titulo: 'Comercial', descricao: 'Leads, captação e estudo de mercado.' },
-  { chave: 'marketing', titulo: 'Marketing', descricao: 'Anúncios e redes sociais.' },
-  { chave: 'financeiro', titulo: 'Financeiro', descricao: 'Cobranças, repasses, notas e pagamentos.' },
-  { chave: 'administracao', titulo: 'Administração', descricao: 'Locadores e acesso ao painel.' },
+  { chave: 'venda', titulo: 'Venda', descricao: 'Do lead à comissão.' },
+  { chave: 'administracao', titulo: 'Administração', descricao: 'Contratos de locação administrados.' },
+  { chave: 'sistema', titulo: 'Sistema', descricao: 'Acesso ao painel.' },
 ];
 
 export type FlagLegada =
@@ -55,18 +53,20 @@ export type DefTela = {
 };
 
 export const TELAS: DefTela[] = [
-  { chave: 'diligencias', titulo: 'Diligências', area: 'juridico', flag: 'pode_diligencias' },
-  { chave: 'sdr', titulo: 'Funil do SDR', area: 'comercial', flag: null },
-  { chave: 'captacao', titulo: 'Captação', area: 'comercial', flag: 'pode_captacao' },
-  { chave: 'estudo', titulo: 'Estudo de mercado', area: 'comercial', flag: 'pode_postagens' },
-  { chave: 'postagens', titulo: 'Postagens', area: 'marketing', flag: 'pode_postagens' },
-  { chave: 'vitrine', titulo: 'Vitrine Google Ads', area: 'marketing', flag: null },
-  { chave: 'cobrancas', titulo: 'Cobranças e contratos', area: 'financeiro', flag: 'pode_cobrancas' },
-  { chave: 'repasse', titulo: 'Repasse', area: 'financeiro', flag: 'pode_repasse' },
-  { chave: 'notas', titulo: 'Notas fiscais', area: 'financeiro', flag: 'pode_notas' },
-  { chave: 'pagamentos', titulo: 'Pagamentos', area: 'financeiro', flag: 'pode_pagamentos' },
+  { chave: 'sdr', titulo: 'Funil do SDR', area: 'venda', flag: null },
+  { chave: 'captacao', titulo: 'Captação', area: 'venda', flag: 'pode_captacao' },
+  { chave: 'estudo', titulo: 'Estudo de mercado', area: 'venda', flag: 'pode_postagens' },
+  { chave: 'diligencias', titulo: 'Diligências', area: 'venda', flag: 'pode_diligencias' },
+  { chave: 'postagens', titulo: 'Postagens', area: 'venda', flag: 'pode_postagens' },
+  { chave: 'vitrine', titulo: 'Vitrine Google Ads', area: 'venda', flag: null },
+  // uma permissão cobre Cobranças/contratos (Administração) e a Cobrança com split (Venda)
+  { chave: 'cobrancas', titulo: 'Cobranças, contratos e cobrança com split', area: 'administracao', flag: 'pode_cobrancas' },
+  { chave: 'repasse', titulo: 'Repasse', area: 'administracao', flag: 'pode_repasse' },
+  { chave: 'pagamentos', titulo: 'Pagamentos', area: 'administracao', flag: 'pode_pagamentos' },
+  // uma permissão cobre as Notas da administração e as Notas de comissão (Venda)
+  { chave: 'notas', titulo: 'Notas da administração e de comissão', area: 'administracao', flag: 'pode_notas' },
   { chave: 'locador', titulo: 'Portal do locador', area: 'administracao', flag: null, soAdmin: true },
-  { chave: 'usuarios', titulo: 'Usuários e perfis', area: 'administracao', flag: null, soAdmin: true },
+  { chave: 'usuarios', titulo: 'Usuários e perfis', area: 'sistema', flag: null, soAdmin: true },
 ];
 
 export const TELA_CHAVES = TELAS.map((t) => t.chave);
