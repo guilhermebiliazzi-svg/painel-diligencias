@@ -88,6 +88,8 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
   const nomeCor = (p: string) => { const c = porPhone.get(p); return c ? (c.apelido?.trim() || c.nome.split(' ')[0]) : telFmt(p); };
   const st = STATUS[l.status] ?? { t: l.status, c: 'bg-slate-100 text-slate-700' };
   const aberto = ['aguardando_guilherme', 'em_cascata'].includes(l.status) && !l.corretor_phone;
+  // Encaminhar está sempre disponível; fora de "esperando você"/"ofertando" ele reabre o lead.
+  const reabre = !aberto;
   const fila = l.fila_corretores ?? [];
   const wa = 'https://wa.me/' + l.telefone.replace(/\D/g, '');
   // Imóveis que dá para referenciar: o do anúncio + os de parceiros (outras unidades) enviados ao cliente.
@@ -161,14 +163,15 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
 
         <Decisao
           modo="lead" id={l.id} corretores={corretores} filaAtual={fila}
-          podeOfertar={aberto} podeSegurar={aberto} emCascata={l.status === 'em_cascata'}
+          podeOfertar podeSegurar={aberto} emCascata={l.status === 'em_cascata' && !l.corretor_phone}
           podeDescartar={!['atribuido', 'visita_agendada', 'encerrado', 'arquivado'].includes(l.status)}
           imoveisRef={imoveisRef}
         />
 
-        {!aberto && (
+        {reabre && (
           <p className="rounded-xl bg-slate-100 px-4 py-3 text-sm text-slate-600">
-            Este lead não está esperando decisão sua agora ({st.t.toLowerCase()}).
+            Lead {st.t.toLowerCase()}. Se você montar uma fila acima, ele é reaberto
+            {l.corretor_phone ? ', sai do corretor atual' : ''} e a oferta começa pelo primeiro da fila.
           </p>
         )}
 
