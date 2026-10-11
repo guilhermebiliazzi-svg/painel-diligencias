@@ -220,7 +220,7 @@ async function Historico({ sp, beneficiarios }: { sp: SP; beneficiarios: Benefic
   if (ate) qb = qb.lt('vencimento', ate);
   if (f.tipo === 'venda') qb = qb.not('diligencia_id', 'is', null);
   if (f.tipo === 'avulsa') qb = qb.is('diligencia_id', null);
-  if (f.ben) qb = qb.contains('split', [{ walletId: f.ben }]);
+  if (f.ben) qb = qb.contains('split', JSON.stringify([{ walletId: f.ben }])); // jsonb: o filtro vai como JSON
   const { data: brutas, error } = await qb;
   if (error) {
     return <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">Não consegui ler as cobranças: {error.message}</p>;
