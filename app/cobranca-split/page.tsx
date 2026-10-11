@@ -1,12 +1,13 @@
 // Cobrança com split (Venda): emitir boleto no Asaas com a comissão já dividida
 // e acompanhar o histórico das cobranças emitidas, com status.
 //
-// O histórico filtra no banco (vencimento, status, tipo, beneficiário, busca),
-// 50 por página — não carrega tudo de uma vez. "Vencida" = pendente com
+// O histórico filtra no servidor (vencimento, status, tipo, beneficiário,
+// busca), 50 por página — o navegador não recebe a lista inteira. "Vencida" = pendente com
 // vencimento passado (ou OVERDUE vindo do Asaas).
 import Link from 'next/link';
 import { exigirTela } from '@/lib/perfil';
 import { pool } from '@/lib/db';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 import NovaCobranca, { type VendaOpcao, type Beneficiario } from './nova';
 import Filtros, { type FiltrosValor } from './filtros';
 
@@ -88,6 +89,8 @@ type Linha = {
   pagador_nome: string | null;
   endereco: string | null;
   diligencia_id: string | null;
+  _doc?: string;
+  _desc?: string;
 };
 
 const brl = (v: unknown) => 'R$ ' + (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -120,12 +123,15 @@ export default async function CobrancaSplit({ searchParams }: { searchParams: Pr
   const sp = await searchParams;
   const aba = sp.aba === 'hist' ? 'hist' : 'nova';
 
+  // As tabelas do Asaas são lidas pela service role (a role do pool, painel_looker,
+  // só enxerga diligências).
+  const sb = supabaseAdmin();
   const [benR, totR] = await Promise.all([
-    pool.query('select asaas_wallet_id, nome from asaas_participantes where asaas_wallet_id is not null order by nome'),
-    pool.query('select count(*)::int n from asaas_cobrancas'),
+    sb.from('asaas_participantes').select('asaas_wallet_id,nome').not('asaas_wallet_id', 'is', null).order('nome'),
+    sb.from('asaas_cobrancas').select('id', { count: 'exact', head: true }),
   ]);
-  const beneficiarios: Beneficiario[] = benR.rows.map((r) => ({ walletId: r.asaas_wallet_id, nome: r.nome }));
-  const totalGeral: number = totR.rows[0]?.n ?? 0;
+  const beneficiarios: Beneficiario[] = (benR.data ?? []).map((r) => ({ walletId: String(r.asaas_wallet_id), nome: String(r.nome ?? '') }));
+  const totalGeral: number = totR.count ?? 0;
 
   return (
     <div style={{ backgroundColor: '#f8fafc' }} className="min-h-screen">
@@ -159,20 +165,31 @@ export default async function CobrancaSplit({ searchParams }: { searchParams: Pr
 
 async function Nova({ beneficiarios }: { beneficiarios: Beneficiario[] }) {
   // vendas = diligências não arquivadas; as com comissão na ficha primeiro
-  const r = await pool.query(`
-    select d.id, d.endereco,
-           (d.dados_completos->'negocio'->'comissao'->>'total') is not null as tem_comissao,
-           (select count(*)::int from asaas_cobrancas c
-             where c.diligencia_id = d.id and coalesce(c.status,'') <> all($1::text[])) as cobrancas
-      from diligencias d
-     where not exists (select 1 from diligencias_arquivo a where a.diligencia_id = d.id::text)
-     order by tem_comissao desc, d.criado_em desc`, [CANCELADO]);
-  const vendas: VendaOpcao[] = r.rows.map((x) => ({
-    id: x.id,
-    rotulo: curto(x.endereco) || 'Diligência sem endereço',
-    cobrancas: x.cobrancas,
-    temComissao: !!x.tem_comissao,
-  }));
+  const sb = supabaseAdmin();
+  const [r, arq, cob] = await Promise.all([
+    pool.query(`
+      select d.id::text as id, d.endereco,
+             (d.dados_completos->'negocio'->'comissao'->>'total') is not null as tem_comissao
+        from diligencias d
+       order by tem_comissao desc, d.criado_em desc`),
+    sb.from('diligencias_arquivo').select('diligencia_id'),
+    sb.from('asaas_cobrancas').select('diligencia_id,status').not('diligencia_id', 'is', null).limit(10000),
+  ]);
+  const arquivadas = new Set((arq.data ?? []).map((a) => String(a.diligencia_id)));
+  const ativas = new Map<string, number>();
+  for (const c of cob.data ?? []) {
+    if (CANCELADO.includes(String(c.status ?? ''))) continue;
+    const k = String(c.diligencia_id);
+    ativas.set(k, (ativas.get(k) ?? 0) + 1);
+  }
+  const vendas: VendaOpcao[] = r.rows
+    .filter((x) => !arquivadas.has(String(x.id)))
+    .map((x) => ({
+      id: String(x.id),
+      rotulo: curto(x.endereco) || 'Diligência sem endereço',
+      cobrancas: ativas.get(String(x.id)) ?? 0,
+      temComissao: !!x.tem_comissao,
+    }));
   return <NovaCobranca vendas={vendas} beneficiarios={beneficiarios} />;
 }
 
@@ -190,65 +207,82 @@ async function Historico({ sp, beneficiarios }: { sp: SP; beneficiarios: Benefic
   };
   const pg = Math.max(1, Number(sp.pg) || 1);
 
-  const params: unknown[] = [RECEBIDO, CANCELADO, hoje];
-  const add = (v: unknown) => {
-    params.push(v);
-    return '$' + params.length;
-  };
-  const conds: string[] = [];
+  // Filtros "grossos" no banco (vencimento, tipo, beneficiário); status
+  // derivado, busca, totais, ordem e página no servidor, em memória — o volume
+  // é de cobranças de comissão (centenas/ano), então cabe folgado.
+  const sb = supabaseAdmin();
+  let qb = sb
+    .from('asaas_cobrancas')
+    .select('id,asaas_payment_id,status,valor,vencimento,criado_em,link,parcela,total_parcelas,pagador_nome,pagador_doc,descricao,diligencia_id')
+    .limit(10000);
   const [de, ate] = intervalo(f.per, f.de, f.ate, hoje);
-  if (de) conds.push(`c.vencimento >= ${add(de)}::date`);
-  if (ate) conds.push(`c.vencimento < ${add(ate)}::date`);
-  if (['rec', 'pen', 'ven', 'can'].includes(f.st)) conds.push(`c.st = ${add(f.st)}`);
-  if (f.tipo === 'venda') conds.push('c.diligencia_id is not null');
-  if (f.tipo === 'avulsa') conds.push('c.diligencia_id is null');
-  if (f.ben) conds.push(`c.split @> jsonb_build_array(jsonb_build_object('walletId', ${add(f.ben)}::text))`);
-  if (f.q) {
-    const like = add('%' + f.q + '%');
-    const digitos = f.q.replace(/\D/g, '');
-    const porDoc = digitos.length >= 3 ? ` or c.pagador_doc like ${add('%' + digitos + '%')}` : '';
-    conds.push(
-      `(d.endereco ilike ${like} or c.pagador_nome ilike ${like} or c.asaas_payment_id ilike ${like} or c.descricao ilike ${like}${porDoc})`
+  if (de) qb = qb.gte('vencimento', de);
+  if (ate) qb = qb.lt('vencimento', ate);
+  if (f.tipo === 'venda') qb = qb.not('diligencia_id', 'is', null);
+  if (f.tipo === 'avulsa') qb = qb.is('diligencia_id', null);
+  if (f.ben) qb = qb.contains('split', [{ walletId: f.ben }]);
+  const { data: brutas, error } = await qb;
+  if (error) {
+    return <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">Não consegui ler as cobranças: {error.message}</p>;
+  }
+
+  const ids = [...new Set((brutas ?? []).map((c) => c.diligencia_id).filter(Boolean).map(String))];
+  const ends = new Map<string, string>();
+  if (ids.length) {
+    const r = await pool.query('select id::text as id, endereco from diligencias where id = any($1::uuid[])', [ids]);
+    for (const x of r.rows) ends.set(String(x.id), String(x.endereco ?? ''));
+  }
+
+  const statusDe = (status: string, venc: string | null): Linha['st'] => {
+    if (RECEBIDO.includes(status)) return 'rec';
+    if (CANCELADO.includes(status)) return 'can';
+    if (status === 'OVERDUE' || (status === 'PENDING' && venc && venc < hoje)) return 'ven';
+    if (status === 'PENDING' || status === 'AWAITING_RISK_ANALYSIS') return 'pen';
+    return 'out';
+  };
+  const sem = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const busca = sem(f.q);
+  const digitos = f.q.replace(/\D/g, '');
+
+  let todas: Linha[] = (brutas ?? []).map((c) => ({
+    id: Number(c.id),
+    asaas_payment_id: String(c.asaas_payment_id ?? ''),
+    status: String(c.status ?? ''),
+    st: statusDe(String(c.status ?? ''), c.vencimento ? String(c.vencimento).slice(0, 10) : null),
+    valor: c.valor == null ? null : String(c.valor),
+    vencimento: c.vencimento ? String(c.vencimento).slice(0, 10) : null,
+    criado_em: String(c.criado_em ?? ''),
+    link: c.link ? String(c.link) : null,
+    parcela: c.parcela ?? null,
+    total_parcelas: c.total_parcelas ?? null,
+    pagador_nome: c.pagador_nome ? String(c.pagador_nome) : null,
+    endereco: c.diligencia_id ? ends.get(String(c.diligencia_id)) ?? null : null,
+    diligencia_id: c.diligencia_id ? String(c.diligencia_id) : null,
+    _doc: String(c.pagador_doc ?? ''),
+    _desc: String(c.descricao ?? ''),
+  }));
+  if (['rec', 'pen', 'ven', 'can'].includes(f.st)) todas = todas.filter((l) => l.st === f.st);
+  if (busca) {
+    todas = todas.filter(
+      (l) =>
+        sem(`${l.endereco ?? ''} ${l.pagador_nome ?? ''} ${l.asaas_payment_id} ${l._desc ?? ''}`).includes(busca) ||
+        (digitos.length >= 3 && (l._doc ?? '').includes(digitos))
     );
   }
-  const where = conds.length ? 'where ' + conds.join(' and ') : '';
 
-  // status derivado: o "Vencida" não depende do aviso do Asaas chegar
-  const base = `
-    from (
-      select c.*,
-             case
-               when c.status = any($1::text[]) then 'rec'
-               when c.status = any($2::text[]) then 'can'
-               when c.status = 'OVERDUE' or (c.status = 'PENDING' and c.vencimento < $3::date) then 'ven'
-               when c.status in ('PENDING','AWAITING_RISK_ANALYSIS') then 'pen'
-               else 'out'
-             end as st
-        from asaas_cobrancas c
-    ) c
-    left join diligencias d on d.id = c.diligencia_id
-    ${where}`;
+  const soma = (st: string) => todas.filter((l) => l.st === st).reduce((a, l) => a + (Number(l.valor) || 0), 0);
+  const t = { n: todas.length, rec: soma('rec'), pen: soma('pen'), ven: soma('ven') };
 
-  const [lin, tot] = await Promise.all([
-    pool.query(
-      `select c.id, c.asaas_payment_id, c.status, c.st, c.valor, c.vencimento::text as vencimento, c.criado_em, c.link, c.parcela, c.total_parcelas,
-              c.pagador_nome, c.diligencia_id, d.endereco
-       ${base}
-       order by ${ORDENS[f.ord]}
-       limit ${POR_PAGINA} offset ${(pg - 1) * POR_PAGINA}`,
-      params
-    ),
-    pool.query(
-      `select count(*)::int n,
-              coalesce(sum(c.valor) filter (where c.st = 'rec'), 0) rec,
-              coalesce(sum(c.valor) filter (where c.st = 'pen'), 0) pen,
-              coalesce(sum(c.valor) filter (where c.st = 'ven'), 0) ven
-       ${base}`,
-      params
-    ),
-  ]);
-  const linhas = lin.rows as Linha[];
-  const t = tot.rows[0] as { n: number; rec: string; pen: string; ven: string };
+  const [campo, sentido] = f.ord.split('_');
+  const chave = (l: Linha): number | string =>
+    campo === 'valor' ? Number(l.valor) || 0 : campo === 'emit' ? l.criado_em : l.vencimento ?? '';
+  todas.sort((a, b) => {
+    const x = chave(a);
+    const y = chave(b);
+    const c = x < y ? -1 : x > y ? 1 : b.id - a.id;
+    return sentido === 'asc' ? c : -c;
+  });
+  const linhas = todas.slice((pg - 1) * POR_PAGINA, pg * POR_PAGINA);
   const paginas = Math.max(1, Math.ceil(t.n / POR_PAGINA));
 
   const url = (mud: Partial<FiltrosValor> & { pg?: number }) => {
