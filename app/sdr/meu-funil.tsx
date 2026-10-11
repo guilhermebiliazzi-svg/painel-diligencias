@@ -29,7 +29,8 @@ type Atr = { lead_id: string; corretor_phone: string; resposta: string | null; o
 type LeadMin = { id: string; telefone: string | null; nome: string | null; status: string; intencao: string | null; corretor_phone: string | null; atribuido_em: string | null; feito_em: string | null; created_at: string; fonte: string | null };
 type Funil = { id: string; endereco: string | null; valor: number | null; visita_agendada: boolean; proposta: boolean };
 
-export async function MeuFunil({ cor, nome, periodo }: { cor: CorretorDaPessoa | null; nome: string; periodo: string }) {
+// comoAdmin: o administrador vendo o funil de um corretor ("Ver como corretor").
+export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor }: { cor: CorretorDaPessoa | null; nome: string; periodo: string; comoAdmin?: boolean; seletor?: React.ReactNode }) {
   const p = PERIODOS.some((x) => x.k === periodo) ? periodo : '30';
   const dias = p === 'tudo' ? null : Number(p);
   const desde = dias == null ? '1970-01-01T00:00:00Z' : new Date(Date.now() - dias * 864e5).toISOString();
@@ -99,19 +100,25 @@ export async function MeuFunil({ cor, nome, periodo }: { cor: CorretorDaPessoa |
       <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <Link href="/" className="text-xs font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-800">← Painel interno</Link>
-            <h1 className="mt-1 text-2xl font-semibold text-slate-900 sm:text-3xl">Meu funil</h1>
-            <p className="mt-1 text-sm text-slate-600">Os leads da Eva oferecidos a você, {nome}.</p>
+            {comoAdmin ? (
+              <Link href={`/sdr?d=${p}`} className="text-xs font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-800">← Funil completo</Link>
+            ) : (
+              <Link href="/" className="text-xs font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-800">← Painel interno</Link>
+            )}
+            <h1 className="mt-1 text-2xl font-semibold text-slate-900 sm:text-3xl">{comoAdmin ? `Funil de ${nome}` : 'Meu funil'}</h1>
+            <p className="mt-1 text-sm text-slate-600">{comoAdmin ? `Exatamente o que ${nome} vê em “Meu funil”.` : `Os leads da Eva oferecidos a você, ${nome}.`}</p>
           </div>
           <nav className="flex gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
             {PERIODOS.map((x) => (
-              <Link key={x.k} href={`/sdr?d=${x.k}`}
+              <Link key={x.k} href={comoAdmin && cor ? `/sdr?c=${cor.id}&d=${x.k}` : `/sdr?d=${x.k}`}
                 className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${x.k === p ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
                 {x.rotulo}
               </Link>
             ))}
           </nav>
         </header>
+
+        {seletor && <div className="mt-6">{seletor}</div>}
 
         {k.length !== 8 ? (
           <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
