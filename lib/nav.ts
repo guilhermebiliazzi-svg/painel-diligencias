@@ -1,38 +1,44 @@
 // Config das telas do hub. Como tudo está no mesmo app, os links apontam
 // para as rotas internas. Uma env opcional (PAINEL_URL_*) pode sobrescrever.
+// Cada card pertence a uma tela do catálogo (lib/acesso.ts), que define a área
+// em que ele aparece no início e quem pode vê-lo.
+import { TELAS, type Area, type Tela } from '@/lib/acesso';
 
 export type IconeNav = 'diligencias' | 'cobrancas' | 'repasse' | 'notas' | 'usuarios' | 'locador' | 'captacao' | 'funil' | 'vitrine' | 'mais';
 export type Cor = 'blue' | 'emerald' | 'violet' | 'amber' | 'slate';
-export type PermKey = 'pode_diligencias' | 'pode_cobrancas' | 'pode_repasse' | 'pode_notas' | 'pode_pagamentos' | 'pode_captacao' | 'pode_postagens';
-
 export type ItemNav = {
   chave: string; titulo: string; descricao: string; href: string;
-  icone: IconeNav; cor: Cor; permKey: PermKey; disponivel: boolean; externo: boolean;
+  icone: IconeNav; cor: Cor; tela: Tela; area: Area; disponivel: boolean; externo: boolean;
 };
 
 function item(
   chave: string, titulo: string, descricao: string, envVar: string,
-  padrao: string, icone: IconeNav, cor: Cor, permKey: PermKey
+  padrao: string, icone: IconeNav, cor: Cor, tela: Tela
 ): ItemNav {
   const href = (process.env[envVar] || padrao).trim();
+  const area = TELAS.find((t) => t.chave === tela)!.area;
   return {
-    chave, titulo, descricao, href: href || padrao, icone, cor, permKey,
+    chave, titulo, descricao, href: href || padrao, icone, cor, tela, area,
     disponivel: true, externo: /^https?:\/\//i.test(href),
   };
 }
 
 export function getNav(): ItemNav[] {
   return [
-    item('diligencias', 'Diligências', 'Auditoria de certidões e acompanhamento das diligências.', 'PAINEL_URL_DILIGENCIAS', '/admin', 'diligencias', 'blue', 'pode_diligencias'),
-    item('cobrancas', 'Cobranças', 'Boletos, faturas e situação de pagamentos.', 'PAINEL_URL_COBRANCAS', '/cobrancas', 'cobrancas', 'amber', 'pode_cobrancas'),
+    item('diligencias', 'Diligências', 'Auditoria de certidões e acompanhamento das diligências.', 'PAINEL_URL_DILIGENCIAS', '/admin', 'diligencias', 'blue', 'diligencias'),
+    item('cobrancas', 'Cobranças', 'Boletos, faturas e situação de pagamentos.', 'PAINEL_URL_COBRANCAS', '/cobrancas', 'cobrancas', 'amber', 'cobrancas'),
     // Tela servida pelo n8n (WF-A4). Não depende de contrato nem de diligência.
-    item('cobranca-avulsa', 'Cobrança avulsa', 'Boleto no Asaas com split, sem contrato nem diligência.', 'PAINEL_URL_COBRANCA_AVULSA', 'https://villejds.app.n8n.cloud/webhook/cobranca-avulsa', 'cobrancas', 'amber', 'pode_cobrancas'),
-    item('repasse', 'Repasse', 'Repasses aos locadores e conciliação de valores.', 'PAINEL_URL_REPASSE', '/repasses', 'repasse', 'emerald', 'pode_repasse'),
-    item('notas', 'Notas', 'Emissão e conciliação de NFS-e da administração.', 'PAINEL_URL_NOTAS', '/notas', 'notas', 'violet', 'pode_notas'),
-    item('notas-comissao', 'Notas de comissão', 'NFS-e de corretagem sobre os recebimentos do Asaas e notas avulsas.', 'PAINEL_URL_NOTAS_COMISSAO', '/notas-comissao', 'notas', 'violet', 'pode_notas'),
-    item('captacao', 'Captação', 'Quem consta ligado a uma unidade, e como falar com a pessoa.', 'PAINEL_URL_CAPTACAO', '/captacao', 'captacao', 'blue', 'pode_captacao'),
-    item('postagens', 'Postagens', 'Montar o carrossel de um imóvel para o Instagram escolhendo as fotos do anúncio.', 'PAINEL_URL_POSTAGENS', '/postagens', 'vitrine', 'violet', 'pode_postagens'),
-    item('estudo', 'Estudo de mercado', 'Ficha de captação: preencha na visita e mande para a Eva fazer o estudo.', 'PAINEL_URL_ESTUDO', '/estudo', 'captacao', 'blue', 'pode_postagens'),
-    item('pagamentos', 'Pagamentos', 'Pagar boletos da imobiliária (IPTU/condomínio) pelo Banco Inter.', 'PAINEL_URL_PAGAMENTOS', '/pagamentos', 'cobrancas', 'slate', 'pode_pagamentos'),
+    item('cobranca-avulsa', 'Cobrança avulsa', 'Boleto no Asaas com split, sem contrato nem diligência.', 'PAINEL_URL_COBRANCA_AVULSA', 'https://villejds.app.n8n.cloud/webhook/cobranca-avulsa', 'cobrancas', 'amber', 'cobrancas'),
+    item('repasse', 'Repasse', 'Repasses aos locadores e conciliação de valores.', 'PAINEL_URL_REPASSE', '/repasses', 'repasse', 'emerald', 'repasse'),
+    item('notas', 'Notas', 'Emissão e conciliação de NFS-e da administração.', 'PAINEL_URL_NOTAS', '/notas', 'notas', 'violet', 'notas'),
+    item('notas-comissao', 'Notas de comissão', 'NFS-e de corretagem sobre os recebimentos do Asaas e notas avulsas.', 'PAINEL_URL_NOTAS_COMISSAO', '/notas-comissao', 'notas', 'violet', 'notas'),
+    item('captacao', 'Captação', 'Quem consta ligado a uma unidade, e como falar com a pessoa.', 'PAINEL_URL_CAPTACAO', '/captacao', 'captacao', 'blue', 'captacao'),
+    item('postagens', 'Postagens', 'Montar o carrossel de um imóvel para o Instagram escolhendo as fotos do anúncio.', 'PAINEL_URL_POSTAGENS', '/postagens', 'vitrine', 'violet', 'postagens'),
+    item('estudo', 'Estudo de mercado', 'Ficha de captação: preencha na visita e mande para a Eva fazer o estudo.', 'PAINEL_URL_ESTUDO', '/estudo', 'captacao', 'blue', 'estudo'),
+    item('pagamentos', 'Pagamentos', 'Pagar boletos da imobiliária (IPTU/condomínio) pelo Banco Inter.', 'PAINEL_URL_PAGAMENTOS', '/pagamentos', 'cobrancas', 'slate', 'pagamentos'),
+    item('sdr', 'Funil do SDR', 'Leads da Eva: quem respondeu, qualificou, foi distribuído e visitou.', 'PAINEL_URL_SDR', '/sdr', 'funil', 'blue', 'sdr'),
+    item('vitrine', 'Vitrine Google Ads', 'Escolher os imóveis que aparecem nos anúncios por região do Google Ads.', 'PAINEL_URL_VITRINE', '/vitrine', 'vitrine', 'violet', 'vitrine'),
+    item('locador', 'Portal do locador', 'Ver o portal de cada locador: recibos, comprovantes e envio por e-mail.', 'PAINEL_URL_LOCADOR', '/locador', 'locador', 'emerald', 'locador'),
+    item('usuarios', 'Usuários e perfis', 'Convidar pessoas e definir o perfil de acesso de cada uma.', 'PAINEL_URL_USUARIOS', '/usuarios', 'usuarios', 'slate', 'usuarios'),
   ];
 }
