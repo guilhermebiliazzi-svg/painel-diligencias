@@ -51,14 +51,14 @@ function Icone({ nome }: { nome: IconeNav }) {
   }
 }
 
-function CardConteudo({ icone, cor, titulo, descricao, disponivel }: {
-  icone: IconeNav; cor: Cor; titulo: string; descricao: string; disponivel: boolean;
+function CardConteudo({ icone, cor, titulo, descricao, disponivel, emoji }: {
+  icone: IconeNav; cor: Cor; titulo: string; descricao: string; disponivel: boolean; emoji?: string;
 }) {
   return (
     <>
       <div className="flex items-start justify-between">
         <span className={`flex size-12 items-center justify-center rounded-xl ${COR_CHIP[cor]}`}>
-          <Icone nome={icone} />
+          {emoji ? <span className="text-2xl leading-none" aria-hidden>{emoji}</span> : <Icone nome={icone} />}
         </span>
         {disponivel ? (
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-5 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-slate-500"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
@@ -76,7 +76,7 @@ const BASE = 'group flex flex-col rounded-2xl border border-slate-200 bg-white p
 const HOVER = 'hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md';
 
 function CardTela({ item }: { item: ItemNav }) {
-  const conteudo = <CardConteudo icone={item.icone} cor={item.cor} titulo={item.titulo} descricao={item.descricao} disponivel={item.disponivel} />;
+  const conteudo = <CardConteudo icone={item.icone} cor={item.cor} titulo={item.titulo} descricao={item.descricao} disponivel={item.disponivel} emoji={item.emoji} />;
   if (!item.disponivel) {
     return <div style={{ backgroundColor: '#ffffff' }} className={`${BASE} cursor-default opacity-70`} title="Defina a URL desta tela nas variáveis de ambiente">{conteudo}</div>;
   }
