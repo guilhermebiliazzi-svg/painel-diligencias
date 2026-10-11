@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { logoutAction, arquivarDiligencia, desarquivarDiligencia } from './actions';
 import { redirect } from 'next/navigation';
 import { acessoDiligencias, diligenciasDoCorretor } from '@/lib/diligencia-acesso';
+import VerComoCorretor from '@/app/_components/VerComoCorretor';
 
 type DiligenciaListRow = {
   diligencia_id: string;
@@ -105,7 +106,7 @@ function formatDate(iso: string): string {
 export default async function AdminHome({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; arq?: string }>;
+  searchParams: Promise<{ q?: string; arq?: string; c?: string }>;
 }) {
   const sp = await searchParams;
   const busca = sp.q?.trim() ?? '';
@@ -113,7 +114,16 @@ export default async function AdminHome({
   const acesso = await acessoDiligencias();
   if (!acesso) redirect('/sem-acesso');
   const gerir = acesso.todas;
-  const soIds = gerir ? null : await diligenciasDoCorretor(acesso.corretorId);
+  // "Ver como corretor": quem gerencia todas pode ver a lista exatamente como um corretor vê.
+  let corretores: { id: number; nome: string }[] = [];
+  let como: { id: number; nome: string } | null = null;
+  if (gerir) {
+    const { data } = await supabaseAdmin().from('corretores_associados').select('id,nome').eq('status', 'ativo').order('nome');
+    corretores = ((data ?? []) as { id: number; nome: string }[]).map((x) => ({ id: x.id, nome: x.nome.split(' - ')[0] }));
+    if (sp.c && /^\d+$/.test(sp.c)) como = corretores.find((x) => x.id === Number(sp.c)) ?? null;
+  }
+  const soIds = como ? await diligenciasDoCorretor(como.id) : gerir ? null : await diligenciasDoCorretor(acesso.corretorId);
+  const qc = como ? `&c=${como.id}` : '';
   const arqSet = await getArquivadasSet();
   const diligencias = await fetchDiligencias(busca, arquivadas, arqSet, soIds);
   const nArquivadas = soIds === null ? arqSet.size : soIds.filter((i) => arqSet.has(i)).length;
@@ -144,7 +154,7 @@ export default async function AdminHome({
               REMAX Ville — Painel admin
             </p>
             <h1 className="mt-2 text-2xl font-semibold text-slate-900 sm:text-3xl">
-              {gerir ? 'Diligências' : 'Minhas diligências'}
+              {como ? `Diligências de ${como.nome}` : gerir ? 'Diligências' : 'Minhas diligências'}
             </h1>
           </div>
           <div className="flex items-center gap-2">
@@ -165,6 +175,17 @@ export default async function AdminHome({
             </form>
           </div>
         </header>
+
+        {gerir && (
+          <section className="mb-6 flex flex-wrap items-center gap-3">
+            <VerComoCorretor corretores={corretores} base="/admin?c=" atual={como?.id ?? null} />
+            {como && (
+              <span className="text-xs text-slate-500">
+                Mostrando só o que {como.nome} vê em “Minhas diligências”. Ao abrir uma, você continua com as suas ações de admin.
+              </span>
+            )}
+          </section>
+        )}
 
         {/* Cards de resumo */}
         <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -189,11 +210,11 @@ export default async function AdminHome({
 
         {/* Abas: Ativas / Arquivadas */}
         <section className="mb-4 flex items-center gap-1 border-b border-slate-200">
-          <Aba href={busca ? `/admin?q=${encodeURIComponent(busca)}` : '/admin'} ativo={!arquivadas}>
+          <Aba href={busca ? `/admin?q=${encodeURIComponent(busca)}${qc}` : `/admin?${qc.slice(1)}`} ativo={!arquivadas}>
             Ativas
           </Aba>
           <Aba
-            href={busca ? `/admin?arq=1&q=${encodeURIComponent(busca)}` : '/admin?arq=1'}
+            href={busca ? `/admin?arq=1&q=${encodeURIComponent(busca)}${qc}` : `/admin?arq=1${qc}`}
             ativo={arquivadas}
           >
             Arquivadas{nArquivadas > 0 ? ` (${nArquivadas})` : ''}
@@ -204,6 +225,7 @@ export default async function AdminHome({
         <section className="mb-6">
           <form method="get" className="flex gap-2">
             {arquivadas && <input type="hidden" name="arq" value="1" />}
+            {como && <input type="hidden" name="c" value={como.id} />}
             <input
               name="q"
               defaultValue={busca}
@@ -218,7 +240,7 @@ export default async function AdminHome({
             </button>
             {busca && (
               <Link
-                href={arquivadas ? '/admin?arq=1' : '/admin'}
+                href={arquivadas ? `/admin?arq=1${qc}` : `/admin?${qc.slice(1)}`}
                 className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 Limpar
@@ -233,7 +255,9 @@ export default async function AdminHome({
             <p className="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
               {arquivadas
                 ? 'Nenhuma diligência arquivada.'
-                : !gerir && !acesso.corretorId
+                : como && !busca
+                  ? `Nenhuma diligência ligada a ${como.nome} ainda.`
+                  : !gerir && !acesso.corretorId
                   ? 'Seu e-mail não está no cadastro de corretores. Fale com o administrador.'
                   : !gerir && !busca
                     ? 'Nenhuma diligência ligada a você ainda. Ela aparece aqui quando você cria a diligência ou quando seu nome entra no split da comissão.'
@@ -292,7 +316,7 @@ export default async function AdminHome({
                 </div>
               </Link>
 
-              {gerir && (
+              {gerir && !como && (
               <div className="flex justify-end border-t border-slate-100 bg-slate-50/60 px-4 py-2">
                 {arquivadas ? (
                   <form action={desarquivarDiligencia}>
