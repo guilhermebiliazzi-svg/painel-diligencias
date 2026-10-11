@@ -89,7 +89,14 @@ export async function dadosDaVenda(diligenciaId: string): Promise<DadosVenda> {
   if (!pagador) avisos.push(`Não achei o ${lado} no cadastro da diligência — preencha o pagador.`);
 
   const byDoc: Record<string, { nome: string; wallet: string }> = {};
-  for (const p of parts.data ?? []) if (p.cpf_cnpj) byDoc[dig(p.cpf_cnpj)] = { nome: p.nome, wallet: p.asaas_wallet_id };
+  const byNome: Record<string, { nome: string; wallet: string }> = {};
+  const norm = (v: unknown) =>
+    txt(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' ');
+  for (const p of parts.data ?? []) {
+    const it = { nome: String(p.nome ?? ''), wallet: String(p.asaas_wallet_id ?? '') };
+    if (p.cpf_cnpj) byDoc[dig(p.cpf_cnpj)] = it;
+    if (p.nome) byNome[norm(p.nome)] = it;
+  }
 
   const lista = Array.isArray(com.split) ? com.split : [];
   let somaVille = 0;
@@ -100,15 +107,29 @@ export async function dadosDaVenda(diligenciaId: string): Promise<DadosVenda> {
     const dest = txt(s?.destino);
     if (dest === 'ville') somaVille += v;
     else if (dest === 'asaas') {
-      const p = byDoc[dig(s?.documento)];
+      let p = byDoc[dig(s?.documento)];
+      if (!p && byNome[norm(s?.credor)]) {
+        p = byNome[norm(s?.credor)];
+        avisos.push(`${txt(s?.credor)}: o CPF/CNPJ da ficha não bate com o da subconta — achei pelo nome, confira.`);
+      }
       const w = txt(s?.walletid) || p?.wallet || '';
-      if (!w) avisos.push(`${txt(s?.credor) || 'Credor'} está como "Asaas" na ficha mas não tem subconta cadastrada.`);
+      if (!w)
+        avisos.push(`${txt(s?.credor) || 'Credor'} está como "Asaas" na ficha mas não achei a subconta dele — não entrou no split nem no valor.`);
       else if (v > 0) splits.push({ walletId: w, valor: v, nome: p?.nome || txt(s?.credor) });
     } else if (dest === 'fora_direto' || dest === 'fora_split_proprio') fora.push({ nome: txt(s?.credor), valor: v });
     else if (v > 0) avisos.push(`${txt(s?.credor) || 'Credor'} está sem destino na ficha — não entrou na cobrança.`);
   }
-  const valor = r2(somaVille + splits.reduce((a, s) => a + s.valor, 0));
-  if (!lista.length) avisos.push('A ficha "Dados do negócio" ainda não tem a comissão — preencha valor e split à mão.');
+  let valor = r2(somaVille + splits.reduce((a, s) => a + s.valor, 0));
+  const total = r2(Number(com.total) || 0);
+  if (!lista.length) {
+    // sem split na ficha: sugere o total da comissão, o split fica à mão
+    valor = total;
+    avisos.push(
+      total
+        ? 'A ficha "Dados do negócio" tem o total da comissão mas não o split — confira o valor e preencha o split à mão.'
+        : 'A ficha "Dados do negócio" ainda não tem a comissão — preencha valor e split à mão.'
+    );
+  }
 
   const end = txt(r.rows[0].endereco).replace(/\s*-\s*SÃO PAULO\/SP$/i, '');
   return {
