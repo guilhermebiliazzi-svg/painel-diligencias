@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { podeTela } from "@/lib/acesso";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { supabaseServer } from "@/lib/supabase/server";
 import { enviarEmail, mailerConfigurado, type Anexo } from "@/lib/mailer";
@@ -41,15 +42,15 @@ function bucketPathDeUrl(url: string): { bucket: string; path: string } | null {
 }
 
 export async function POST(req: Request) {
-  // exige admin
+  // exige a tela Portal do locador (admin ou perfil que a inclua)
   const sb = await supabaseServer();
   const { data: { user } } = await sb.auth.getUser();
   if (!user?.email) return NextResponse.json({ error: "não autenticado" }, { status: 401 });
   const adm = supabaseAdmin();
   const { data: perfil } = await adm
-    .from("perfis").select("is_admin,ativo").eq("email", user.email.toLowerCase()).maybeSingle();
-  if (!perfil?.is_admin || !perfil?.ativo) {
-    return NextResponse.json({ error: "apenas admin" }, { status: 403 });
+    .from("perfis").select("is_admin,ativo,telas").eq("email", user.email.toLowerCase()).maybeSingle();
+  if (!podeTela(perfil, "locador")) {
+    return NextResponse.json({ error: "sem acesso ao portal do locador" }, { status: 403 });
   }
 
   if (!mailerConfigurado()) {
