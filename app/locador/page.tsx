@@ -2,6 +2,7 @@
 // repasse do locador (casado por e-mail em adm_locadores -> locador_id).
 import { supabaseServer } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { podeTela } from '@/lib/acesso';
 import LocadorLogin from './login-form';
 import { sairLocador } from './actions';
 import LocadorAdminView, { type GrupoImovel } from './admin-view';
@@ -156,10 +157,11 @@ export default async function LocadorPage({ searchParams }: { searchParams: Prom
   const email = user.email.toLowerCase();
   const adm = supabaseAdmin();
 
-  // Admin? (verificado no servidor pelo perfil) → acesso universal com seletor.
+  // Equipe com a tela "Portal do locador" (admin ou perfil que a inclua),
+  // verificada no servidor pelo perfil → acesso universal com seletor.
   const { data: perfil } = await adm
-    .from('perfis').select('is_admin,ativo').eq('email', email).maybeSingle();
-  const isAdmin = !!(perfil?.is_admin && perfil?.ativo);
+    .from('perfis').select('is_admin,ativo,telas').eq('email', email).maybeSingle();
+  const isAdmin = podeTela(perfil, 'locador');
 
   let locador: { id: number; nome: string | null; email?: string | null } | null = null;
 
