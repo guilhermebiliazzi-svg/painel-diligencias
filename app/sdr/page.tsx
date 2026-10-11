@@ -1,11 +1,13 @@
 // Funil do SDR (Eva) — 5 funis: comprador, locatário, proprietário (venda),
-// proprietário (locação) e recrutamento. Só admin.
+// proprietário (locação) e recrutamento. Quem tem a tela do SDR com alcance
+// "todos"; o perfil Corretor vê só o próprio funil (meu-funil.tsx).
 // Clientes: view public.v_painel_sdr_funil (role painel_looker) + feito_em/origem do sdr_leads.
 // Proprietários: captacao_leads (landing Anuncie na REMAX) + o lead criado quando a fila é definida.
 // Recrutamento: recrutamento_leads (landing Seja REMAX).
 
 import Link from 'next/link';
-import { exigirAdmin } from '@/lib/perfil';
+import { exigirTela, escopoSdr, corretorDaPessoa } from '@/lib/perfil';
+import { MeuFunil } from './meu-funil';
 import { pool } from '@/lib/db';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import FunilSelect from './funil-select';
@@ -658,8 +660,13 @@ async function FunilRecrutamento({ dias }: { dias: number | null }) {
 }
 
 export default async function FunilSdr({ searchParams }: { searchParams: Promise<{ d?: string; f?: string }> }) {
-  await exigirAdmin();
+  const perfil = await exigirTela('sdr');
   const { d, f } = await searchParams;
+  // Perfil Corretor: só o próprio funil.
+  if (escopoSdr(perfil) === 'proprio') {
+    const cor = await corretorDaPessoa(perfil.email);
+    return <MeuFunil cor={cor} nome={(perfil.nome?.trim() || perfil.email).split(' ')[0]} periodo={d ?? '30'} />;
+  }
   const periodo = PERIODOS.some((p) => p.k === d) ? (d as string) : '30';
   const funil: FunilK = FUNIS.some((x) => x.k === f) ? (f as FunilK) : 'comprador';
   const dias = periodo === 'tudo' ? null : Number(periodo);
