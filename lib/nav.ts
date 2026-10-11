@@ -43,8 +43,8 @@ export function getNav(): ItemNav[] {
     item('diligencias', 'Diligências', 'Auditoria de certidões e acompanhamento das diligências.', 'PAINEL_URL_DILIGENCIAS', '/admin', 'diligencias', 'blue', 'diligencias'),
     item('postagens', 'Postagens', 'Montar o carrossel de um imóvel para o Instagram escolhendo as fotos do anúncio.', 'PAINEL_URL_POSTAGENS', '/postagens', 'vitrine', 'violet', 'postagens'),
     item('vitrine', 'Vitrine Google Ads', 'Escolher os imóveis que aparecem nos anúncios por região do Google Ads.', 'PAINEL_URL_VITRINE', '/vitrine', 'vitrine', 'violet', 'vitrine'),
-    // Tela servida pelo n8n (WF-A4). Não depende de contrato nem de diligência.
-    item('cobranca-avulsa', 'Cobrança com split', 'Boleto no Asaas com a comissão já dividida entre os corretores.', 'PAINEL_URL_COBRANCA_AVULSA', 'https://villejds.app.n8n.cloud/webhook/cobranca-avulsa', 'cobrancas', 'amber', 'cobrancas', 'venda'),
+    // Tela do painel (/cobranca-split); a emissão continua no n8n (WF-A4).
+    item('cobranca-avulsa', 'Cobrança com split', 'Boleto no Asaas com a comissão já dividida, ligado à venda, e o histórico com status.', 'PAINEL_URL_COBRANCA_SPLIT', '/cobranca-split', 'cobrancas', 'amber', 'cobrancas', 'venda'),
     item('notas-comissao', 'Notas de comissão', 'NFS-e de corretagem sobre os recebimentos do Asaas e notas avulsas.', 'PAINEL_URL_NOTAS_COMISSAO', '/notas-comissao', 'notas', 'violet', 'notas', 'venda'),
     // Administração
     item('cobrancas', 'Cobranças', 'Boletos, faturas e situação de pagamentos.', 'PAINEL_URL_COBRANCAS', '/cobrancas', 'cobrancas', 'amber', 'cobrancas'),
