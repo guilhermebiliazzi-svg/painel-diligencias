@@ -128,6 +128,8 @@ function validar(f: FormRepresentacao, envio: boolean): string[] {
   if (!txt(f.imovel.endereco)) err.push('Endereço do imóvel.');
   if (!txt(f.imovel.bairro)) err.push('Bairro do imóvel.');
   if (!numBR(f.imovel.valor)) err.push('Valor de venda do imóvel.');
+  if (!txt(f.imovel.matricula)) err.push('Matrícula do imóvel.');
+  if (!txt(f.imovel.cartorio)) err.push('Cartório de registro do imóvel.');
   ps.forEach((p, i) => {
     const q = pj ? `Empresa ${i + 1}` : `Proprietário ${i + 1}`;
     if (!txt(p.nome)) err.push(`${q}: ${pj ? 'razão social' : 'nome'}.`);
