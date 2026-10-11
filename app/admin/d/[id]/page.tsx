@@ -24,6 +24,8 @@ import { GerarCCV } from '../../GerarCCV';
 import { FichaNegocio } from '../../FichaNegocio';
 import { EmitirCobranca } from '../../EmitirCobranca';
 import { EnviarArquivoCard } from '../../EnviarArquivoCard';
+import { CorretoresDiligencia } from '../../CorretoresDiligencia';
+import { exigirVerDiligencia } from '@/lib/diligencia-acesso';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -587,11 +589,14 @@ function CardAdmin({
   r,
   diligencia_id,
   pdfsDisponiveis,
+  gerir,
 }: {
   numero: number;
   r: AdminRow;
   diligencia_id: string;
   pdfsDisponiveis: DriveFile[];
+  // false = perfil Corretor: só vê e envia arquivo
+  gerir: boolean;
 }) {
   const s = styleFor(r.situacao);
   const mostrarObs = !!r.observacao_ia && SITUACOES_ATENCAO.has(r.situacao);
@@ -656,7 +661,7 @@ function CardAdmin({
       <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-slate-200/70 pt-2">
         {/* v2: Reemitir - so aparece quando nao tem PDF vinculado e o tipo tem emissao automatica
             (card manual de upload nao tem o que reemitir) */}
-        {!r.drive_file_id && rotaDoTipo(r.tipo) && (
+        {gerir && !r.drive_file_id && rotaDoTipo(r.tipo) && (
           <form
             action={async () => {
               'use server';
@@ -672,7 +677,7 @@ function CardAdmin({
             </SubmitButtonAsync>
           </form>
         )}
-        {r.drive_file_id && (
+        {gerir && r.drive_file_id && (
           <form
             action={async () => {
               'use server';
@@ -689,7 +694,7 @@ function CardAdmin({
         )}
         {/* Validar manualmente: so aparece quando ja tem PDF mas ninguem registrou
             o veredito. Fecha o dado (resultado_certidao) em vez de so pintar o card. */}
-        {r.drive_file_id && (!r.resultado || r.situacao === 'Em revisao') && (
+        {gerir && r.drive_file_id && (!r.resultado || r.situacao === 'Em revisao') && (
           <details className="relative">
             <summary className="cursor-pointer list-none rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50">
               {r.situacao === 'Em revisao' ? '✓ Resolver revisão' : '✓ Validar manualmente'}
@@ -745,6 +750,7 @@ function CardAdmin({
         )}
         {/* Envio direto: arquivo do computador/celular -> pasta do Drive do card */}
         {r.pasta_id && <EnviarArquivoCard certidaoId={r.certidao_id} temPdf={!!r.drive_file_id} />}
+        {gerir && (
         <details className="relative">
           <summary className="cursor-pointer list-none rounded-md border border-blue-300 bg-white px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50">
             {r.drive_file_id ? 'Trocar PDF' : 'Vincular PDF'}
@@ -787,8 +793,10 @@ function CardAdmin({
             )}
           </div>
         </details>
+        )}
 
         {/* v3: toggle de visibilidade do card no painel cliente */}
+        {gerir && (
         <div className="ml-auto flex items-center gap-2">
           {r.is_extra && (
             <ExcluirCardExtra
@@ -802,6 +810,7 @@ function CardAdmin({
             oculto={r.card_oculto}
           />
         </div>
+        )}
       </div>
     </div>
   );
@@ -821,10 +830,12 @@ function GrupoAdmin({
   g,
   diligencia_id,
   pdfsDoGrupo,
+  gerir,
 }: {
   g: Group;
   diligencia_id: string;
   pdfsDoGrupo: DriveFile[];
+  gerir: boolean;
 }) {
   const tot = g.rows.length;
   const concl = g.rows.filter((r) => r.situacao === 'Concluida').length;
@@ -847,7 +858,7 @@ function GrupoAdmin({
             <p className="truncate text-xs text-slate-500">{g.subtitulo}</p>
           )}
           {/* v3: toggle visibilidade da PESSOA (apenas PF/PJ) */}
-          {g.tipo !== 'imovel' && g.rows[0]?.documento_normalizado && (
+          {gerir && g.tipo !== 'imovel' && g.rows[0]?.documento_normalizado && (
             <div className="mt-1.5">
               <TogglePessoaVisivel
                 diligencia_id={diligencia_id}
@@ -917,6 +928,7 @@ function GrupoAdmin({
                               r={r}
                               diligencia_id={diligencia_id}
                               pdfsDisponiveis={pdfsDoGrupo}
+                              gerir={gerir}
                             />
                           );
                         })}
@@ -929,6 +941,7 @@ function GrupoAdmin({
           })}
 
           {/* v3: card "+" pra adicionar documento avulso ao grupo */}
+          {gerir && (
           <div className="border-t border-dashed border-slate-200 pt-4">
             <div className="grid gap-3 sm:grid-cols-2">
               <CardExtraNovo
@@ -944,6 +957,7 @@ function GrupoAdmin({
               />
             </div>
           </div>
+          )}
         </div>
       </div>
     </details>
@@ -960,6 +974,7 @@ export default async function AdminDiligenciaPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const { gerir } = await exigirVerDiligencia(id);
   const rows = await fetchDiligencia(id);
   if (!rows) notFound();
 
@@ -999,7 +1014,7 @@ export default async function AdminDiligenciaPage({
               href="/admin"
               className="text-xs font-semibold uppercase tracking-wider text-blue-600 hover:underline"
             >
-              ← Voltar para diligências
+              ← Voltar para {gerir ? 'diligências' : 'minhas diligências'}
             </Link>
             <h1 className="mt-2 text-2xl font-semibold text-slate-900 sm:text-3xl">
               {endereco}
@@ -1027,9 +1042,10 @@ export default async function AdminDiligenciaPage({
               </SubmitButtonAsync>
             </form>
             <FichaNegocio diligenciaId={id} />
-            <GerarParecer diligenciaId={id} />
-            <GerarCCV diligenciaId={id} />
-            <EmitirCobranca diligenciaId={id} />
+            {gerir && <CorretoresDiligencia diligenciaId={id} />}
+            {gerir && <GerarParecer diligenciaId={id} />}
+            {gerir && <GerarCCV diligenciaId={id} />}
+            {gerir && <EmitirCobranca diligenciaId={id} />}
             <form action={logoutAction}>
               <button
                 type="submit"
@@ -1055,6 +1071,7 @@ export default async function AdminDiligenciaPage({
               g={g}
               diligencia_id={id}
               pdfsDoGrupo={g.pasta_id ? pdfsPorPasta.get(g.pasta_id) ?? [] : []}
+              gerir={gerir}
             />
           ))}
         </section>
