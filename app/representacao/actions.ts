@@ -233,7 +233,10 @@ export async function gerarPdf(f: FormRepresentacao): Promise<{ ok: boolean; pdf
   }
 }
 
-export async function enviarAssinatura(f: FormRepresentacao): Promise<{ ok: boolean; mensagem?: string; erro?: string }> {
+// O envio roda em segundo plano no n8n: o Clicksign às vezes recusa a conexão
+// por alguns minutos, e o n8n espera e continua sozinho. Aqui só registramos o
+// pedido; a tela acompanha por statusEnvio().
+export async function enviarAssinatura(f: FormRepresentacao): Promise<{ ok: boolean; pedido?: string; erro?: string }> {
   try {
     const s = await sessao();
     const err = validar(f, true);
@@ -242,12 +245,39 @@ export async function enviarAssinatura(f: FormRepresentacao): Promise<{ ok: bool
     if (!EMAIL.test(c.email)) return { ok: false, erro: `O cadastro do corretor ${c.nome} está sem e-mail — ele assina como testemunha. Cadastre o e-mail antes de enviar.` };
     if (!c.phone) return { ok: false, erro: `O cadastro do corretor ${c.nome} está sem telefone.` };
     const m = montar(f, c);
+    // mesmo contrato já em envio (clique duplo, outra aba): acompanha o mesmo pedido
+    const { data: aberto } = await supabaseAdmin()
+      .from('representacao_envios')
+      .select('id')
+      .eq('phone_corretor', m.phone)
+      .eq('imovel_endereco', m.imovel_endereco)
+      .eq('status', 'enviando')
+      .gte('criado_em', new Date(Date.now() - 10 * 60000).toISOString())
+      .limit(1)
+      .maybeSingle();
+    if (aberto?.id) return { ok: true, pedido: String(aberto.id) };
     const r = await chamar({ acao: 'enviar', ...m });
-    if (r?.duplicado) return { ok: false, erro: 'Este contrato já foi enviado há poucos minutos — não criei outro envelope. Confira em "Contratos enviados".' };
-    if (!r?.ok) return { ok: false, erro: r?.erro || r?.mensagem || 'O envio não deu certo.' };
-    return { ok: true, mensagem: 'Enviado para assinatura. Cada signatário recebe o link por e-mail do Clicksign.' };
+    if (!r?.ok || !r.pedido_id) return { ok: false, erro: r?.erro || 'Não consegui registrar o envio. Nada foi enviado.' };
+    return { ok: true, pedido: String(r.pedido_id) };
   } catch (e) {
     return { ok: false, erro: (e as Error).message };
+  }
+}
+
+export async function statusEnvio(pedido: string): Promise<{ status: 'enviando' | 'enviado' | 'erro' | 'duplicado'; erro?: string }> {
+  try {
+    const s = await sessao();
+    if (!/^[0-9a-f-]{36}$/i.test(pedido)) return { status: 'erro', erro: 'Pedido inválido.' };
+    const { data } = await supabaseAdmin().from('representacao_envios').select('status,erro,phone_corretor').eq('id', pedido).maybeSingle();
+    if (!data) return { status: 'erro', erro: 'Pedido não encontrado.' };
+    if (!s.admin) {
+      const c = await corretorDoEnvio(s, null);
+      if (dig(data.phone_corretor).slice(-8) !== c.phone.slice(-8)) return { status: 'erro', erro: 'Sem acesso a este envio.' };
+    }
+    const st = String(data.status);
+    return { status: (['enviando', 'enviado', 'erro', 'duplicado'].includes(st) ? st : 'erro') as 'enviando' | 'enviado' | 'erro' | 'duplicado', erro: data.erro || undefined };
+  } catch (e) {
+    return { status: 'erro', erro: (e as Error).message };
   }
 }
 
