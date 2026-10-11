@@ -7,6 +7,9 @@
 // com a diligência (venda) a que a cobrança pertence.
 import { pool } from '@/lib/db';
 import { getSessaoPerfil, podeTela } from '@/lib/perfil';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+
+const CANCELADO = ['CANCELADA', 'CANCELLED', 'DELETED', 'REFUNDED', 'REFUND_REQUESTED'];
 
 const N8N_EMITIR =
   process.env.N8N_COBRANCA_SPLIT_EMITIR_URL || 'https://villejds.app.n8n.cloud/webhook/cobranca-avulsa-emitir';
@@ -58,15 +61,15 @@ export async function dadosDaVenda(diligenciaId: string): Promise<DadosVenda> {
   }
   if (!UUID.test(diligenciaId)) return { ...vazio, erro: 'Venda inválida.' };
 
+  // diligencias pela role do painel; as tabelas do Asaas pela service role
+  const sb = supabaseAdmin();
   const [r, parts, cob] = await Promise.all([
     pool.query('select id, endereco, dados_completos from diligencias where id = $1', [diligenciaId]),
-    pool.query('select nome, cpf_cnpj, asaas_wallet_id from asaas_participantes where asaas_wallet_id is not null'),
-    pool.query(
-      "select count(*)::int n from asaas_cobrancas where diligencia_id = $1 and coalesce(status,'') not in ('CANCELADA','DELETED','REFUNDED')",
-      [diligenciaId]
-    ),
+    sb.from('asaas_participantes').select('nome,cpf_cnpj,asaas_wallet_id').not('asaas_wallet_id', 'is', null),
+    sb.from('asaas_cobrancas').select('status').eq('diligencia_id', diligenciaId),
   ]);
   if (!r.rows.length) return { ...vazio, erro: 'Venda não encontrada.' };
+  const ativas = (cob.data ?? []).filter((c) => !CANCELADO.includes(String(c.status ?? ''))).length;
 
   const dc = obj(r.rows[0].dados_completos);
   const com = obj(obj(dc.negocio).comissao);
@@ -86,7 +89,7 @@ export async function dadosDaVenda(diligenciaId: string): Promise<DadosVenda> {
   if (!pagador) avisos.push(`Não achei o ${lado} no cadastro da diligência — preencha o pagador.`);
 
   const byDoc: Record<string, { nome: string; wallet: string }> = {};
-  for (const p of parts.rows) if (p.cpf_cnpj) byDoc[dig(p.cpf_cnpj)] = { nome: p.nome, wallet: p.asaas_wallet_id };
+  for (const p of parts.data ?? []) if (p.cpf_cnpj) byDoc[dig(p.cpf_cnpj)] = { nome: p.nome, wallet: p.asaas_wallet_id };
 
   const lista = Array.isArray(com.split) ? com.split : [];
   let somaVille = 0;
@@ -116,7 +119,7 @@ export async function dadosDaVenda(diligenciaId: string): Promise<DadosVenda> {
     descricao: `Comissão de corretagem — ${end}`,
     splits,
     fora,
-    cobrancas: cob.rows[0]?.n ?? 0,
+    cobrancas: ativas,
   };
 }
 
