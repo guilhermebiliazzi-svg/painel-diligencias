@@ -4,6 +4,7 @@
 'use server';
 
 import { pool } from '@/lib/db';
+import { garantirGerirDiligencias, garantirVerDiligencia, podeVerDiligencia, ligarCorretoresDoSplit } from '@/lib/diligencia-acesso';
 import { rotaDoTipo } from '@/lib/rota-certidao';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
@@ -42,6 +43,7 @@ async function logAcao(opts: {
  * Nao apaga o arquivo no Drive (decisao do usuario: opcao 2).
  */
 export async function desvincularPDF(certidao_id: string, diligencia_id: string) {
+  await garantirGerirDiligencias();
   if (!certidao_id || !diligencia_id) throw new Error('parametros invalidos');
 
   // Pega estado atual pra log
@@ -90,6 +92,7 @@ export async function vincularPDF(opts: {
   nome_arquivo: string;
 }) {
   const { certidao_id, diligencia_id, drive_file_id, url_pdf, nome_arquivo } = opts;
+  await garantirGerirDiligencias();
   if (!certidao_id || !drive_file_id) throw new Error('parametros invalidos');
 
   // Pega estado anterior
@@ -143,6 +146,7 @@ export async function validarManualmente(opts: {
   observacao?: string;
 }) {
   const { certidao_id, diligencia_id, resultado, observacao } = opts;
+  await garantirGerirDiligencias();
   if (!certidao_id) throw new Error('certidao_id ausente');
   if (!['negativa', 'positiva', 'com_pendencias'].includes(resultado)) {
     throw new Error('resultado invalido: ' + resultado);
@@ -199,6 +203,7 @@ const WEBHOOKS = {
 };
 
 export async function reemitirCertidao(certidao_id: string, diligencia_id: string) {
+  await garantirGerirDiligencias();
   if (!certidao_id || !diligencia_id) throw new Error('parametros invalidos');
 
   console.log('[reemitirCertidao] inicio', { certidao_id, diligencia_id });
@@ -309,6 +314,7 @@ export async function reemitirCertidao(certidao_id: string, diligencia_id: strin
 const WEBHOOK_WF07 = 'https://villejds.app.n8n.cloud/webhook/wf07-auditoria-pdf';
 
 export async function auditarDiligencia(diligencia_id: string) {
+  await garantirVerDiligencia(diligencia_id);
   if (!diligencia_id) throw new Error('diligencia_id ausente');
 
   let httpStatus = 0;
@@ -348,6 +354,7 @@ export async function auditarDiligencia(diligencia_id: string) {
  * São form actions (FormData) porque os botões são <form> na lista.
  */
 export async function arquivarDiligencia(fd: FormData): Promise<void> {
+  await garantirGerirDiligencias();
   const diligencia_id = String(fd.get('diligencia_id') || '').trim();
   if (!diligencia_id) throw new Error('diligencia_id ausente');
 
@@ -368,6 +375,7 @@ export async function arquivarDiligencia(fd: FormData): Promise<void> {
 }
 
 export async function desarquivarDiligencia(fd: FormData): Promise<void> {
+  await garantirGerirDiligencias();
   const diligencia_id = String(fd.get('diligencia_id') || '').trim();
   if (!diligencia_id) throw new Error('diligencia_id ausente');
 
@@ -391,6 +399,7 @@ export async function desarquivarDiligencia(fd: FormData): Promise<void> {
  * Atualiza certidoes_status.oculta_cliente.
  */
 export async function toggleCardOculto(certidao_id: string, diligencia_id: string, novoOculto: boolean) {
+  await garantirGerirDiligencias();
   if (!certidao_id || !diligencia_id) throw new Error('parametros invalidos');
 
   await pool.query(
@@ -417,6 +426,7 @@ export async function togglePessoaOculta(
   documento_normalizado: string,
   novoOculto: boolean
 ) {
+  await garantirGerirDiligencias();
   if (!diligencia_id || !documento_normalizado) {
     throw new Error('parametros invalidos');
   }
@@ -456,6 +466,7 @@ export async function togglePessoaOculta(
  * - drive_file_id e url_pdf: do PDF ja existente no Drive.
  */
 export async function criarCertidaoExtra(formData: FormData) {
+  await garantirGerirDiligencias();
   const diligencia_id = String(formData.get('diligencia_id') || '');
   const documento_normalizado = String(formData.get('documento_normalizado') || '');
   const titular = String(formData.get('titular') || '');
@@ -512,6 +523,7 @@ export async function criarCertidaoExtra(formData: FormData) {
  * Nao deleta o PDF do Drive (caso queira, exclua manualmente).
  */
 export async function excluirCertidaoExtra(certidao_id: string, diligencia_id: string) {
+  await garantirGerirDiligencias();
   if (!certidao_id || !diligencia_id) throw new Error('parametros invalidos');
 
   const before = await pool.query(
@@ -545,6 +557,7 @@ export async function excluirCertidaoExtra(certidao_id: string, diligencia_id: s
 const WEBHOOK_PARECER = 'https://villejds.app.n8n.cloud/webhook/gerar-parecer';
 
 export async function gerarParecer(fd: FormData) {
+  await garantirGerirDiligencias();
   const diligencia_id = String(fd.get('diligencia_id') || '');
   if (!diligencia_id) throw new Error('diligencia_id ausente');
 
@@ -616,6 +629,7 @@ export async function logoutAction() {
 export async function liberarParecer(
   fd: FormData
 ): Promise<{ ok: boolean; error?: string }> {
+  try { await garantirGerirDiligencias(); } catch (e) { return { ok: false, error: (e as Error).message }; }
   const parecer_id = String(fd.get('parecer_id') || '');
   const diligencia_id = String(fd.get('diligencia_id') || '');
   if (!parecer_id || !diligencia_id) return { ok: false, error: 'parecer_id/diligencia_id ausente' };
@@ -658,6 +672,7 @@ export async function liberarParecer(
 const WEBHOOK_CCV = 'https://villejds.app.n8n.cloud/webhook/gerar-ccv';
 
 export async function gerarCCV(diligencia_id: string) {
+  await garantirGerirDiligencias();
   if (!diligencia_id) throw new Error('diligencia_id ausente');
 
   let httpStatus = 0;
@@ -709,6 +724,9 @@ export async function carregarNegocio(diligencia_id: string): Promise<{
 }> {
   if (!diligencia_id) {
     return { ok: false, negocio: {}, preco: null, vendedores: [], error: 'diligencia_id ausente' };
+  }
+  if (!(await podeVerDiligencia(diligencia_id))) {
+    return { ok: false, negocio: {}, preco: null, vendedores: [], error: 'Sem acesso a esta diligência.' };
   }
   const r = await pool.query(
     `SELECT dados_completos, preco FROM diligencias WHERE id = $1`,
@@ -774,6 +792,7 @@ export async function carregarDadosParecer(diligencia_id: string): Promise<Dados
     forma_pagamento: '', compradores: [], origem: 'vazio',
   };
   if (!diligencia_id) return vazio;
+  if (!(await podeVerDiligencia(diligencia_id))) return vazio;
   try {
     const r = await pool.query(
       `SELECT dados_completos, compradores, preco FROM diligencias WHERE id = $1`,
@@ -856,6 +875,7 @@ export async function salvarNegocio(
   novo: NegocioPayload
 ): Promise<{ ok: boolean; error?: string }> {
   if (!diligencia_id) return { ok: false, error: 'diligencia_id ausente' };
+  if (!(await podeVerDiligencia(diligencia_id))) return { ok: false, error: 'Sem acesso a esta diligência.' };
   try {
     const r = await pool.query(
       `SELECT dados_completos FROM diligencias WHERE id = $1`,
@@ -882,6 +902,8 @@ export async function salvarNegocio(
       ]);
     }
 
+    // corretores do split passam a enxergar a diligência ("Minhas diligências")
+    await ligarCorretoresDoSplit(diligencia_id, parseObj(merged.comissao).split);
     await logAcao({ acao: 'salvar_negocio', detalhe: { diligencia_id } });
     revalidatePath(`/admin/d/${diligencia_id}`);
     return { ok: true };
