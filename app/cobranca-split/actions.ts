@@ -197,3 +197,40 @@ export async function emitirCobranca(p: PedidoEmissao): Promise<RespostaEmissao>
     return { ok: false, mensagem: 'Não consegui falar com o n8n: ' + String(e) };
   }
 }
+
+const N8N_ALTERAR_VENCIMENTO =
+  process.env.N8N_COBRANCA_ALTERAR_VENCIMENTO_URL || 'https://villejds.app.n8n.cloud/webhook/cobranca-alterar-vencimento';
+
+// Muda o vencimento de uma cobrança pendente/vencida no Asaas (WF-A5) e grava
+// a data nova no painel. Mesmo boleto/link; o Asaas só troca a data.
+export async function alterarVencimento(
+  paymentId: string,
+  novaData: string
+): Promise<{ ok: boolean; mensagem?: string; vencimento?: string; aviso?: string }> {
+  try {
+    await garantir();
+  } catch (e) {
+    return { ok: false, mensagem: (e as Error).message };
+  }
+  if (!/^pay_[A-Za-z0-9]+$/.test(paymentId)) return { ok: false, mensagem: 'Cobrança inválida.' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(novaData)) return { ok: false, mensagem: 'Informe a nova data.' };
+  try {
+    const res = await fetch(N8N_ALTERAR_VENCIMENTO, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payment_id: paymentId, nova_data: novaData }),
+      cache: 'no-store',
+    });
+    const t = await res.text();
+    let d: any;
+    try {
+      d = JSON.parse(t);
+    } catch {
+      return { ok: false, mensagem: `Resposta inesperada do n8n (HTTP ${res.status}).` };
+    }
+    if (Array.isArray(d)) d = d[0];
+    return { ok: !!d?.ok, mensagem: d?.mensagem, vencimento: d?.vencimento, aviso: d?.aviso };
+  } catch (e) {
+    return { ok: false, mensagem: 'Não consegui falar com o n8n: ' + String(e) };
+  }
+}
