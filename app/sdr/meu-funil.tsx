@@ -21,6 +21,27 @@ const PERIODOS = [
   { k: 'tudo', rotulo: 'Tudo' },
 ] as const;
 
+// Os mesmos funis do Funil do SDR completo, só com os leads do corretor.
+const FUNIS = [
+  { k: 'comprador', rotulo: 'Comprador' },
+  { k: 'locatario', rotulo: 'Locatário' },
+  { k: 'prop_venda', rotulo: 'Proprietário (venda)' },
+  { k: 'prop_locacao', rotulo: 'Proprietário (locação)' },
+] as const;
+type FunilK = (typeof FUNIS)[number]['k'];
+// Etapas da captação de venda (a Eva registra com o captador pelo WhatsApp).
+const ETAPAS_CAP = [
+  { k: 'v1_agendada', rotulo: 'V1 agendada' },
+  { k: 'v1_realizada', rotulo: 'V1 realizada' },
+  { k: 'v2_agendada', rotulo: 'V2 agendada' },
+  { k: 'v2_realizada', rotulo: 'V2 realizada' },
+  { k: 'contrato_assinado', rotulo: 'Contrato assinado' },
+] as const;
+const tipoDoLead = (l: { fonte: string | null; intencao: string | null }): FunilK =>
+  /^capta/i.test(String(l.fonte ?? ''))
+    ? /^alug|^loca/i.test(String(l.intencao ?? '')) ? 'prop_locacao' : 'prop_venda'
+    : /^alug|^loca/i.test(String(l.intencao ?? '')) ? 'locatario' : 'comprador';
+
 const INTENCAO: Record<string, string> = {
   compra: 'Compra', aluguel: 'Aluguel', venda: 'Venda', locacao: 'Locação', alugar: 'Locação', vender: 'Venda',
 };
@@ -30,8 +51,13 @@ type LeadMin = { id: string; telefone: string | null; nome: string | null; statu
 type Funil = { id: string; endereco: string | null; valor: number | null; visita_agendada: boolean; proposta: boolean };
 
 // comoAdmin: o administrador vendo o funil de um corretor ("Ver como corretor").
-export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor }: { cor: CorretorDaPessoa | null; nome: string; periodo: string; comoAdmin?: boolean; seletor?: React.ReactNode }) {
+export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK }: { cor: CorretorDaPessoa | null; nome: string; periodo: string; comoAdmin?: boolean; seletor?: React.ReactNode; funilK?: string }) {
   const p = PERIODOS.some((x) => x.k === periodo) ? periodo : '30';
+  const fk: FunilK = FUNIS.some((x) => x.k === funilK) ? (funilK as FunilK) : 'comprador';
+  // monta a URL desta tela mantendo período, funil e o corretor (visão do admin)
+  const url = (o: { d?: string; f?: string }) =>
+    `/sdr?d=${o.d ?? p}&f=${o.f ?? fk}` + (comoAdmin && cor ? `&c=${cor.id}` : '');
+  let nivelCap = new Map<string, number>();
   const dias = p === 'tudo' ? null : Number(p);
   const desde = dias == null ? '1970-01-01T00:00:00Z' : new Date(Date.now() - dias * 864e5).toISOString();
   const k = fim8(cor?.phone);
@@ -57,7 +83,20 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor }: { cor
         const { data } = await sb.from('sdr_leads').select('id,telefone,nome,status,intencao,corretor_phone,atribuido_em,feito_em,created_at,fonte').in('id', faltam.slice(i, i + 300));
         leads.push(...((data ?? []) as LeadMin[]));
       }
+      // só os leads deste funil
+      leads = leads.filter((x) => tipoDoLead(x) === fk);
+      const doFunil = new Set(leads.map((x) => x.id));
+      atrs = atrs.filter((x) => doFunil.has(x.lead_id));
       const ids = leads.map((x) => x.id);
+      if (fk === 'prop_venda' && ids.length) {
+        const { data: et } = await sb.from('sdr_captacao_etapas').select('lead_id,etapa').in('lead_id', ids.slice(0, 300));
+        const m = new Map<string, number>();
+        for (const e of (et ?? []) as { lead_id: string; etapa: string }[]) {
+          const o = ETAPAS_CAP.findIndex((x) => x.k === e.etapa);
+          if (o >= 0) m.set(e.lead_id, Math.max(m.get(e.lead_id) ?? -1, o));
+        }
+        nivelCap = m;
+      }
       if (ids.length) {
         const { rows } = await pool.query<Funil>(
           `select id, endereco, valor, visita_agendada, proposta from public.v_painel_sdr_funil where id = any($1::uuid[])`,
@@ -85,12 +124,20 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor }: { cor
   const contato = (l: LeadMin) => !!l.feito_em || !!funil.get(l.id)?.visita_agendada || !!funil.get(l.id)?.proposta;
   const visita = (l: LeadMin) => !!funil.get(l.id)?.visita_agendada || !!funil.get(l.id)?.proposta;
   const proposta = (l: LeadMin) => !!funil.get(l.id)?.proposta;
+  const ehProp = fk === 'prop_venda' || fk === 'prop_locacao';
+  const nivel = (l: LeadMin) => nivelCap.get(l.id) ?? -1;
   const etapas = [
     { rotulo: 'Ofertados a você', n: ofertados.size },
     { rotulo: 'Você aceitou', n: meus.length },
-    { rotulo: 'Contato feito', n: meus.filter(contato).length },
-    { rotulo: 'Visita agendada', n: meus.filter(visita).length },
-    { rotulo: 'Proposta', n: meus.filter(proposta).length },
+    { rotulo: 'Contato feito', n: meus.filter(ehProp ? (l: LeadMin) => !!l.feito_em || nivel(l) >= 0 : contato).length },
+    ...(fk === 'prop_venda'
+      ? ETAPAS_CAP.map((e, i) => ({ rotulo: e.rotulo, n: meus.filter((l) => nivel(l) >= i).length }))
+      : fk === 'prop_locacao'
+        ? []
+        : [
+            { rotulo: 'Visita agendada', n: meus.filter(visita).length },
+            { rotulo: 'Proposta', n: meus.filter(proposta).length },
+          ]),
   ];
   const topo = Math.max(etapas[0].n, 1);
   const lista = [...meus].sort((a, b) => (b.atribuido_em || b.created_at).localeCompare(a.atribuido_em || a.created_at));
@@ -110,7 +157,7 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor }: { cor
           </div>
           <nav className="flex gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
             {PERIODOS.map((x) => (
-              <Link key={x.k} href={comoAdmin && cor ? `/sdr?c=${cor.id}&d=${x.k}` : `/sdr?d=${x.k}`}
+              <Link key={x.k} href={url({ d: x.k })}
                 className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${x.k === p ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
                 {x.rotulo}
               </Link>
@@ -118,7 +165,17 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor }: { cor
           </nav>
         </header>
 
-        {seletor && <div className="mt-6">{seletor}</div>}
+        <div className="mt-6 flex flex-wrap items-center gap-4">
+          <nav className="flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+            {FUNIS.map((x) => (
+              <Link key={x.k} href={url({ f: x.k })}
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${x.k === fk ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
+                {x.rotulo}
+              </Link>
+            ))}
+          </nav>
+          {seletor}
+        </div>
 
         {k.length !== 8 ? (
           <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
@@ -153,7 +210,7 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor }: { cor
                   </li>
                 ))}
               </ol>
-              <p className="mt-4 text-xs text-slate-500">Contato feito, visita e proposta contam o que você registrou com a Eva pelo WhatsApp.</p>
+              <p className="mt-4 text-xs text-slate-500">{ehProp ? 'Contato feito e as etapas da captação contam o que você registrou com a Eva pelo WhatsApp.' : 'Contato feito, visita e proposta contam o que você registrou com a Eva pelo WhatsApp.'}</p>
             </section>
 
             <section style={{ backgroundColor: '#ffffff' }} className="mt-4 rounded-2xl border border-slate-200 p-5 shadow-sm">
@@ -175,8 +232,11 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor }: { cor
                     <tbody className="divide-y divide-slate-100">
                       {lista.map((l) => {
                         const f = funil.get(l.id);
-                        const andamento = proposta(l) ? 'Proposta' : visita(l) ? 'Visita agendada' : contato(l) ? 'Contato feito' : 'Aguardando contato';
-                        const tom = proposta(l) || visita(l) ? 'bg-emerald-100 text-emerald-700' : contato(l) ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700';
+                        const nv = nivel(l);
+                        const andamento = ehProp
+                          ? nv >= 0 ? ETAPAS_CAP[nv].rotulo : l.feito_em ? 'Contato feito' : 'Aguardando contato'
+                          : proposta(l) ? 'Proposta' : visita(l) ? 'Visita agendada' : contato(l) ? 'Contato feito' : 'Aguardando contato';
+                        const tom = (ehProp ? nv >= 0 : proposta(l) || visita(l)) ? 'bg-emerald-100 text-emerald-700' : (ehProp ? !!l.feito_em : contato(l)) ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700';
                         return (
                           <tr key={l.id}>
                             <td className="whitespace-nowrap py-2 pr-3 text-slate-600">{fmtData.format(new Date(l.atribuido_em || l.created_at))}</td>
