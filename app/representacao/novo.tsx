@@ -1,8 +1,8 @@
 'use client';
 
 // Aba "Novo contrato": preencher, conferir o PDF e enviar para assinatura.
-import { useMemo, useState, useTransition } from 'react';
-import { gerarPdf, enviarAssinatura, type FormRepresentacao, type Pessoa, type CorretorOpcao } from './actions';
+import { useEffect, useMemo, useState, useTransition } from 'react';
+import { gerarPdf, enviarAssinatura, statusEnvio, type FormRepresentacao, type Pessoa, type CorretorOpcao } from './actions';
 
 const inputCls =
   'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none disabled:bg-slate-50';
@@ -53,8 +53,41 @@ export default function NovoContrato({
   const [erro, setErro] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [gerando, startGerar] = useTransition();
-  const [enviando, startEnviar] = useTransition();
+  const [enviandoAcao, startEnviar] = useTransition();
+  // pedido em andamento no n8n (o envio segue em segundo plano)
+  const [pedido, setPedido] = useState<string | null>(null);
+  const enviando = enviandoAcao || !!pedido;
   const ocupado = gerando || enviando;
+
+  useEffect(() => {
+    if (!pedido) return;
+    let vivo = true;
+    const inicio = Date.now();
+    const olhar = async () => {
+      const r = await statusEnvio(pedido);
+      if (!vivo) return;
+      if (r.status === 'enviado') {
+        setPedido(null);
+        setOk('Enviado para assinatura. Cada signatário recebe o link por e-mail do Clicksign.');
+      } else if (r.status === 'duplicado') {
+        setPedido(null);
+        setErro('Este contrato já tinha sido enviado há poucos minutos — não criei outro envelope. Confira em "Contratos enviados".');
+      } else if (r.status === 'erro') {
+        setPedido(null);
+        setErro(r.erro || 'O envio não deu certo. Nada foi enviado a ninguém.');
+      } else if (Date.now() - inicio > 8 * 60000) {
+        setPedido(null);
+        setErro('O envio está demorando mais que o normal. Confira em "Contratos enviados" daqui a pouco antes de tentar de novo.');
+      } else {
+        setTimeout(olhar, 4000);
+      }
+    };
+    const t = setTimeout(olhar, 4000);
+    return () => {
+      vivo = false;
+      clearTimeout(t);
+    };
+  }, [pedido]);
 
   const form: FormRepresentacao = useMemo(
     () => ({ tipo, imovel, pessoas, corretor_id: corretorId, corretor_cpf: corretorCpf }),
@@ -100,11 +133,11 @@ export default function NovoContrato({
     if (!window.confirm(`Enviar para assinatura? ${n} ${tipo === 'pj' ? 'empresa(s)' : 'proprietário(s)'} + Ville assinam; ${corretor?.nome || 'o corretor'} e Jessica como testemunhas.`)) return;
     startEnviar(async () => {
       const r = await enviarAssinatura(form);
-      if (!r.ok) {
-        setErro(r.erro || 'O envio não deu certo.');
+      if (!r.ok || !r.pedido) {
+        setErro(r.erro || 'O envio não deu certo. Nada foi enviado a ninguém.');
         return;
       }
-      setOk(r.mensagem || 'Enviado.');
+      setPedido(r.pedido);
     });
   }
 
@@ -339,6 +372,12 @@ export default function NovoContrato({
         </div>
       )}
 
+      {pedido && (
+        <p className="mt-4 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
+          Enviando para o Clicksign… Normalmente leva menos de um minuto. Se o Clicksign estiver lento, o sistema espera e
+          continua sozinho (até alguns minutos) — pode sair desta tela, o envio não para.
+        </p>
+      )}
       {erro && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{erro}</p>}
 
       <div className="mt-5 flex flex-wrap gap-3">
