@@ -4,7 +4,7 @@
 // (link no cartão do WhatsApp). Cada tela é de UM lead: não há como a decisão
 // cair no lead errado. A cascata (oferta 15 min por corretor) continua no n8n:
 // aqui só gravamos a fila/estado, igual ao comando de fila do WhatsApp.
-import { exigirAdmin } from '@/lib/perfil';
+import { exigirSdrGestao } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { leadDaCaptacao } from '@/app/sdr/lead-captacao';
 
@@ -45,7 +45,7 @@ async function registrar(leadId: string, template: string, conteudo: string) {
 // Fila: se a cascata já começou (alguém já recebeu oferta), os nomes novos entram no fim;
 // se ainda não, a nova ordem substitui a anterior.
 export async function ofertar(leadId: string, phones: string[]): Promise<Resultado> {
-  await exigirAdmin();
+  await exigirSdrGestao();
   const lead = await lerLead(leadId);
   if (!lead) return { ok: false, erro: 'Lead não encontrado.' };
   const fila = await telefonesValidos(phones);
@@ -80,7 +80,7 @@ export async function ofertar(leadId: string, phones: string[]): Promise<Resulta
 
 // Segura: para a cascata (se ninguém assumiu) e adia o lembrete.
 export async function segurar(leadId: string): Promise<Resultado> {
-  await exigirAdmin();
+  await exigirSdrGestao();
   const lead = await lerLead(leadId);
   if (!lead) return { ok: false, erro: 'Lead não encontrado.' };
   const patch: Record<string, unknown> = { cartao_enviado_em: new Date().toISOString(), updated_at: new Date().toISOString() };
@@ -93,7 +93,7 @@ export async function segurar(leadId: string): Promise<Resultado> {
 
 // Descarta: arquiva sem atender (não mexe em lead já atribuído/visitando).
 export async function descartar(leadId: string): Promise<Resultado> {
-  await exigirAdmin();
+  await exigirSdrGestao();
   const lead = await lerLead(leadId);
   if (!lead) return { ok: false, erro: 'Lead não encontrado.' };
   if (['atribuido', 'visita_agendada', 'encerrado'].includes(lead.status)) return { ok: false, erro: 'Lead já está com corretor — não dá para descartar daqui.' };
@@ -109,7 +109,7 @@ export async function descartar(leadId: string): Promise<Resultado> {
 
 // Captação da landing (Anuncie na REMAX): cria o lead na hora de escolher a fila.
 export async function ofertarCaptacao(captacaoId: string, phones: string[]): Promise<Resultado> {
-  await exigirAdmin();
+  await exigirSdrGestao();
   const sb = supabaseAdmin();
   const { data: c } = await sb.from('captacao_leads').select('*').eq('id', captacaoId).maybeSingle();
   if (!c) return { ok: false, erro: 'Captação não encontrada.' };
@@ -140,7 +140,7 @@ const WEBHOOK_ACAO = 'https://villejds.app.n8n.cloud/webhook/sdr-painel-acao';
 const CHAVE_ACAO = 'ville-sdr-painel-7c2e9a41f0b84d6e';
 
 export async function referenciar(leadId: string, ref: string): Promise<Resultado> {
-  const eu = await exigirAdmin();
+  const eu = await exigirSdrGestao();
   const lead = await lerLead(leadId);
   if (!lead) return { ok: false, erro: 'Lead não encontrado.' };
   if (['atribuido', 'visita_agendada', 'encerrado', 'arquivado'].includes(lead.status)) return { ok: false, erro: 'Este lead não está mais aberto.' };
@@ -174,7 +174,7 @@ const fim8tel = (t: string | null) => String(t ?? '').replace(/\D/g, '').slice(-
 
 // Descarta a captação (todos os registros do mesmo telefone: formulário e WhatsApp).
 export async function descartarCaptacao(captacaoId: string): Promise<Resultado> {
-  await exigirAdmin();
+  await exigirSdrGestao();
   const c = await lerCaptacao(captacaoId);
   if (!c) return { ok: false, erro: 'Captação não encontrada.' };
   const sb = supabaseAdmin();
@@ -191,7 +191,7 @@ export type DadosRefCaptacao = { corretor_nome: string; corretor_whatsapp: strin
 // O painel grava a indicação; o n8n (sdr-painel-acao) manda o convite (modelo referenciamento_captacao).
 // O aceite e o e-mail seguem o mesmo fluxo da Eva do referenciamento de cliente.
 export async function referenciarCaptacao(captacaoId: string, d: DadosRefCaptacao): Promise<Resultado> {
-  const eu = await exigirAdmin();
+  const eu = await exigirSdrGestao();
   const c = await lerCaptacao(captacaoId);
   if (!c) return { ok: false, erro: 'Captação não encontrada.' };
   if (c.referenciado_em) return { ok: false, erro: 'Esta captação já foi referenciada.' };
