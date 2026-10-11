@@ -10,7 +10,7 @@
 
 import { NextResponse } from 'next/server';
 import { timingSafeEqual } from 'node:crypto';
-import { pool } from '@/lib/db';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,8 +20,13 @@ const APIV3 = (process.env.DIRECTD_BASE || 'https://apiv3.directd.com.br').repla
 
 async function segredoOk(recebido: string): Promise<boolean> {
   if (!recebido) return false;
-  const r = await pool.query(`SELECT valor FROM credenciais_sistema WHERE chave = 'painel_upload_secret'`);
-  const esperado = String(r.rows[0]?.valor || '');
+  // service_role: a role do pool (painel_looker) não lê credenciais_sistema
+  const { data } = await supabaseAdmin()
+    .from('credenciais_sistema')
+    .select('valor')
+    .eq('chave', 'painel_upload_secret')
+    .maybeSingle();
+  const esperado = String((data as { valor?: string } | null)?.valor || '');
   if (!esperado) return false;
   const a = Buffer.from(recebido);
   const b = Buffer.from(esperado);
