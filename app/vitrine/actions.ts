@@ -3,7 +3,7 @@
 // Vitrine — grava as vitrines e em quais vitrines cada imóvel aparece. Só admin.
 // Só as vitrines marcadas "Anunciar no Google Ads" viram grupo da campanha
 // "Imóveis à venda por região" (a sincronização diária do n8n cria/pausa os grupos).
-import { exigirAdmin } from '@/lib/perfil';
+import { exigirTela } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
 type Resultado = { ok: boolean; erro?: string; id?: string };
@@ -14,7 +14,7 @@ async function vitrinesAtivas(): Promise<Set<string>> {
 }
 
 export async function salvarGrupos(codigo: string, grupos: string[]): Promise<Resultado> {
-  const eu = await exigirAdmin();
+  const eu = await exigirTela('vitrine');
   const cod = String(codigo || '').trim().toUpperCase();
   if (!/^[A-Z0-9]{3,12}$/.test(cod)) return { ok: false, erro: 'Código de imóvel inválido.' };
   const validas = await vitrinesAtivas();
@@ -53,7 +53,7 @@ const slug = (s: string) =>
   s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
 
 export async function salvarVitrine(entrada: VitrineEntrada): Promise<Resultado> {
-  const eu = await exigirAdmin();
+  const eu = await exigirTela('vitrine');
   const nome = String(entrada.nome || '').trim().slice(0, 60);
   if (nome.length < 3) return { ok: false, erro: 'Dê um nome à vitrine (mínimo 3 letras).' };
   const publico = lista(entrada.publico, 60).filter((g) => /^\d{4,12}$/.test(g));
@@ -91,7 +91,7 @@ export async function salvarVitrine(entrada: VitrineEntrada): Promise<Resultado>
 // Arquivar: a vitrine some do painel, os imóveis saem dela e a sincronização
 // pausa o grupo e os anúncios no Google Ads.
 export async function arquivarVitrine(id: string): Promise<Resultado> {
-  const eu = await exigirAdmin();
+  const eu = await exigirTela('vitrine');
   const sb = supabaseAdmin();
   const { error } = await sb
     .from('ads_vitrines')
@@ -114,7 +114,7 @@ export async function arquivarVitrine(id: string): Promise<Resultado> {
 const WEBHOOK_CURADORIA = 'https://villejds.app.n8n.cloud/webhook/curadoria-painel';
 
 export async function gerarCarrossel(titulo: string, codigos: string[]): Promise<Resultado> {
-  const eu = await exigirAdmin();
+  const eu = await exigirTela('vitrine');
   const t = String(titulo || '').trim().replace(/\s+/g, ' ').slice(0, 40);
   if (t.length < 3) return { ok: false, erro: 'Dê um título ao carrossel (ex.: Jardim Paulista).' };
   const cods = Array.from(new Set((codigos || []).map((c) => String(c).trim().toUpperCase()))).filter((c) =>
