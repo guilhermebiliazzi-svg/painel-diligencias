@@ -666,7 +666,7 @@ export default async function FunilSdr({ searchParams }: { searchParams: Promise
   // Perfil Corretor: só o próprio funil.
   if (escopoSdr(perfil) === 'proprio') {
     const cor = await corretorDaPessoa(perfil.email);
-    return <MeuFunil cor={cor} nome={(perfil.nome?.trim() || perfil.email).split(' ')[0]} periodo={d ?? '30'} />;
+    return <MeuFunil cor={cor} nome={(perfil.nome?.trim() || perfil.email).split(' ')[0]} periodo={d ?? '30'} funilK={f} />;
   }
   // "Ver como corretor": quem vê o funil completo pode abrir o "Meu funil" de um corretor.
   const { data: corsAtivos } = await supabaseAdmin().from('corretores_associados').select('id,nome,phone').eq('status', 'ativo').order('nome');
@@ -680,7 +680,8 @@ export default async function FunilSdr({ searchParams }: { searchParams: Promise
           nome={cor.nome.split(' - ')[0]}
           periodo={d ?? '30'}
           comoAdmin
-          seletor={<VerComoCorretor corretores={corretores.map((x) => ({ id: x.id, nome: x.nome.split(' - ')[0] }))} base={`/sdr?d=${d ?? '30'}&c=`} atual={cor.id} />}
+          funilK={f}
+          seletor={<VerComoCorretor corretores={corretores.map((x) => ({ id: x.id, nome: x.nome.split(' - ')[0] }))} base={`/sdr?d=${d ?? '30'}&f=${f ?? 'comprador'}&c=`} atual={cor.id} />}
         />
       );
   }
@@ -723,7 +724,7 @@ export default async function FunilSdr({ searchParams }: { searchParams: Promise
         <div className="mt-6">
           <div className="flex flex-wrap items-center gap-4">
             <FunilSelect funis={FUNIS.map((x) => ({ k: x.k, rotulo: x.rotulo }))} atual={funil} periodo={periodo} />
-            <VerComoCorretor corretores={corretores.map((x) => ({ id: x.id, nome: x.nome.split(' - ')[0] }))} base={`/sdr?d=${periodo}&c=`} />
+            <VerComoCorretor corretores={corretores.map((x) => ({ id: x.id, nome: x.nome.split(' - ')[0] }))} base={`/sdr?d=${periodo}&f=${funil}&c=`} />
           </div>
         </div>
 
