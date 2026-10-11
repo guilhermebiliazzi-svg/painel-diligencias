@@ -10,6 +10,7 @@ import { pool } from '@/lib/db';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import NovaCobranca, { type VendaOpcao, type Beneficiario } from './nova';
 import Filtros, { type FiltrosValor } from './filtros';
+import AlterarVencimento from './alterar-vencimento';
 
 export const metadata = { title: 'Cobrança com split — Painel REMAX Ville' };
 export const dynamic = 'force-dynamic';
@@ -351,7 +352,10 @@ async function Historico({ sp, beneficiarios }: { sp: SP; beneficiarios: Benefic
                     {l.pagador_nome && <div className="text-xs text-slate-500">{l.pagador_nome}</div>}
                   </td>
                   <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums">{brl(l.valor)}</td>
-                  <td className="whitespace-nowrap px-2 py-2.5">{dataBR(l.vencimento)}</td>
+                  <td className="whitespace-nowrap px-2 py-2.5">
+                    {dataBR(l.vencimento)}
+                    {(l.st === 'pen' || l.st === 'ven') && <AlterarVencimento paymentId={l.asaas_payment_id} atual={l.vencimento} />}
+                  </td>
                   <td className="px-2 py-2.5">
                     <span className={`inline-block whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${cls}`}>
                       {txt || l.status}
