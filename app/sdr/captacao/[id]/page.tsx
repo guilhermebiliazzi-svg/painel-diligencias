@@ -2,7 +2,7 @@
 // Se o lead já foi criado (fila escolhida), vai direto para a tela do lead.
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { exigirAdmin } from '@/lib/perfil';
+import { exigirSdrGestao } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { leadDaCaptacao } from '@/app/sdr/lead-captacao';
 import Decisao, { type CorretorOpc } from '../../decisao';
@@ -15,7 +15,7 @@ const fmt = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', da
 const telFmt = (t: string) => { const d = t.replace(/\D/g, '').replace(/^55/, ''); return d.length >= 10 ? `(${d.slice(0, 2)}) ${d.slice(2, -4)}-${d.slice(-4)}` : t; };
 
 export default async function CaptacaoSdr({ params }: { params: Promise<{ id: string }> }) {
-  await exigirAdmin();
+  await exigirSdrGestao();
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const sb = supabaseAdmin();
