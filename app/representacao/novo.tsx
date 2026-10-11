@@ -75,7 +75,7 @@ export default function NovoContrato({
       } else if (r.status === 'erro') {
         setPedido(null);
         setErro(r.erro || 'O envio não deu certo. Nada foi enviado a ninguém.');
-      } else if (Date.now() - inicio > 8 * 60000) {
+      } else if (Date.now() - inicio > 14 * 60000) {
         setPedido(null);
         setErro('O envio está demorando mais que o normal. Confira em "Contratos enviados" daqui a pouco antes de tentar de novo.');
       } else {
@@ -374,8 +374,8 @@ export default function NovoContrato({
 
       {pedido && (
         <p className="mt-4 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
-          Enviando para o Clicksign… Normalmente leva menos de um minuto. Se o Clicksign estiver lento, o sistema espera e
-          continua sozinho (até alguns minutos) — pode sair desta tela, o envio não para.
+          Enviando para o Clicksign… Normalmente leva menos de um minuto. Se o Clicksign estiver fora do ar, o sistema espera e
+          continua sozinho (até 12 minutos) — pode sair desta tela, o envio não para.
         </p>
       )}
       {erro && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{erro}</p>}
