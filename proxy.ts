@@ -30,6 +30,7 @@ const REGRAS: Regra[] = [
   { re: /^\/captacao(\/|$)/, perm: 'captacao', legacy: false },
   { re: /^\/postagens(\/|$)/, perm: 'postagens', legacy: false },
   { re: /^\/estudo(\/|$)/, perm: 'estudo', legacy: false },
+  { re: /^\/representacao(\/|$)/, perm: 'representacao', legacy: false },
   { re: /^\/$/, perm: 'any', legacy: false },
 ];
 
