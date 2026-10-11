@@ -2,7 +2,7 @@
 // Decisão por toque (fila / segurar / descartar), sem texto livre.
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { exigirAdmin } from '@/lib/perfil';
+import { exigirSdrGestao } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import Decisao, { type CorretorOpc, type ImovelRef } from '../../decisao';
 
@@ -60,7 +60,7 @@ function Linha({ k, v }: { k: string; v: React.ReactNode }) {
 }
 
 export default async function LeadSdr({ params }: { params: Promise<{ id: string }> }) {
-  await exigirAdmin();
+  await exigirSdrGestao();
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const sb = supabaseAdmin();
