@@ -17,6 +17,7 @@ const REGRAS: Regra[] = [
   { re: /^\/admin(\/|$)/, perm: 'diligencias', legacy: true },
   { re: /^\/cobrancas(\/|$)/, perm: 'cobrancas', legacy: true },
   { re: /^\/contratos(\/|$)/, perm: 'cobrancas', legacy: true },
+  { re: /^\/cobranca-split(\/|$)/, perm: 'cobrancas', legacy: false },
   { re: /^\/repasses(\/|$)/, perm: 'repasse', legacy: true },
   { re: /^\/seguros(\/|$)/, perm: 'admin', legacy: true },
   { re: /^\/notas-comissao(\/|$)/, perm: 'notas', legacy: false },
