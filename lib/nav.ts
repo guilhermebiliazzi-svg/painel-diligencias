@@ -9,6 +9,15 @@ export type Cor = 'blue' | 'emerald' | 'violet' | 'amber' | 'slate';
 export type ItemNav = {
   chave: string; titulo: string; descricao: string; href: string;
   icone: IconeNav; cor: Cor; tela: Tela; area: Area; disponivel: boolean; externo: boolean;
+  // ícone do card no início (o mesmo da prévia aprovada em out/2026)
+  emoji?: string;
+};
+
+const EMOJI: Record<string, string> = {
+  sdr: '🔻', captacao: '🔎', estudo: '📝', diligencias: '📄', postagens: '🖼️', vitrine: '📣',
+  'cobranca-avulsa': '💳', 'notas-comissao': '🧾',
+  cobrancas: '💳', repasse: '🔁', pagamentos: '🏦', locador: '🏢', notas: '🧾',
+  usuarios: '👥',
 };
 
 function item(
@@ -19,7 +28,7 @@ function item(
   // o card fica na área da tela, salvo quando a mesma permissão serve a outra área
   const area = areaCard ?? TELAS.find((t) => t.chave === tela)!.area;
   return {
-    chave, titulo, descricao, href: href || padrao, icone, cor, tela, area,
+    chave, titulo, descricao, href: href || padrao, icone, cor, tela, area, emoji: EMOJI[chave],
     disponivel: true, externo: /^https?:\/\//i.test(href),
   };
 }
