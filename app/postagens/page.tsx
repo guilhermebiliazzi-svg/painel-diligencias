@@ -66,7 +66,23 @@ async function carregar(email: string, isAdmin: boolean, corretorParam: string |
       .ilike('dados_jsonb->>corretor_email', corretor.email)
       .order('listing_id');
     if (e2) throw new Error(e2.message);
-    imoveis = ((xml ?? []) as { listing_id: string; dados_jsonb: Dados }[]).map((r) => {
+    // Só imóveis de VENDA que continuam publicados no XML da REMAX. O cache renova
+    // updated_at de todo anúncio publicado a cada leitura do XML; quem foi vendido
+    // ou retirado fica com a data antiga (mesma regra do feed do Quinto Andar).
+    const { data: ult } = await sb
+      .from('xml_cache')
+      .select('updated_at')
+      .eq('fonte', 'remax')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const corte = ult ? new Date((ult as { updated_at: string }).updated_at).getTime() - 3 * 3600_000 : 0;
+    const publicados = ((xml ?? []) as { listing_id: string; dados_jsonb: Dados; updated_at: string }[]).filter(
+      (r) =>
+        String((r.dados_jsonb as Record<string, unknown> | null)?.transaction_type ?? '') === 'For Sale' &&
+        new Date(r.updated_at).getTime() >= corte
+    );
+    imoveis = publicados.map((r) => {
       const d = r.dados_jsonb || {};
       // A versão LargeWM tem a marca d'água da REMAX no meio da foto; Large é a mesma foto limpa.
       const fotos = (d.fotos || []).map((f) => String(f.url || '').replace('/LargeWM/', '/Large/')).filter((u) => /^https?:\/\//.test(u));
