@@ -1,10 +1,12 @@
 // Home do painel interno. Exige login (Supabase) + perfil ativo. Mostra só
-// os cards que a pessoa tem permissão de ver. Admin vê também "Usuários".
+// os cards que o perfil de acesso da pessoa libera, agrupados por área
+// (Jurídico, Comercial, Marketing, Financeiro, Administração).
 
 import Link from 'next/link';
 import { exigirPerfil } from '@/lib/perfil';
 import { logoutAction } from './actions';
 import { getNav, type ItemNav, type IconeNav, type Cor } from '@/lib/nav';
+import { AREAS, podeTela, escopoDiligencias, escopoSdr } from '@/lib/acesso';
 
 export const metadata = { title: 'Painel interno — REMAX Ville' };
 
@@ -97,7 +99,19 @@ function CardTela({ item }: { item: ItemNav }) {
 
 export default async function Home() {
   const perfil = await exigirPerfil();
-  const itens = getNav().filter((i) => perfil.is_admin || perfil[i.permKey]);
+  const proprias = escopoDiligencias(perfil) === 'proprias';
+  const meuFunil = escopoSdr(perfil) === 'proprio';
+  const itens = getNav()
+    .filter((i) => podeTela(perfil, i.tela))
+    // quem vê só o que é seu enxerga o card com o nome certo
+    .map((i) =>
+      i.chave === 'diligencias' && proprias
+        ? { ...i, titulo: 'Minhas diligências', descricao: 'As diligências dos negócios em que você é o corretor.' }
+        : i.chave === 'sdr' && meuFunil
+          ? { ...i, titulo: 'Meu funil', descricao: 'Os leads da Eva oferecidos a você: aceite, contato, visita e proposta.' }
+          : i
+    );
+  const areas = AREAS.map((a) => ({ ...a, itens: itens.filter((i) => i.area === a.chave) })).filter((a) => a.itens.length);
   const nome = (perfil.nome?.trim() || perfil.email).split(' ')[0];
 
   return (
@@ -117,39 +131,23 @@ export default async function Home() {
           </form>
         </header>
 
-        <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {itens.map((item) => (<CardTela key={item.chave} item={item} />))}
-
-          {perfil.is_admin && (
-            <Link href="/sdr" style={{ backgroundColor: '#ffffff' }} className={`${BASE} ${HOVER}`}>
-              <CardConteudo icone="funil" cor="blue" titulo="Funil do SDR" descricao="Leads da Eva: quem respondeu, qualificou, foi distribuído e visitou." disponivel />
-            </Link>
-          )}
-
-          {perfil.is_admin && (
-            <Link href="/vitrine" style={{ backgroundColor: '#ffffff' }} className={`${BASE} ${HOVER}`}>
-              <CardConteudo icone="vitrine" cor="violet" titulo="Vitrine Google Ads" descricao="Escolher os imóveis que aparecem nos anúncios por região do Google Ads." disponivel />
-            </Link>
-          )}
-
-          {perfil.is_admin && (
-            <Link href="/locador" style={{ backgroundColor: '#ffffff' }} className={`${BASE} ${HOVER}`}>
-              <CardConteudo icone="locador" cor="emerald" titulo="Portal do locador" descricao="Ver o portal de cada locador: recibos, comprovantes e envio por e-mail." disponivel />
-            </Link>
-          )}
-
-          {perfil.is_admin && (
-            <Link href="/usuarios" style={{ backgroundColor: '#ffffff' }} className={`${BASE} ${HOVER}`}>
-              <CardConteudo icone="usuarios" cor="slate" titulo="Usuários" descricao="Convidar pessoas, ativar/desativar e definir permissões." disponivel />
-            </Link>
-          )}
-
-          {itens.length === 0 && !perfil.is_admin && (
-            <div className="col-span-full rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
-              Você ainda não tem nenhuma área liberada. Fale com o administrador.
+        {areas.map((a) => (
+          <section key={a.chave} className="mt-8">
+            <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-b border-slate-200 pb-2">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-700">{a.titulo}</h2>
+              <p className="text-xs text-slate-500">{a.descricao}</p>
             </div>
-          )}
-        </section>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {a.itens.map((item) => (<CardTela key={item.chave} item={item} />))}
+            </div>
+          </section>
+        ))}
+
+        {areas.length === 0 && (
+          <div className="mt-8 rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+            Você ainda não tem nenhuma área liberada. Fale com o administrador.
+          </div>
+        )}
 
         <footer className="mt-10 text-center text-xs text-slate-400">
           REMAX Ville — Jardins/Itaim, São Paulo · {perfil.email}
