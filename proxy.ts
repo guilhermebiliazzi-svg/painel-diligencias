@@ -8,27 +8,27 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { podeTela, type PerfilAcesso, type Tela } from '@/lib/acesso';
 
 type CookieParaGravar = { name: string; value: string; options: CookieOptions };
-type PermKey = 'pode_diligencias' | 'pode_cobrancas' | 'pode_repasse' | 'pode_notas' | 'pode_pagamentos';
-type PerfilRow = {
-  is_admin: boolean; ativo: boolean;
-  pode_diligencias: boolean; pode_cobrancas: boolean; pode_repasse: boolean; pode_notas: boolean; pode_pagamentos: boolean;
-};
-type Regra = { re: RegExp; perm: 'any' | 'admin' | PermKey; legacy: boolean };
+type Regra = { re: RegExp; perm: 'any' | 'admin' | Tela; legacy: boolean };
 
 const REGRAS: Regra[] = [
-  { re: /^\/admin(\/|$)/, perm: 'pode_diligencias', legacy: true },
-  { re: /^\/cobrancas(\/|$)/, perm: 'pode_cobrancas', legacy: true },
-  { re: /^\/contratos(\/|$)/, perm: 'pode_cobrancas', legacy: true },
-  { re: /^\/repasses(\/|$)/, perm: 'pode_repasse', legacy: true },
+  { re: /^\/admin(\/|$)/, perm: 'diligencias', legacy: true },
+  { re: /^\/cobrancas(\/|$)/, perm: 'cobrancas', legacy: true },
+  { re: /^\/contratos(\/|$)/, perm: 'cobrancas', legacy: true },
+  { re: /^\/repasses(\/|$)/, perm: 'repasse', legacy: true },
   { re: /^\/seguros(\/|$)/, perm: 'admin', legacy: true },
-  { re: /^\/notas-comissao(\/|$)/, perm: 'pode_notas', legacy: false },
-  { re: /^\/notas(\/|$)/, perm: 'pode_notas', legacy: true },
-  { re: /^\/pagamentos(\/|$)/, perm: 'pode_pagamentos', legacy: false },
+  { re: /^\/notas-comissao(\/|$)/, perm: 'notas', legacy: false },
+  { re: /^\/notas(\/|$)/, perm: 'notas', legacy: true },
+  { re: /^\/pagamentos(\/|$)/, perm: 'pagamentos', legacy: false },
   { re: /^\/api\/adm(\/|$)/, perm: 'any', legacy: true },
-  { re: /^\/usuarios(\/|$)/, perm: 'admin', legacy: false },
-  { re: /^\/sdr(\/|$)/, perm: 'admin', legacy: false },
+  { re: /^\/usuarios(\/|$)/, perm: 'usuarios', legacy: false },
+  { re: /^\/sdr(\/|$)/, perm: 'sdr', legacy: false },
+  { re: /^\/vitrine(\/|$)/, perm: 'vitrine', legacy: false },
+  { re: /^\/captacao(\/|$)/, perm: 'captacao', legacy: false },
+  { re: /^\/postagens(\/|$)/, perm: 'postagens', legacy: false },
+  { re: /^\/estudo(\/|$)/, perm: 'estudo', legacy: false },
   { re: /^\/$/, perm: 'any', legacy: false },
 ];
 
@@ -93,23 +93,19 @@ export default async function proxy(req: NextRequest) {
     return NextResponse.redirect(dest);
   }
 
-  // Perfil + permissão
-  const { data } = await sb
-    .from('perfis')
-    .select('is_admin,ativo,pode_diligencias,pode_cobrancas,pode_repasse,pode_notas,pode_pagamentos')
-    .eq('email', (user.email || '').toLowerCase())
-    .maybeSingle();
-  const perfil = (data as PerfilRow | null) ?? null;
+  // Perfil + permissão. As colunas dos perfis de acesso (telas, escopos) entraram
+  // em out/2026; se ainda não existirem, lê só as flags antigas.
+  const email = (user.email || '').toLowerCase();
+  const ANTIGAS = 'is_admin,ativo,pode_diligencias,pode_cobrancas,pode_repasse,pode_notas,pode_pagamentos,pode_captacao,pode_postagens';
+  let { data, error } = await sb.from('perfis').select(ANTIGAS + ',telas').eq('email', email).maybeSingle();
+  if (error) ({ data, error } = await sb.from('perfis').select(ANTIGAS).eq('email', email).maybeSingle());
+  const perfil = (data as PerfilAcesso | null) ?? null;
 
   const r = regra!;
   const permitido =
     !!perfil &&
     perfil.ativo &&
-    (r.perm === 'any'
-      ? true
-      : r.perm === 'admin'
-        ? perfil.is_admin
-        : perfil.is_admin || perfil[r.perm]);
+    (r.perm === 'any' ? true : r.perm === 'admin' ? perfil.is_admin : podeTela(perfil, r.perm));
 
   if (!permitido) {
     if (ehApi) return NextResponse.json({ error: 'sem permissão' }, { status: 403 });
