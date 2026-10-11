@@ -17,6 +17,7 @@ import { cookies } from 'next/headers';
 import { pool } from '@/lib/db';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getSessaoPerfil } from '@/lib/perfil';
+import { podeVerDiligencia } from '@/lib/diligencia-acesso';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -83,6 +84,8 @@ export async function POST(req: Request) {
   if (!UUID_RE.test(certidaoId)) return erro('Card inválido.');
   const cert = await carregarCertidao(certidaoId);
   if (!cert) return erro('Card não encontrado.', 404);
+  // perfil Corretor: só nos cards das diligências ligadas a ele
+  if (!(await podeVerDiligencia(cert.diligencia_id))) return erro('Sem acesso a esta diligência.', 403);
   if (!cert.pasta_id) return erro('Este card não tem pasta no Drive. Use "Vincular PDF".');
 
   const sb = supabaseAdmin();
