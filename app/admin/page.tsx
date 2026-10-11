@@ -5,6 +5,8 @@ import { pool } from '@/lib/db';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import Link from 'next/link';
 import { logoutAction, arquivarDiligencia, desarquivarDiligencia } from './actions';
+import { redirect } from 'next/navigation';
+import { acessoDiligencias, diligenciasDoCorretor } from '@/lib/diligencia-acesso';
 
 type DiligenciaListRow = {
   diligencia_id: string;
@@ -38,8 +40,23 @@ async function getArquivadasSet(): Promise<Set<string>> {
 async function fetchDiligencias(
   busca: string,
   arquivadas: boolean,
-  arqSet: Set<string>
+  arqSet: Set<string>,
+  soIds: string[] | null
 ): Promise<DiligenciaListRow[]> {
+  // Perfil Corretor: só as diligências ligadas a ele (sem o limite de 200).
+  if (soIds !== null) {
+    if (soIds.length === 0) return [];
+    const params: unknown[] = [soIds];
+    let q = `SELECT * FROM painel.v_painel_admin WHERE diligencia_id::text = ANY($1)`;
+    if (busca.length > 0) {
+      params.push(`%${busca}%`);
+      q += ` AND (endereco ILIKE $2 OR cliente_nome ILIKE $2)`;
+    }
+    q += ` ORDER BY criado_em DESC`;
+    const r = await pool.query(q, params);
+    return (r.rows as DiligenciaListRow[]).filter((d) => arqSet.has(String(d.diligencia_id)) === arquivadas);
+  }
+
   // Aba "Arquivadas": busca só os ids arquivados diretamente (podem ser antigos).
   if (arquivadas) {
     const ids = [...arqSet];
@@ -93,9 +110,13 @@ export default async function AdminHome({
   const sp = await searchParams;
   const busca = sp.q?.trim() ?? '';
   const arquivadas = sp.arq === '1';
+  const acesso = await acessoDiligencias();
+  if (!acesso) redirect('/sem-acesso');
+  const gerir = acesso.todas;
+  const soIds = gerir ? null : await diligenciasDoCorretor(acesso.corretorId);
   const arqSet = await getArquivadasSet();
-  const diligencias = await fetchDiligencias(busca, arquivadas, arqSet);
-  const nArquivadas = arqSet.size;
+  const diligencias = await fetchDiligencias(busca, arquivadas, arqSet, soIds);
+  const nArquivadas = soIds === null ? arqSet.size : soIds.filter((i) => arqSet.has(i)).length;
 
   // Totais agregados
   // Os contadores vêm do Postgres como texto; força número (senão += concatena).
@@ -123,7 +144,7 @@ export default async function AdminHome({
               REMAX Ville — Painel admin
             </p>
             <h1 className="mt-2 text-2xl font-semibold text-slate-900 sm:text-3xl">
-              Diligências
+              {gerir ? 'Diligências' : 'Minhas diligências'}
             </h1>
           </div>
           <div className="flex items-center gap-2">
@@ -212,7 +233,11 @@ export default async function AdminHome({
             <p className="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
               {arquivadas
                 ? 'Nenhuma diligência arquivada.'
-                : 'Nenhuma diligência encontrada.'}
+                : !gerir && !acesso.corretorId
+                  ? 'Seu e-mail não está no cadastro de corretores. Fale com o administrador.'
+                  : !gerir && !busca
+                    ? 'Nenhuma diligência ligada a você ainda. Ela aparece aqui quando você cria a diligência ou quando seu nome entra no split da comissão.'
+                    : 'Nenhuma diligência encontrada.'}
             </p>
           )}
           {diligencias.map((d) => (
@@ -267,6 +292,7 @@ export default async function AdminHome({
                 </div>
               </Link>
 
+              {gerir && (
               <div className="flex justify-end border-t border-slate-100 bg-slate-50/60 px-4 py-2">
                 {arquivadas ? (
                   <form action={desarquivarDiligencia}>
@@ -290,6 +316,7 @@ export default async function AdminHome({
                   </form>
                 )}
               </div>
+              )}
             </div>
           ))}
         </section>
