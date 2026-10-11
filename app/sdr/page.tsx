@@ -8,6 +8,7 @@
 import Link from 'next/link';
 import { exigirTela, escopoSdr, corretorDaPessoa } from '@/lib/perfil';
 import { MeuFunil } from './meu-funil';
+import VerComoCorretor from '@/app/_components/VerComoCorretor';
 import { pool } from '@/lib/db';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import FunilSelect from './funil-select';
@@ -659,13 +660,29 @@ async function FunilRecrutamento({ dias }: { dias: number | null }) {
   );
 }
 
-export default async function FunilSdr({ searchParams }: { searchParams: Promise<{ d?: string; f?: string }> }) {
+export default async function FunilSdr({ searchParams }: { searchParams: Promise<{ d?: string; f?: string; c?: string }> }) {
   const perfil = await exigirTela('sdr');
-  const { d, f } = await searchParams;
+  const { d, f, c } = await searchParams;
   // Perfil Corretor: só o próprio funil.
   if (escopoSdr(perfil) === 'proprio') {
     const cor = await corretorDaPessoa(perfil.email);
     return <MeuFunil cor={cor} nome={(perfil.nome?.trim() || perfil.email).split(' ')[0]} periodo={d ?? '30'} />;
+  }
+  // "Ver como corretor": quem vê o funil completo pode abrir o "Meu funil" de um corretor.
+  const { data: corsAtivos } = await supabaseAdmin().from('corretores_associados').select('id,nome,phone').eq('status', 'ativo').order('nome');
+  const corretores = ((corsAtivos ?? []) as { id: number; nome: string; phone: string | null }[]);
+  if (c && /^\d+$/.test(c)) {
+    const cor = corretores.find((x) => x.id === Number(c)) ?? null;
+    if (cor)
+      return (
+        <MeuFunil
+          cor={cor}
+          nome={cor.nome.split(' - ')[0]}
+          periodo={d ?? '30'}
+          comoAdmin
+          seletor={<VerComoCorretor corretores={corretores.map((x) => ({ id: x.id, nome: x.nome.split(' - ')[0] }))} base={`/sdr?d=${d ?? '30'}&c=`} atual={cor.id} />}
+        />
+      );
   }
   const periodo = PERIODOS.some((p) => p.k === d) ? (d as string) : '30';
   const funil: FunilK = FUNIS.some((x) => x.k === f) ? (f as FunilK) : 'comprador';
@@ -704,7 +721,10 @@ export default async function FunilSdr({ searchParams }: { searchParams: Promise
         </header>
 
         <div className="mt-6">
-          <FunilSelect funis={FUNIS.map((x) => ({ k: x.k, rotulo: x.rotulo }))} atual={funil} periodo={periodo} />
+          <div className="flex flex-wrap items-center gap-4">
+            <FunilSelect funis={FUNIS.map((x) => ({ k: x.k, rotulo: x.rotulo }))} atual={funil} periodo={periodo} />
+            <VerComoCorretor corretores={corretores.map((x) => ({ id: x.id, nome: x.nome.split(' - ')[0] }))} base={`/sdr?d=${periodo}&c=`} />
+          </div>
         </div>
 
         {erro ? (
