@@ -9,6 +9,7 @@
 //
 // Acesso: /admin/* exige login + pode_diligencias (proxy.ts).
 import { NextResponse } from 'next/server';
+import { acessoDiligencias } from '@/lib/diligencia-acesso';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -41,7 +42,26 @@ function pagina(status: number, titulo: string, texto: string) {
   });
 }
 
+// Perfil Corretor (alcance "proprias"):
+//  - esconde o "Editar diligência existente" (a busca do n8n lista todas);
+//  - depois de enviar, avisa o painel para marcar a diligência como dele
+//    (/api/adm/diligencia-criada), com novas tentativas enquanto o WF-01 grava.
+const SCRIPT_CORRETOR = `<script>(function(){
+function esconderEditar(){var b=document.getElementById('busca-dilig');var n=b;while(n&&n.parentElement&&!(n.querySelector&&n.querySelector('h2')))n=n.parentElement;if(n&&b)n.style.display='none';}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',esconderEditar);else esconderEditar();
+var ESPERAS=[2000,4000,8000,15000,30000];
+function marcar(end,i){fetch('/api/adm/diligencia-criada',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({endereco:end}),credentials:'same-origin'})
+.then(function(r){return r.json();}).then(function(j){if(!j.ok&&i<ESPERAS.length)setTimeout(function(){marcar(end,i+1);},ESPERAS[i]);})
+.catch(function(){if(i<ESPERAS.length)setTimeout(function(){marcar(end,i+1);},ESPERAS[i]);});}
+var orig=window.fetch;
+window.fetch=function(u,o){var p=orig.apply(this,arguments);
+try{var url=String(u&&u.url?u.url:u);if(/\\/nova-diligencia-submit(\\?|$)/.test(url)&&o&&typeof o.body==='string'){var b={};try{b=JSON.parse(o.body);}catch(e){}
+p.then(function(r){if(r&&r.ok&&b.endereco)setTimeout(function(){marcar(b.endereco,0);},1500);}).catch(function(){});}}catch(e){}
+return p;};
+})();</script>`;
+
 export async function GET() {
+  const acesso = await acessoDiligencias();
   let html: string;
   try {
     const r = await fetch(`${N8N}/nova-diligencia`, { cache: 'no-store', signal: AbortSignal.timeout(20000) });
@@ -65,7 +85,7 @@ export async function GET() {
       'Atenção: o formulário foi alterado no n8n e esta versão do painel pode não conseguir enviar. Avise o suporte antes de usar.</div>'
     : '';
 
-  const cfg = `<script>var N8N_BASE = ${JSON.stringify(N8N)};</script>`;
+  const cfg = `<script>var N8N_BASE = ${JSON.stringify(N8N)};</script>` + (acesso && !acesso.todas ? SCRIPT_CORRETOR : '');
   html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + cfg) : cfg + html;
   html = /<body[^>]*>/i.test(html) ? html.replace(/<body[^>]*>/i, (m) => m + BARRA + aviso) : html;
 
