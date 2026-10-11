@@ -19,6 +19,7 @@ import { ToggleCardVisivel, TogglePessoaVisivel } from '../../ToggleVisibilidade
 import { CopiarLinkCliente } from '../../CopiarLinkCliente';
 import { CardExtraNovo, ExcluirCardExtra } from '../../CardExtra';
 import { GerarParecer } from '../../GerarParecer';
+import { rotaDoTipo } from '@/lib/rota-certidao';
 import { GerarCCV } from '../../GerarCCV';
 import { FichaNegocio } from '../../FichaNegocio';
 import { EmitirCobranca } from '../../EmitirCobranca';
@@ -653,8 +654,9 @@ function CardAdmin({
       </div>
 
       <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-slate-200/70 pt-2">
-        {/* v2: Reemitir - so aparece quando nao tem PDF vinculado */}
-        {!r.drive_file_id && (
+        {/* v2: Reemitir - so aparece quando nao tem PDF vinculado e o tipo tem emissao automatica
+            (card manual de upload nao tem o que reemitir) */}
+        {!r.drive_file_id && rotaDoTipo(r.tipo) && (
           <form
             action={async () => {
               'use server';
