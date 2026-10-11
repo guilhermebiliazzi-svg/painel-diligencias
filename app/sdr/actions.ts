@@ -48,26 +48,34 @@ export async function ofertar(leadId: string, phones: string[]): Promise<Resulta
   await exigirAdmin();
   const lead = await lerLead(leadId);
   if (!lead) return { ok: false, erro: 'Lead não encontrado.' };
-  if (lead.corretor_phone) return { ok: false, erro: 'Este lead já tem corretor.' };
-  if (!ABERTOS.includes(lead.status)) return { ok: false, erro: 'Este lead não está aguardando decisão (status: ' + lead.status + ').' };
   const fila = await telefonesValidos(phones);
   if (!fila.length) return { ok: false, erro: 'Escolha pelo menos um corretor.' };
 
+  // Guilherme sempre pode encaminhar (11/10): lead em qualificação, direto ao
+  // gestor, arquivado ou já com corretor é REABERTO e entra na fila nova.
+  const reabrir = !ABERTOS.includes(lead.status) || !!lead.corretor_phone;
   const sb = supabaseAdmin();
   let novaFila = fila;
-  const patch: Record<string, unknown> = { status: 'em_cascata', updated_at: new Date().toISOString() };
-  if (lead.status === 'em_cascata') {
+  const agora = new Date().toISOString();
+  const patch: Record<string, unknown> = { status: 'em_cascata', updated_at: agora };
+  if (reabrir) {
+    Object.assign(patch, { corretor_phone: null, cartao_enviado_em: agora, arquivado_em: null, motivo_arquivamento: null });
+    // oferta ainda aberta de uma cascata anterior não pode travar a nova
+    await sb.from('sdr_atribuicoes').update({ resposta: 'sem_resposta', respondido_em: agora }).eq('lead_id', leadId).is('resposta', null);
+  } else if (lead.status === 'em_cascata') {
     const atual = lead.fila_corretores ?? [];
     novaFila = [...atual, ...fila.filter((p) => !atual.includes(p))];
   } else {
     patch.cartao_enviado_em = new Date().toISOString();
   }
   patch.fila_corretores = novaFila;
-  const { data, error } = await sb.from('sdr_leads').update(patch).eq('id', leadId).eq('status', lead.status).is('corretor_phone', null).select('id');
+  let q = sb.from('sdr_leads').update(patch).eq('id', leadId).eq('status', lead.status);
+  q = lead.corretor_phone ? q.eq('corretor_phone', lead.corretor_phone) : q.is('corretor_phone', null);
+  const { data, error } = await q.select('id');
   if (error) return { ok: false, erro: 'Não foi possível gravar: ' + error.message };
   if (!data?.length) return { ok: false, erro: 'O lead mudou enquanto você decidia. Recarregue a página.' };
-  await registrar(leadId, 'comando_fila', novaFila.join(','));
-  return { ok: true, msg: 'Fila gravada. A oferta ao primeiro corretor sai em até 10 minutos; cada um tem 15 minutos para responder.' };
+  await registrar(leadId, 'comando_fila', (reabrir ? '(reaberto de ' + lead.status + ') ' : '') + novaFila.join(','));
+  return { ok: true, msg: (reabrir ? 'Lead reaberto. ' : '') + 'Fila gravada. A oferta ao primeiro corretor sai em até 10 minutos; cada um tem 15 minutos para responder.' };
 }
 
 // Segura: para a cascata (se ninguém assumiu) e adia o lembrete.
