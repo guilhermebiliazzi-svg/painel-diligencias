@@ -3,7 +3,7 @@
 // Catálogo: public.ads_vitrine_catalogo (imóveis à venda do villejardins.com.br,
 // atualizado pelo n8n; só os de corretor REMAX). Escolhas: public.ads_vitrine_selecao.
 import Link from 'next/link';
-import { exigirAdmin } from '@/lib/perfil';
+import { exigirTela } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import Vitrine, { type Imovel, type Vitrine as Vitrine_, type GeoAlvo, type Carrossel } from './vitrine';
 
@@ -58,7 +58,7 @@ async function carregar() {
 }
 
 export default async function VitrinePage() {
-  await exigirAdmin();
+  await exigirTela('vitrine');
   let dados: Awaited<ReturnType<typeof carregar>> | null = null;
   let erro: string | null = null;
   try {
