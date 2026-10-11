@@ -20,6 +20,7 @@ export type Tela =
   | 'captacao'
   | 'sdr'
   | 'estudo'
+  | 'representacao'
   | 'postagens'
   | 'vitrine'
   | 'locador'
@@ -56,6 +57,7 @@ export const TELAS: DefTela[] = [
   { chave: 'sdr', titulo: 'Funil do SDR', area: 'venda', flag: null },
   { chave: 'captacao', titulo: 'Captação', area: 'venda', flag: 'pode_captacao' },
   { chave: 'estudo', titulo: 'Estudo de mercado', area: 'venda', flag: 'pode_postagens' },
+  { chave: 'representacao', titulo: 'Contrato de representação', area: 'venda', flag: null },
   { chave: 'diligencias', titulo: 'Diligências', area: 'venda', flag: 'pode_diligencias' },
   { chave: 'postagens', titulo: 'Postagens', area: 'venda', flag: 'pode_postagens' },
   { chave: 'vitrine', titulo: 'Vitrine Google Ads', area: 'venda', flag: null },
@@ -65,7 +67,7 @@ export const TELAS: DefTela[] = [
   { chave: 'pagamentos', titulo: 'Pagamentos', area: 'administracao', flag: 'pode_pagamentos' },
   // uma permissão cobre as Notas da administração e as Notas de comissão (Venda)
   { chave: 'notas', titulo: 'Notas da administração e de comissão', area: 'administracao', flag: 'pode_notas' },
-  { chave: 'locador', titulo: 'Portal do locador', area: 'administracao', flag: null, soAdmin: true },
+  { chave: 'locador', titulo: 'Portal do locador', area: 'administracao', flag: null },
   { chave: 'usuarios', titulo: 'Usuários e perfis', area: 'sistema', flag: null, soAdmin: true },
 ];
 
