@@ -172,7 +172,12 @@ export async function rejeitarPostagem(pedidoId: string): Promise<Resultado> {
   if (!['textos_prontos', 'previa_pronta', 'aguardando_admin', 'erro'].includes(p.status)) return { ok: false, erro: 'Este pedido não pode ser cancelado agora.' };
   const sb = supabaseAdmin();
   await sb.from('postagem_pedidos').update({ status: 'rejeitado', atualizado_em: new Date().toISOString() }).eq('id', p.id);
-  if (p.criativo_id) await sb.from('criativos_imoveis').update({ status: 'rejeitado' }).eq('id', p.criativo_id).neq('status', 'postado');
+  if (p.criativo_id) {
+    await sb.from('criativos_imoveis').update({ status: 'rejeitado' }).eq('id', p.criativo_id).neq('status', 'postado');
+    // Fecha também a aprovação pendente no WhatsApp, para não aparecer em "pendencias" nem poder ser postado depois.
+    await sb.from('aprovacoes_pendentes').update({ status: 'rejeitado', resposta_admin_em: new Date().toISOString() })
+      .eq('criativo_id', p.criativo_id).eq('status', 'aguardando');
+  }
   return { ok: true };
 }
 
