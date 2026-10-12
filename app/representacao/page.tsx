@@ -168,9 +168,10 @@ async function Enviados({
   const pagina = rows.slice((pg - 1) * POR_PAGINA, pg * POR_PAGINA);
   const paginas = Math.max(1, Math.ceil(total / POR_PAGINA));
 
-  // andamento no Clicksign: só os em aberto que não foram consultados há 10 min
+  // andamento no Clicksign: consulta os em aberto desta página sempre que a lista abre
+  // (assinatura ou cancelamento feito no Clicksign aparece logo; intervalo mínimo de 30 s)
   const consultar = pagina
-    .filter((r) => (r.status === 'aguardando_assinatura' || r.status === 'parcial') && agora - new Date(r.atualizado_em).getTime() > 10 * 60000)
+    .filter((r) => (r.status === 'aguardando_assinatura' || r.status === 'parcial') && agora - new Date(r.atualizado_em).getTime() > 30000)
     .map((r) => r.envelope_id)
     .slice(0, 25);
 
