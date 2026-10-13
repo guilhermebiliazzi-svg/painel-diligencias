@@ -40,6 +40,8 @@ type Lead = {
   min_ate_atribuicao: number | null;
   feito: boolean;
   referenciado: boolean;
+  // situação do referenciamento (13/10): aguardando_aceite, recusado, email_enviado…
+  ref_status: string | null;
   corretor_phone: string | null;
 };
 
@@ -61,6 +63,13 @@ const FUNIS = [
 ] as const;
 type FunilK = (typeof FUNIS)[number]['k'];
 
+// Rótulo do lead referenciado conforme a resposta da outra unidade (13/10).
+const REF_ROTULO: Record<string, string> = {
+  aguardando_aceite: 'Referenciado · sem aceite',
+  recusado: 'Referenciado · recusado',
+  aceito_aguardando_email: 'Referenciado · aceito',
+  email_enviado: 'Referenciado · aceito',
+};
 const STATUS_ROTULO: Record<string, string> = {
   direto: 'Direto ao gestor',
   atribuido: 'Atribuído',
@@ -105,11 +114,21 @@ async function carregarClientes(dias: number | null): Promise<Lead[]> {
     [dias]
   );
   const ids = rows.map((r) => r.id);
-  const extra = new Map<string, { feito_em: string | null; origem: string | null; motivo: string | null; corretor_phone: string | null }>();
+  const extra = new Map<string, { feito_em: string | null; origem: string | null; motivo: string | null; corretor_phone: string | null; telefone: string | null }>();
   for (let i = 0; i < ids.length; i += 300) {
-    const { data } = await supabaseAdmin().from('sdr_leads').select('id,feito_em,origem,motivo_arquivamento,corretor_phone').in('id', ids.slice(i, i + 300));
-    for (const d of (data ?? []) as { id: string; feito_em: string | null; origem: string | null; motivo_arquivamento: string | null; corretor_phone: string | null }[])
-      extra.set(d.id, { feito_em: d.feito_em, origem: d.origem, motivo: d.motivo_arquivamento, corretor_phone: d.corretor_phone });
+    const { data } = await supabaseAdmin().from('sdr_leads').select('id,feito_em,origem,motivo_arquivamento,corretor_phone,telefone').in('id', ids.slice(i, i + 300));
+    for (const d of (data ?? []) as { id: string; feito_em: string | null; origem: string | null; motivo_arquivamento: string | null; corretor_phone: string | null; telefone: string | null }[])
+      extra.set(d.id, { feito_em: d.feito_em, origem: d.origem, motivo: d.motivo_arquivamento, corretor_phone: d.corretor_phone, telefone: d.telefone });
+  }
+  // Situação do referenciamento de cada cliente (o mais recente pelo telefone).
+  const refStatus = new Map<string, string>();
+  {
+    const { data } = await supabaseAdmin().from('indicacoes').select('cliente_telefone,status,criado_em')
+      .gte('criado_em', new Date(Date.now() - 180 * 864e5).toISOString()).order('criado_em', { ascending: true }).limit(2000);
+    for (const d of (data ?? []) as { cliente_telefone: string | null; status: string }[]) {
+      const f8 = String(d.cliente_telefone ?? '').replace(/\D/g, '').slice(-8);
+      if (f8.length === 8) refStatus.set(f8, d.status);
+    }
   }
   return rows
     .filter((r) => extra.get(r.id)?.origem !== 'campanha' && !/^capta/i.test(r.fonte))
@@ -119,6 +138,7 @@ async function carregarClientes(dias: number | null): Promise<Lead[]> {
       feito: !!extra.get(r.id)?.feito_em,
       corretor_phone: extra.get(r.id)?.corretor_phone ?? null,
       referenciado: /referenciad/i.test(extra.get(r.id)?.motivo ?? r.motivo_arquivamento ?? ''),
+      ref_status: refStatus.get(String(extra.get(r.id)?.telefone ?? '').replace(/\D/g, '').slice(-8)) ?? null,
     }));
 }
 
@@ -391,8 +411,8 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
                     </td>
                     <td className="py-2">
                       <Selo
-                        texto={l.referenciado ? 'Referenciado' : STATUS_ROTULO[l.status] ?? l.status}
-                        tom={l.referenciado ? 'azul' : l.status === 'atribuido' || l.status === 'visita_agendada' ? 'verde' : l.status === 'arquivado' ? 'cinza' : l.status === 'direto' ? 'roxo' : 'ambar'}
+                        texto={l.referenciado ? (REF_ROTULO[l.ref_status ?? ''] ?? 'Referenciado') : STATUS_ROTULO[l.status] ?? l.status}
+                        tom={l.referenciado ? (l.ref_status === 'aguardando_aceite' || l.ref_status === 'recusado' ? 'ambar' : 'azul') : l.status === 'atribuido' || l.status === 'visita_agendada' ? 'verde' : l.status === 'arquivado' ? 'cinza' : l.status === 'direto' ? 'roxo' : 'ambar'}
                       />
                     </td>
                     <td className="py-2 text-slate-600">{l.corretor || '—'}</td>

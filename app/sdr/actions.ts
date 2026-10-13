@@ -13,12 +13,12 @@ export type Resultado = { ok: boolean; erro?: string; msg?: string; leadId?: str
 const GUILHERME = '5511989766590';
 const ABERTOS = ['aguardando_guilherme', 'em_cascata'];
 
-type LeadMin = { id: string; status: string; fila_corretores: string[] | null; corretor_phone: string | null; nome: string | null };
+type LeadMin = { id: string; status: string; fila_corretores: string[] | null; corretor_phone: string | null; nome: string | null; telefone: string | null; motivo_arquivamento: string | null; created_at: string | null };
 
 async function lerLead(id: string): Promise<LeadMin | null> {
   const { data } = await supabaseAdmin()
     .from('sdr_leads')
-    .select('id,status,fila_corretores,corretor_phone,nome')
+    .select('id,status,fila_corretores,corretor_phone,nome,telefone,motivo_arquivamento,created_at')
     .eq('id', id)
     .maybeSingle();
   return (data as LeadMin | null) ?? null;
@@ -42,6 +42,23 @@ async function registrar(leadId: string, template: string, conteudo: string) {
   });
 }
 
+// Referenciamento de cliente ainda sem aceite: cancela para o corretor de fora não
+// receber os dados se aceitar depois (13/10). Devolve quantos foram cancelados.
+async function cancelarReferenciamentosPendentes(telefone: string | null, motivo: string): Promise<number> {
+  const f8 = String(telefone ?? '').replace(/\D/g, '').slice(-8);
+  if (f8.length !== 8) return 0;
+  const sb = supabaseAdmin();
+  const { data } = await sb.from('indicacoes').select('id,observacoes')
+    .like('cliente_telefone', '%' + f8).eq('status', 'aguardando_aceite').or('tipo_indicacao.is.null,tipo_indicacao.neq.captacao');
+  let n = 0;
+  for (const i of (data ?? []) as { id: number; observacoes: string | null }[]) {
+    const obs = [i.observacoes, motivo + ' em ' + new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })].filter(Boolean).join(' | ');
+    const { error } = await sb.from('indicacoes').update({ status: 'cancelada', observacoes: obs }).eq('id', i.id).eq('status', 'aguardando_aceite');
+    if (!error) n++;
+  }
+  return n;
+}
+
 // Fila: se a cascata já começou (alguém já recebeu oferta), os nomes novos entram no fim;
 // se ainda não, a nova ordem substitui a anterior.
 export async function ofertar(leadId: string, phones: string[]): Promise<Resultado> {
@@ -62,6 +79,8 @@ export async function ofertar(leadId: string, phones: string[]): Promise<Resulta
     Object.assign(patch, { corretor_phone: null, cartao_enviado_em: agora, arquivado_em: null, motivo_arquivamento: null });
     // oferta ainda aberta de uma cascata anterior não pode travar a nova
     await sb.from('sdr_atribuicoes').update({ resposta: 'sem_resposta', respondido_em: agora }).eq('lead_id', leadId).is('resposta', null);
+    // referenciamento ainda sem aceite deixa de valer: o cliente volta para a Ville
+    await cancelarReferenciamentosPendentes(lead.telefone, 'cancelado: lead encaminhado a corretor da Ville pelo painel');
   } else if (lead.status === 'em_cascata') {
     const atual = lead.fila_corretores ?? [];
     novaFila = [...atual, ...fila.filter((p) => !atual.includes(p))];
@@ -76,6 +95,36 @@ export async function ofertar(leadId: string, phones: string[]): Promise<Resulta
   if (!data?.length) return { ok: false, erro: 'O lead mudou enquanto você decidia. Recarregue a página.' };
   await registrar(leadId, 'comando_fila', (reabrir ? '(reaberto de ' + lead.status + ') ' : '') + novaFila.join(','));
   return { ok: true, msg: (reabrir ? 'Lead reaberto. ' : '') + 'Fila gravada. A oferta ao primeiro corretor sai em até 10 minutos; cada um tem 15 minutos para responder.' };
+}
+
+// Resgatar (13/10): referenciamento sem aceite (ou recusado) — cancela o pedido pendente
+// e devolve o lead para "esperando você". Não mexe se a outra unidade já aceitou.
+export async function resgatarReferenciamento(leadId: string): Promise<Resultado> {
+  await exigirSdrGestao();
+  const lead = await lerLead(leadId);
+  if (!lead) return { ok: false, erro: 'Lead não encontrado.' };
+  const f8 = String(lead.telefone ?? '').replace(/\D/g, '').slice(-8);
+  const sb = supabaseAdmin();
+  if (f8.length === 8) {
+    const { data: aceitos } = await sb.from('indicacoes').select('id,corretor_nome')
+      .like('cliente_telefone', '%' + f8).in('status', ['aceito_aguardando_email', 'email_enviado']).or('tipo_indicacao.is.null,tipo_indicacao.neq.captacao')
+      .gte('criado_em', new Date(new Date(lead.created_at ?? 0).getTime() - 864e5).toISOString()).limit(1);
+    if (aceitos && aceitos.length) return { ok: false, erro: 'O referenciamento já foi aceito' + (aceitos[0].corretor_nome ? ' por ' + aceitos[0].corretor_nome : '') + '. Não dá para resgatar daqui.' };
+  }
+  const cancelados = await cancelarReferenciamentosPendentes(lead.telefone, 'cancelado pelo Guilherme no painel (resgatado)');
+  const agora = new Date().toISOString();
+  let voltou = false;
+  if (lead.status === 'arquivado' && /referenciad/i.test(lead.motivo_arquivamento ?? '')) {
+    const { data, error } = await sb.from('sdr_leads').update({
+      status: 'aguardando_guilherme', arquivado_em: null, motivo_arquivamento: null, fila_corretores: [],
+      corretor_phone: null, cartao_enviado_em: agora, updated_at: agora,
+    }).eq('id', leadId).eq('status', 'arquivado').select('id');
+    if (error) return { ok: false, erro: 'Cancelei o referenciamento, mas não consegui reabrir o lead: ' + error.message };
+    voltou = !!data?.length;
+  }
+  await registrar(leadId, 'comando_resgatar', 'referenciamento resgatado (painel): ' + cancelados + ' pedido(s) cancelado(s)');
+  if (!cancelados && !voltou) return { ok: false, erro: 'Não havia referenciamento pendente nem lead arquivado para resgatar.' };
+  return { ok: true, msg: (cancelados ? 'Pedido de aceite cancelado. ' : '') + (voltou ? 'O lead voltou para "esperando você": escolha a fila ou referencie de novo.' : '') };
 }
 
 // Segura: para a cascata (se ninguém assumiu) e adia o lembrete.
