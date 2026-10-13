@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation';
 import { exigirSdrGestao } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import Decisao, { type CorretorOpc, type ImovelRef } from '../../decisao';
+import Resgatar from './resgatar';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Lead — SDR REMAX Ville' };
@@ -83,6 +84,9 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
     .gte('criado_em', new Date(new Date(l.created_at).getTime() - 864e5).toISOString())
     .order('criado_em', { ascending: false });
   const indicacoes = (inds ?? []) as Indicacao[];
+  // Resgatar (13/10): referenciamento sem aceite pode ser cancelado; recusado com o lead ainda
+  // arquivado como referenciado pode voltar. Se alguém já aceitou, não aparece.
+  const algumAceito = indicacoes.some((r) => ['aceito_aguardando_email', 'email_enviado'].includes(r.status));
   const corretores = (cors ?? []) as CorretorOpc[];
   const porPhone = new Map(corretores.map((c) => [c.phone, c]));
   const nomeCor = (p: string) => { const c = porPhone.get(p); return c ? (c.apelido?.trim() || c.nome.split(' ')[0]) : telFmt(p); };
@@ -157,6 +161,9 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
                 <Linha k="Resposta do corretor" v={r.followup_resposta} />
                 <Linha k="Obs." v={r.observacoes} />
               </dl>
+              {!algumAceito && (r.status === 'aguardando_aceite' || (r.status === 'recusado' && l.status === 'arquivado' && /referenciad/i.test(l.motivo_arquivamento ?? ''))) && (
+                <Resgatar id={l.id} pendente={r.status === 'aguardando_aceite'} />
+              )}
             </section>
           );
         })}
