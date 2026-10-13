@@ -1030,15 +1030,16 @@ def marcar_dono(bloco, dono):
 
 
 COTAS_SUCURSAL = {
-    # Aditivo de 15/09: mais 100 super, total 300 — agora 100 para cada uma.
-    #   Antes (contrato de 07/09): 67 + 67 + 66 = 200. O 66 da Alcance existia
-    #   so porque 200 nao dividia por tres; com 300, divide certo e some a
-    #   assimetria. O destaque nao mudou: 175 x 3 = 525.
+    # 13/10/2026: plano do ImovelWeb passou para 400 superdestaques (+100).
+    #   Os 100 novos: 34 Homemark, 33 Ville, 33 Alcance (decisao do Guilherme).
+    #   Antes (aditivo de 15/09): 100 + 100 + 100 = 300.
+    #   Antes ainda (contrato de 07/09): 67 + 67 + 66 = 200.
+    #   O destaque nao mudou: 175 x 3 = 525.
     # Os totais da conta unica saem da soma desta tabela — nao existe numero
     # de cota escrito em nenhum outro lugar deste arquivo.
-    "ville":    {"HOME": 100, "DESTACADO": 175},
-    "homemark": {"HOME": 100, "DESTACADO": 175},
-    "alcance":  {"HOME": 100, "DESTACADO": 175},
+    "ville":    {"HOME": 133, "DESTACADO": 175},
+    "homemark": {"HOME": 134, "DESTACADO": 175},
+    "alcance":  {"HOME": 133, "DESTACADO": 175},
 }
 
 
