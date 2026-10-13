@@ -793,6 +793,17 @@ def api_destaques(sucursal: str, authorization: str = Header(default="")):
     }
 
 
+def chaves_ofertaveis(sucursal):
+    """Chaves (sufixo depois do '#') dos imóveis que a sucursal pode marcar
+    hoje — o catálogo da tela dela, gravado a cada geração. None se o
+    catálogo não existir (aí ninguém é filtrado, como antes)."""
+    cat = ler_config(f"catalogo_{sucursal}.json", None)
+    if not cat or not isinstance(cat.get("itens"), list):
+        return None
+    return {uf.chave_compartilhada(str(it.get("c", "")).strip())
+            for it in cat["itens"] if it.get("c")}
+
+
 def destaques_de_outras(sucursal):
     """Imóveis que as OUTRAS sucursais já marcaram como destaque.
 
@@ -806,6 +817,10 @@ def destaques_de_outras(sucursal):
     Código do iList não tem '#' e portanto não cruza — mas imóvel do iList
     quase nunca está em duas sucursais (1 caso hoje), então o que importa,
     que é o pool compartilhado, fica coberto.
+
+    13/10/2026: só conta a escolha de imóvel que a outra sucursal ainda pode
+    marcar (o catálogo da tela dela). Escolha antiga de imóvel que saiu do XML
+    dela não trava mais os botões aqui — e a geração também a ignora.
     """
     tomados = {}
     for outra in uf.SUCURSAIS:
@@ -814,9 +829,12 @@ def destaques_de_outras(sucursal):
         esc = ler_config(f"destaques_{outra}.json", None)
         if not esc:
             continue
+        dela = chaves_ofertaveis(outra)
         for nivel in ("HOME", "DESTACADO"):
             for codigo in (esc.get(nivel) or []):
                 chave = uf.chave_compartilhada(str(codigo).strip())
+                if dela is not None and chave not in dela:
+                    continue
                 # HOME tem precedência: é o que a geração também faz
                 if chave in tomados and tomados[chave]["nivel"] == "HOME":
                     continue
@@ -851,6 +869,18 @@ def salvar_destaques(
     # SIMPLE aqui quer dizer "nunca destaque este": fica de fora tambem do
     # preenchimento automatico. Nao tem cota.
     simples = lista("SIMPLE")
+    # 13/10/2026: guarda só o que a sucursal pode marcar hoje. Escolha de
+    # imóvel que saiu do XML dela é descartada em silêncio (a tela manda a
+    # lista inteira de novo a cada clique, então recusar travaria o salvar).
+    minhas = chaves_ofertaveis(sucursal)
+    descartados = 0
+    if minhas is not None:
+        def filtra(valores):
+            nonlocal descartados
+            ok = [v for v in valores if uf.chave_compartilhada(v) in minhas]
+            descartados += len(valores) - len(ok)
+            return ok
+        home, destacado, simples = filtra(home), filtra(destacado), filtra(simples)
     for a, b, rotulo in ((home, destacado, "superdestaque e destaque"),
                          (home, simples, "superdestaque e simples"),
                          (destacado, simples, "destaque e simples")):
@@ -867,7 +897,8 @@ def salvar_destaques(
              "por": email, "atualizado_em": agora()}
     gravar_config(f"destaques_{sucursal}.json", dados)
     return {"ok": True, "home": len(home), "destacado": len(destacado),
-            "simples": len(simples), "atualizado_em": dados["atualizado_em"]}
+            "simples": len(simples), "descartados": descartados,
+            "atualizado_em": dados["atualizado_em"]}
 
 
 # ============================================================================

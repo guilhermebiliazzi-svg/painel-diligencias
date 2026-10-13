@@ -1047,7 +1047,8 @@ COTA_HOME_UNIFICADA = sum(c["HOME"] for c in COTAS_SUCURSAL.values())
 COTA_DESTACADO_UNIFICADA = sum(c["DESTACADO"] for c in COTAS_SUCURSAL.values())
 
 
-def decidir_marcacao_unificada(itens, dono_de, por_sucursal, traducao):
+def decidir_marcacao_unificada(itens, dono_de, por_sucursal, traducao,
+                               marcado_por=None):
     """Decide o tipoPublicacao de cada anuncio na conta unica.
 
     Antes da conta unica, cada sucursal tinha as suas 67 e 175 num arquivo
@@ -1071,6 +1072,14 @@ def decidir_marcacao_unificada(itens, dono_de, por_sucursal, traducao):
 
     Traducao de codigo: a escolha da Homemark esta gravada em 'homemark#40450'
     e no arquivo unico sobrou 'remaxville#40450'. Sem traduzir, some calada.
+
+    13/10/2026: escolha so vale para imovel em que a sucursal PARTICIPA hoje
+    (mesma regra da tela, ofertavel no app.py): carteira propria do iList, ou
+    pool que ela publica no Nonstop, ou pool sem marcacao de ninguem. Antes,
+    uma escolha antiga continuava valendo depois que o imovel saia do XML da
+    sucursal — a Homemark gastava cota destacando um exclusivo da Ville e a
+    Ville nao conseguia marcar o proprio imovel. Escolha fora disso e ignorada
+    e contada em diag['fora'].
     """
     presentes = {c for c, _ in itens}
     preco = {c: p for c, p in itens}
@@ -1082,6 +1091,20 @@ def decidir_marcacao_unificada(itens, dono_de, por_sucursal, traducao):
     def traduzir(codigo):
         return traducao.get(chave_compartilhada(str(codigo).strip()))
 
+    fora = {n: 0 for n in COTAS_SUCURSAL}
+
+    def participa(nome, final):
+        """Mesma regra de ofertavel() no app.py — quem pode marcar o imovel."""
+        dono = dono_de.get(final)
+        if dono == nome:
+            return True
+        if dono != DONO_ROLETA:
+            return False
+        if marcado_por is None:          # sem a informacao: regra antiga
+            return True
+        quem = marcado_por.get(chave_compartilhada(final)) or set()
+        return (not quem) or (nome in quem)
+
     ordem = [n for n in COTAS_SUCURSAL if n in (por_sucursal or {})]
 
     # --- 1. escolhas da tela
@@ -1089,6 +1112,9 @@ def decidir_marcacao_unificada(itens, dono_de, por_sucursal, traducao):
         for codigo in ((por_sucursal[nome] or {}).get("SIMPLE") or []):
             final = traduzir(codigo)
             if final in presentes:
+                if not participa(nome, final):
+                    fora[nome] += 1
+                    continue
                 travados.add(final)
 
     for rotulo in ("HOME", "DESTACADO"):
@@ -1098,6 +1124,9 @@ def decidir_marcacao_unificada(itens, dono_de, por_sucursal, traducao):
                 final = traduzir(codigo)
                 if not final or final not in presentes:
                     orfas += 1
+                    continue
+                if not participa(nome, final):
+                    fora[nome] += 1
                     continue
                 if final in marcacao:
                     conflitos += 1        # ja levado por outra sucursal
@@ -1146,6 +1175,7 @@ def decidir_marcacao_unificada(itens, dono_de, por_sucursal, traducao):
 
     diag = {
         "orfas": orfas,
+        "fora": fora,
         "conflitos": conflitos,
         "do_pool": do_pool,
         "por_sucursal": {
@@ -1440,9 +1470,10 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
             itens.append((codigo, preco_de(bloco)))
             dono_de[codigo] = dono
     marcacao, (manual_h, manual_d), diag = decidir_marcacao_unificada(
-        itens, dono_de, escolhas_por_sucursal, traducao)
+        itens, dono_de, escolhas_por_sucursal, traducao, marcado_por)
     print(f"  destaques: {manual_h} super e {manual_d} destaque escolhidos nas telas"
-          f" | conflitos={diag['conflitos']} | orfas={diag['orfas']}")
+          f" | conflitos={diag['conflitos']} | orfas={diag['orfas']}"
+          f" | fora_da_sucursal={diag['fora']}")
     for n, c in diag["por_sucursal"].items():
         print(f"     {n:<9} super {c['HOME']}/{COTAS_SUCURSAL[n]['HOME']}"
               f" ({c['HOME_tela']} na tela)   destaque {c['DESTACADO']}"
