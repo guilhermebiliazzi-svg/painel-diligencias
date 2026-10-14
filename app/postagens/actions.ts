@@ -12,6 +12,9 @@ type Resultado = { ok: boolean; erro?: string; id?: string };
 const WEBHOOK = 'https://villejds.app.n8n.cloud/webhook/postagem-painel';
 const MIN_FOTOS = 5;
 const MAX_FOTOS = 7;
+// Geração que não termina em 10 min parou no n8n (o normal é 1 a 3 min).
+const TRAVA_MS = 10 * 60000;
+const EM_GERACAO = ['novo', 'gerando', 'gerando_previa'];
 
 type Corretor = { id: number; email: string | null; phone: string | null; id_agente: string | null; foto_url: string | null; creci: string | null; instagram_handle: string | null };
 
@@ -88,6 +91,11 @@ export async function gerarPostagem(corretorId: number, listingId: string, fotos
   const urls = new Set((dados.fotos || []).flatMap((f) => { const u = String(f.url || ''); return [u, u.replace('/LargeWM/', '/Large/')]; }));
   if (escolhidas.some((f) => !urls.has(f))) return { ok: false, erro: 'Alguma foto escolhida não é do anúncio. Recarregue a página.' };
 
+  // Geração parada há mais de 10 min não bloqueia um pedido novo: vira erro.
+  await sb.from('postagem_pedidos')
+    .update({ status: 'erro', erro_msg: 'A geração parou no meio e foi substituída por um pedido novo.', atualizado_em: new Date().toISOString() })
+    .eq('listing_id', lid).eq('corretor_id', cor.id).in('status', EM_GERACAO).lt('atualizado_em', new Date(Date.now() - TRAVA_MS).toISOString());
+
   // Já existe um carrossel em andamento para este imóvel?
   const { data: aberto } = await sb
     .from('postagem_pedidos')
@@ -121,13 +129,13 @@ export async function gerarPostagem(corretorId: number, listingId: string, fotos
   return { ok: true, id: pedido.id as string };
 }
 
-type PedidoRow = { id: string; corretor_id: number; criativo_id: number | null; status: string };
+type PedidoRow = { id: string; corretor_id: number; criativo_id: number | null; status: string; atualizado_em: string | null; criado_em: string };
 
 async function pedidoPermitido(pedidoId: string) {
   const sb = supabaseAdmin();
   const { data } = await sb
     .from('postagem_pedidos')
-    .select('id,corretor_id,criativo_id,status')
+    .select('id,corretor_id,criativo_id,status,atualizado_em,criado_em')
     .eq('id', String(pedidoId))
     .maybeSingle();
   const p = data as PedidoRow | null;
@@ -166,10 +174,36 @@ export async function aprovarEPostar(pedidoId: string): Promise<Resultado> {
   return { ok: true };
 }
 
+const travado = (p: PedidoRow) => EM_GERACAO.includes(p.status) && Date.now() - new Date(p.atualizado_em || p.criado_em).getTime() > TRAVA_MS;
+
+// Geração que parou no meio (ou que deu erro antes de criar os textos): manda o n8n fazer de novo.
+export async function tentarDeNovo(pedidoId: string): Promise<Resultado> {
+  const { p, erro } = await pedidoPermitido(pedidoId);
+  if (erro || !p) return { ok: false, erro: erro ?? 'Sem permissão.' };
+  const sb = supabaseAdmin();
+  const agora = new Date().toISOString();
+  if (p.status === 'gerando_previa' && travado(p)) {
+    // Os textos já estão salvos: só renderiza a prévia de novo.
+    await sb.from('postagem_pedidos').update({ atualizado_em: agora, erro_msg: null }).eq('id', p.id).eq('status', 'gerando_previa');
+    const falha = await avisarN8n({ evento: 'gerar_previa', pedido_id: p.id });
+    return falha ? { ok: false, erro: falha } : { ok: true };
+  }
+  if ((['novo', 'gerando'].includes(p.status) && travado(p)) || (p.status === 'erro' && !p.criativo_id)) {
+    // Recomeça do zero (o n8n só aceita pedido em "novo").
+    const { data } = await sb.from('postagem_pedidos').update({ status: 'novo', erro_msg: null, criativo_id: null, atualizado_em: agora })
+      .eq('id', p.id).eq('status', p.status).select('id');
+    if (!data || !data.length) return { ok: false, erro: 'O pedido mudou enquanto isso. Recarregue a página.' };
+    const falha = await avisarN8n({ evento: 'gerar', pedido_id: p.id });
+    if (falha) { await sb.from('postagem_pedidos').update({ status: 'erro', erro_msg: falha }).eq('id', p.id); return { ok: false, erro: falha }; }
+    return { ok: true };
+  }
+  return { ok: false, erro: 'Este pedido não está parado. Aguarde terminar ou recarregue a página.' };
+}
+
 export async function rejeitarPostagem(pedidoId: string): Promise<Resultado> {
   const { p, erro } = await pedidoPermitido(pedidoId);
   if (erro || !p) return { ok: false, erro: erro ?? 'Sem permissão.' };
-  if (!['textos_prontos', 'previa_pronta', 'aguardando_admin', 'erro'].includes(p.status)) return { ok: false, erro: 'Este pedido não pode ser cancelado agora.' };
+  if (!['textos_prontos', 'previa_pronta', 'aguardando_admin', 'erro'].includes(p.status) && !travado(p)) return { ok: false, erro: 'Este pedido não pode ser cancelado agora.' };
   const sb = supabaseAdmin();
   await sb.from('postagem_pedidos').update({ status: 'rejeitado', atualizado_em: new Date().toISOString() }).eq('id', p.id);
   if (p.criativo_id) {
