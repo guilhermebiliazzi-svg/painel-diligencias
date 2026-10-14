@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
-import { gerarPostagem, aprovarPrevia, aprovarEPostar, rejeitarPostagem, salvarInstagram, gerarPrevia } from './actions';
+import { gerarPostagem, aprovarPrevia, aprovarEPostar, rejeitarPostagem, salvarInstagram, gerarPrevia, tentarDeNovo } from './actions';
 
 export type Corretor = {
   id: number;
@@ -39,6 +39,7 @@ export type Pedido = {
   drive_folder_url: string | null;
   erro_msg: string | null;
   criado_em: string;
+  atualizado_em: string | null;
   criado_por: string;
   origem: string;
   fotos: string[];
@@ -63,7 +64,12 @@ const STATUS: Record<string, string> = {
   postado: 'Publicado no Instagram',
   rejeitado: 'Cancelado',
   erro: 'Erro ao gerar',
+  travado: 'A geração parou no meio',
 };
+
+// Geração que não termina em 10 min parou no n8n (o normal é 1 a 3 min).
+const TRAVA_MS = 10 * 60000;
+const EM_GERACAO = ['novo', 'gerando', 'gerando_previa'];
 
 const fmtPreco = (v: number | null) => (v ? 'R$ ' + Number(v).toLocaleString('pt-BR') : 'Sem preço');
 const fmtData = (s: string) => new Date(s).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -76,6 +82,7 @@ function statusDoPedido(p: Pedido): string {
     if (c === 'erro') return 'erro';
   }
   if (p.status === 'previa_pronta' && (c === 'aguardando_admin' || c === 'postando')) return c === 'postando' ? 'postando' : 'aguardando_admin';
+  if (EM_GERACAO.includes(p.status) && Date.now() - new Date(p.atualizado_em || p.criado_em).getTime() > TRAVA_MS) return 'travado';
   return p.status;
 }
 
@@ -121,7 +128,7 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
 
   const imovelAberto = imoveis.find((i) => i.listing_id === aberto) ?? null;
   // Enquanto algo está sendo gerado, atualiza a lista sozinho para os textos/prévia aparecerem.
-  const gerandoAlgo = pedidos.some((p) => ['novo', 'gerando', 'gerando_previa'].includes(p.status));
+  const gerandoAlgo = pedidos.some((p) => EM_GERACAO.includes(statusDoPedido(p)));
   useEffect(() => {
     if (!gerandoAlgo) return;
     const t = setInterval(() => router.refresh(), 15000);
@@ -332,7 +339,8 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
                 const pngs = p.criativo?.pngs_carrossel_urls || [];
                 const podeAprovarPrevia = st === 'previa_pronta';
                 const podePostar = isAdmin && (st === 'previa_pronta' || st === 'aguardando_admin');
-                const podeCancelar = ['textos_prontos', 'previa_pronta', 'aguardando_admin', 'erro'].includes(st);
+                const podeCancelar = ['textos_prontos', 'previa_pronta', 'aguardando_admin', 'erro', 'travado'].includes(st);
+                const podeRepetir = st === 'travado' || (st === 'erro' && !p.criativo_id);
                 return (
                   <div key={p.id} style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -342,10 +350,13 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
                           {fmtData(p.criado_em)} · {p.origem === 'admin' ? 'montado pelo admin' : 'montado pelo corretor'} · {p.fotos.length} fotos
                         </p>
                       </div>
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${st === 'postado' ? 'bg-emerald-100 text-emerald-800' : st === 'erro' || st === 'rejeitado' ? 'bg-red-100 text-red-700' : 'bg-violet-100 text-violet-700'}`}>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${st === 'postado' ? 'bg-emerald-100 text-emerald-800' : st === 'erro' || st === 'rejeitado' || st === 'travado' ? 'bg-red-100 text-red-700' : 'bg-violet-100 text-violet-700'}`}>
                         {STATUS[st] || st}
                       </span>
                     </div>
+                    {st === 'travado' && (
+                      <p className="mt-2 text-sm text-red-700">O gerador não terminou (o normal é 1 a 3 minutos). Toque em “Tentar de novo” ou cancele.</p>
+                    )}
                     {(p.erro_msg || p.criativo?.erro_msg) && st === 'erro' && (
                       <p className="mt-2 text-sm text-red-700">{p.erro_msg || p.criativo?.erro_msg}</p>
                     )}
@@ -394,6 +405,12 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
                         <button type="button" disabled={pendente} onClick={() => agir(aprovarEPostar, p.id, 'Publicando no Instagram. Em instantes aparece o link aqui.')}
                           className="rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50">
                           Aprovar e publicar
+                        </button>
+                      )}
+                      {podeRepetir && (
+                        <button type="button" disabled={pendente} onClick={() => agir(tentarDeNovo, p.id, 'Gerando de novo. Em 1 a 3 minutos aparece aqui.')}
+                          className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50">
+                          Tentar de novo
                         </button>
                       )}
                       {podeCancelar && (
