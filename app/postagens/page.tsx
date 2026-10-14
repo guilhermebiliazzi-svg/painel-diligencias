@@ -103,7 +103,7 @@ async function carregar(email: string, isAdmin: boolean, corretorParam: string |
 
     const { data: ped } = await sb
       .from('postagem_pedidos')
-      .select('id,listing_id,status,criativo_id,drive_folder_url,erro_msg,criado_em,criado_por,origem,fotos')
+      .select('id,listing_id,status,criativo_id,drive_folder_url,erro_msg,criado_em,atualizado_em,criado_por,origem,fotos')
       .eq('corretor_id', corretor.id)
       .order('criado_em', { ascending: false })
       .limit(12);
