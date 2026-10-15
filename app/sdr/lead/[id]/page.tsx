@@ -68,7 +68,7 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
 
   const [{ data: lead }, { data: msgs }, { data: cors }, { data: outros }, { data: etapasCap }, { data: imvs }] = await Promise.all([
     sb.from('sdr_leads').select('*').eq('id', id).maybeSingle(),
-    sb.from('sdr_mensagens').select('id,created_at,direcao,interlocutor,telefone,template,conteudo').eq('lead_id', id).order('created_at', { ascending: false }).limit(20),
+    sb.from('sdr_mensagens').select('id,created_at,direcao,interlocutor,telefone,template,conteudo').eq('lead_id', id).order('created_at', { ascending: false }).limit(40),
     sb.from('corretores_associados').select('phone,nome,apelido,foto_url').eq('status', 'ativo').not('phone', 'is', null).order('nome'),
     sb.from('sdr_leads').select('id,nome,imovel_anuncio_endereco,bairros').eq('status', 'aguardando_guilherme').neq('id', id).gte('updated_at', new Date(Date.now() - 7 * 864e5).toISOString()).order('cartao_enviado_em', { ascending: false }).limit(10),
     sb.from('sdr_captacao_etapas').select('etapa,quando,created_at').eq('lead_id', id).order('created_at'),
@@ -90,6 +90,45 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
   const corretores = (cors ?? []) as CorretorOpc[];
   const porPhone = new Map(corretores.map((c) => [c.phone, c]));
   const nomeCor = (p: string) => { const c = porPhone.get(p); return c ? (c.apelido?.trim() || c.nome.split(' ')[0]) : telFmt(p); };
+  // Conversa do cliente com a Eva: mensagens do cliente (mensagens_buffer, com horário) + respostas da Eva (n8n_chat_histories).
+  const desde = new Date(new Date(l.created_at).getTime() - 864e5).toISOString();
+  const [{ data: buf }, { data: hist }] = await Promise.all([
+    sb.from('mensagens_buffer').select('id,mensagem_texto,tipo_msg,created_at,processado_em').like('phone', '%' + fim8).gte('created_at', desde).order('created_at').limit(200),
+    sb.from('n8n_chat_histories').select('id,message').like('session_id', '%' + fim8).order('id', { ascending: false }).limit(120),
+  ]);
+  type Ev = { k: string; t: number; rotulo: string; texto: string };
+  const eventos: Ev[] = [];
+  const bufs = (buf ?? []) as { id: number; mensagem_texto: string | null; tipo_msg: string | null; created_at: string; processado_em: string | null }[];
+  for (const b of bufs) {
+    const tx = (b.mensagem_texto || '').trim() || (b.tipo_msg && b.tipo_msg !== 'text' ? '[' + b.tipo_msg + ']' : '');
+    if (tx) eventos.push({ k: 'b' + b.id, t: new Date(b.created_at).getTime(), rotulo: 'cliente → Eva', texto: tx });
+  }
+  // Respostas da Eva: o histórico não tem horário; cada resposta herda o horário de processamento da mensagem do cliente que a originou.
+  const enviadosCliente = new Set(((msgs ?? []) as Msg[]).filter((m) => m.interlocutor === 'cliente').map((m) => String(m.conteudo ?? '').trim()));
+  const limpa = (c: string) => c.replace(/^(\s*\[[^\]]*\]\s*)+/, '').trim();
+  let ptr = 0; let tRef: number | null = null; let seq = 0;
+  for (const h of [...((hist ?? []) as { id: number; message: { type?: string; content?: string } }[])].reverse()) {
+    const c = String(h.message?.content ?? '');
+    if (h.message?.type === 'human') {
+      const tx = limpa(c);
+      tRef = null; seq = 0;
+      for (let i = ptr; i < bufs.length; i++) {
+        const bt = (bufs[i].mensagem_texto || '').trim();
+        if (bt && tx && (tx.includes(bt) || bt.includes(tx))) { tRef = new Date(bufs[i].processado_em || bufs[i].created_at).getTime(); ptr = i + 1; break; }
+      }
+    } else if (h.message?.type === 'ai' && tRef != null) {
+      const tx = c.trim();
+      if (!tx || tx.startsWith('[') || enviadosCliente.has(tx)) continue;
+      eventos.push({ k: 'h' + h.id, t: tRef + 1000 * ++seq, rotulo: 'Eva → cliente', texto: tx });
+    }
+  }
+  for (const m of (msgs ?? []) as Msg[]) {
+    eventos.push({ k: 'm' + m.id, t: new Date(m.created_at).getTime(),
+      rotulo: (m.direcao === 'in' ? 'de ' : 'para ') + m.interlocutor + (m.interlocutor === 'corretor' && m.telefone ? ' ' + nomeCor(m.telefone) : ''),
+      texto: m.template === 'comando_fila' ? 'Fila: ' + String(m.conteudo ?? '').split(',').filter(Boolean).map(nomeCor).join(' → ') : String(m.conteudo ?? '') });
+  }
+  eventos.sort((a, b) => b.t - a.t);
+  const linhaTempo = eventos.slice(0, 40);
   const st = STATUS[l.status] ?? { t: l.status, c: 'bg-slate-100 text-slate-700' };
   const aberto = ['aguardando_guilherme', 'em_cascata'].includes(l.status) && !l.corretor_phone;
   // Encaminhar está sempre disponível; fora de "esperando você"/"ofertando" ele reabre o lead.
@@ -185,18 +224,15 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
         <section style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
           <h2 className="text-sm font-semibold text-slate-900">Últimos acontecimentos</h2>
           <ul className="mt-2 divide-y divide-slate-100">
-            {((msgs ?? []) as Msg[]).map((m) => (
-              <li key={m.id} className="py-2 text-sm">
-                <p className="text-xs text-slate-500">
-                  {fmt.format(new Date(m.created_at))} · {m.direcao === 'in' ? 'de' : 'para'} {m.interlocutor}
-                  {m.interlocutor === 'corretor' && m.telefone ? ' ' + nomeCor(m.telefone) : ''}
+            {linhaTempo.map((e) => (
+              <li key={e.k} className="py-2 text-sm">
+                <p className={'text-xs ' + (e.rotulo.includes('Eva') ? 'font-medium text-blue-700' : 'text-slate-500')}>
+                  {fmt.format(new Date(e.t))} · {e.rotulo}
                 </p>
-                <p className="mt-0.5 whitespace-pre-line break-words text-slate-800">
-                  {m.template === 'comando_fila' ? 'Fila: ' + String(m.conteudo ?? '').split(',').filter(Boolean).map(nomeCor).join(' → ') : String(m.conteudo ?? '').slice(0, 400)}
-                </p>
+                <p className="mt-0.5 whitespace-pre-line break-words text-slate-800">{e.texto.slice(0, 600)}</p>
               </li>
             ))}
-            {!(msgs ?? []).length && <li className="py-2 text-sm text-slate-400">Sem registros.</li>}
+            {!linhaTempo.length && <li className="py-2 text-sm text-slate-400">Sem registros.</li>}
           </ul>
         </section>
 
