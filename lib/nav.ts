@@ -17,7 +17,7 @@ const EMOJI: Record<string, string> = {
   sdr: '🔻', captacao: '🔎', estudo: '📝', representacao: '✍️', diligencias: '📄', postagens: '🖼️', vitrine: '📣',
   'cobranca-avulsa': '💳', 'notas-comissao': '🧾',
   cobrancas: '💳', repasse: '🔁', pagamentos: '🏦', locador: '🏢', notas: '🧾',
-  usuarios: '👥',
+  usuarios: '👥', treinamento: '🎓',
 };
 
 function item(
@@ -54,6 +54,7 @@ export function getNav(): ItemNav[] {
     item('locador', 'Portal do locador', 'Ver o portal de cada locador: recibos, comprovantes e envio por e-mail.', 'PAINEL_URL_LOCADOR', '/locador', 'locador', 'emerald', 'locador'),
     item('notas', 'Notas da administração', 'Emissão e conciliação de NFS-e da administração de locação.', 'PAINEL_URL_NOTAS', '/notas', 'notas', 'violet', 'notas'),
     // Sistema
+    item('treinamento', 'Treinamento de novatos', 'Trilha dos corretores novos com o Max: tarefas, quizzes, funil e conversas no WhatsApp.', 'PAINEL_URL_TREINAMENTO', '/treinamento', 'usuarios', 'emerald', 'treinamento'),
     item('usuarios', 'Usuários e perfis', 'Convidar pessoas e definir o perfil de acesso de cada uma.', 'PAINEL_URL_USUARIOS', '/usuarios', 'usuarios', 'slate', 'usuarios'),
   ];
 }
