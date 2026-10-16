@@ -25,6 +25,7 @@ const REGRAS: Regra[] = [
   { re: /^\/pagamentos(\/|$)/, perm: 'pagamentos', legacy: false },
   { re: /^\/api\/adm(\/|$)/, perm: 'any', legacy: true },
   { re: /^\/usuarios(\/|$)/, perm: 'usuarios', legacy: false },
+  { re: /^\/treinamento(\/|$)/, perm: 'treinamento', legacy: false },
   { re: /^\/sdr(\/|$)/, perm: 'sdr', legacy: false },
   { re: /^\/vitrine(\/|$)/, perm: 'vitrine', legacy: false },
   { re: /^\/captacao(\/|$)/, perm: 'captacao', legacy: false },
