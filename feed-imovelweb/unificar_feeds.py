@@ -183,6 +183,44 @@ def foto_de(bloco):
     return ""
 
 
+# 16/10/2026 (Guilherme): filtro so no XML do NONSTOP da REMAX Ville.
+# Imovel a venda abaixo de R$ 350 mil so e publicado se estiver a ate 10 km da
+# Rua Batataes, 148 (Jardim Paulista). Coordenada do numero 148 pelo
+# OpenStreetMap. Sem latitude/longitude no anuncio nao da para provar que esta
+# no raio, entao nao publica. iList e o Nonstop das outras sucursais nao passam
+# por aqui.
+FILTRO_RAIO_VILLE = {"sucursal": "ville", "preco_max": 350_000, "raio_km": 10.0,
+                     "lat": -23.5719290, "lon": -46.6555016}
+
+
+def distancia_km(lat1, lon1, lat2, lon2):
+    """Distancia em linha reta (haversine), em km."""
+    import math
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(h))
+
+
+def fora_do_raio_ville(bloco):
+    """True quando o anuncio do Nonstop da Ville NAO deve ser publicado."""
+    f = FILTRO_RAIO_VILLE
+    if operacao_de(bloco) != "VENDA":
+        return False
+    preco = preco_de(bloco)
+    if not (0 < preco < f["preco_max"]):
+        return False
+    try:
+        lat = float(campo("latitude", bloco).strip())
+        lon = float(campo("longitude", bloco).strip())
+    except ValueError:
+        return True
+    if not lat or not lon:
+        return True
+    return distancia_km(f["lat"], f["lon"], lat, lon) > f["raio_km"]
+
+
 def operacao_de(bloco):
     """Normaliza a operacao. As origens escrevem em espanhol e em caixas
     diferentes: Venta, VENTA, Alquiler."""
@@ -1406,6 +1444,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
     derrubados_fato = 0
     repetidos = 0
     tirados_gestor = 0
+    tirados_raio_ville = 0
 
     # Filtro de gestores (03/10): imovel do Nonstop de gestor que nao e REMAX
     # (nem Animacasa/Yuca) sai. Primeiro levanta os codigos e consulta os
@@ -1482,12 +1521,16 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
             if "#" in codigo and not fg.manter(codigo.split("#", 1)[1]):
                 tirados_gestor += 1    # gestor fora da REMAX: nao publica
                 continue
+            if nome == FILTRO_RAIO_VILLE["sucursal"] and fora_do_raio_ville(bloco):
+                tirados_raio_ville += 1   # Ville: < R$ 350 mil e fora de 10 km da Batataes 148
+                continue
             roleta[chave] = (DONO_ROLETA, bloco)
             traducao[chave] = codigo
     print(f"  Nonstop derrubado pelo codigo ... {derrubados_codigo}")
     print(f"  Nonstop derrubado pelo endereco . {derrubados_fato}")
     print(f"  Nonstop repetido entre sucursais  {repetidos}")
     print(f"  tirado por gestor nao REMAX ..... {tirados_gestor}  {fg.resumo()}")
+    print(f"  tirado Ville < 350 mil fora 10 km {tirados_raio_ville}")
     print(f"  roleta ............ {len(roleta)} imoveis")
 
     if conflitos_terceira_sucursal:
@@ -1593,6 +1636,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
             "derrubados_codigo": derrubados_codigo, "derrubados_fato": derrubados_fato,
             "conflitos_ilist": conflitos_ilist,
             "filtro_gestores": fg.resumo(),
+            "tirados_raio_ville": tirados_raio_ville,
             "conflitos_terceiro": conflitos_terceiro,
             "conflitos_terceira_sucursal": conflitos_terceira_sucursal,
             "repetidos": repetidos,
