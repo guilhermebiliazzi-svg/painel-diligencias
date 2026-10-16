@@ -24,6 +24,7 @@ export type Tela =
   | 'postagens'
   | 'vitrine'
   | 'locador'
+  | 'treinamento'
   | 'usuarios';
 
 export type Area = 'venda' | 'administracao' | 'sistema';
@@ -68,6 +69,8 @@ export const TELAS: DefTela[] = [
   // uma permissão cobre as Notas da administração e as Notas de comissão (Venda)
   { chave: 'notas', titulo: 'Notas da administração e de comissão', area: 'administracao', flag: 'pode_notas' },
   { chave: 'locador', titulo: 'Portal do locador', area: 'administracao', flag: null },
+  // Acompanhamento dos novatos na trilha do Max (IA de treinamento, WhatsApp 5192-8192).
+  { chave: 'treinamento', titulo: 'Treinamento de novatos', area: 'sistema', flag: null, soAdmin: true },
   { chave: 'usuarios', titulo: 'Usuários e perfis', area: 'sistema', flag: null, soAdmin: true },
 ];
 
