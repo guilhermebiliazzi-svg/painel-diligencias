@@ -787,7 +787,13 @@ DONO_ROLETA = "ROLETA"
 PREFIXO = {"ville": "VIL", "homemark": "HMK", "alcance": "ALC", DONO_ROLETA: "PAR"}
 
 SAIDA_UNIFICADA = os.environ.get("SAIDA_UNIFICADA", "remax_alianca.xml")
-VAGAS_UNIFICADAS = int(os.environ.get("VAGAS_UNIFICADAS", "6000"))
+# 16/10/2026: o ImovelWeb publica no maximo 6.125 anuncios nesta conta. O que
+# passa disso ele RECUSA — e nao recusa pelo fim do arquivo: mantem o que ja
+# estava no ar e barra os que entrariam agora. Assim 99 superdestaques novos e
+# 58 imoveis da carteira propria ficaram de fora (relatorio de carga 416202383).
+# Por isso o proprio gerador corta o excesso antes de publicar (ver
+# cortar_excesso). O nome antigo da variavel (VAGAS_UNIFICADAS) nao vale mais.
+VAGAS_UNIFICADAS = int(os.environ.get("LIMITE_ANUNCIOS", "6125"))
 # Os totais da conta unica sao a soma das cotas por sucursal (COTAS_SUCURSAL,
 # mais abaixo) — assim nao da para mexer numa e esquecer da outra.
 
@@ -1231,6 +1237,33 @@ def relatar_marcacao(marcado_por, roleta):
             "exclusivos_total": total_exclusivos, "exclusivos_pct": round(pct, 1)}
 
 
+def cortar_excesso(tudo, marcacao, limite):
+    """Deixa no maximo `limite` anuncios, tirando so SIMPLES do pool da roleta.
+
+    Superdestaque, destaque e carteira propria nunca saem. Entre os simples do
+    pool, saem primeiro os de menor preco (sem preco conta como zero). A ordem
+    do arquivo e preservada. Devolve (lista, quantos_sairam).
+    """
+    excesso = len(tudo) - limite
+    if limite <= 0 or excesso <= 0:
+        return tudo, 0
+    candidatos = []
+    for i, (_, (dono, bloco)) in enumerate(tudo):
+        if dono != DONO_ROLETA:
+            continue
+        m = RE_COD.search(bloco)
+        codigo = m.group(1).strip() if m else ""
+        if marcacao.get(codigo, "SIMPLE") != "SIMPLE":
+            continue
+        candidatos.append((preco_de(bloco), i))
+    candidatos.sort()
+    fora = {i for _, i in candidatos[:excesso]}
+    if len(fora) < excesso:
+        print(f"  ATENCAO: so {len(fora)} simples do pool para cortar; "
+              f"o arquivo ainda passa do limite em {excesso - len(fora)}")
+    return [x for i, x in enumerate(tudo) if i not in fora], len(fora)
+
+
 def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
     """Gera UM XML com os imoveis das tres sucursais, sem repetir imovel."""
     print(f"\n{'='*58}\nXML UNIFICADO — ALIANCA\n{'='*58}")
@@ -1481,6 +1514,12 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
     print(f"     do pool da roleta: {diag['do_pool']['HOME']} super, "
           f"{diag['do_pool']['DESTACADO']} destaque")
 
+    # ---- 3b. corta o excesso: o portal nao publica acima do limite da conta
+    tudo, cortados = cortar_excesso(tudo, marcacao, VAGAS_UNIFICADAS)
+    if cortados:
+        print(f"  CORTE: {cortados} anuncios simples do pool da roleta (os de menor "
+              f"preco) para caber no limite de {VAGAS_UNIFICADAS}")
+
     # ---- 4. escreve
     os.makedirs(DIR_SAIDA, exist_ok=True)
     destino = os.path.join(DIR_SAIDA, SAIDA_UNIFICADA)
@@ -1555,6 +1594,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
             "conflitos_terceira_sucursal": conflitos_terceira_sucursal,
             "repetidos": repetidos,
             "marcacao": marcacao_resumo,
+            "cortados_limite": cortados,
             "complementos": dict(complementos),
             "home": tipos.get("HOME", 0), "destacado": tipos.get("DESTACADO", 0),
             "home_manual": manual_h, "destacado_manual": manual_d,
