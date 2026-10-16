@@ -1237,19 +1237,22 @@ def relatar_marcacao(marcado_por, roleta):
             "exclusivos_total": total_exclusivos, "exclusivos_pct": round(pct, 1)}
 
 
-def cortar_excesso(tudo, marcacao, limite):
-    """Deixa no maximo `limite` anuncios, tirando so SIMPLES do pool da roleta.
+def cortar_excesso(tudo, marcacao, limite, chaves_nonstop):
+    """Deixa no maximo `limite` anuncios, tirando so SIMPLES vindos do NONSTOP.
 
-    Superdestaque, destaque e carteira propria nunca saem. Entre os simples do
-    pool, saem primeiro os de menor preco (sem preco conta como zero). A ordem
-    do arquivo e preservada. Devolve (lista, quantos_sairam).
+    Regra do Guilherme (16/10): imovel do XML do iList das tres unidades NUNCA
+    sai — nem quando o dono dele virou ROLETA (imovel de terceiro publicado no
+    iList). Por isso o criterio e a ORIGEM (chave no dicionario do Nonstop), e
+    nao o dono. Superdestaque e destaque tambem nunca saem. Entre os simples do
+    Nonstop, saem primeiro os de menor preco (sem preco conta como zero). A
+    ordem do arquivo e preservada. Devolve (lista, quantos_sairam).
     """
     excesso = len(tudo) - limite
     if limite <= 0 or excesso <= 0:
         return tudo, 0
     candidatos = []
-    for i, (_, (dono, bloco)) in enumerate(tudo):
-        if dono != DONO_ROLETA:
+    for i, (chave, (dono, bloco)) in enumerate(tudo):
+        if chave not in chaves_nonstop:
             continue
         m = RE_COD.search(bloco)
         codigo = m.group(1).strip() if m else ""
@@ -1515,9 +1518,9 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
           f"{diag['do_pool']['DESTACADO']} destaque")
 
     # ---- 3b. corta o excesso: o portal nao publica acima do limite da conta
-    tudo, cortados = cortar_excesso(tudo, marcacao, VAGAS_UNIFICADAS)
+    tudo, cortados = cortar_excesso(tudo, marcacao, VAGAS_UNIFICADAS, set(roleta))
     if cortados:
-        print(f"  CORTE: {cortados} anuncios simples do pool da roleta (os de menor "
+        print(f"  CORTE: {cortados} anuncios simples do Nonstop (os de menor "
               f"preco) para caber no limite de {VAGAS_UNIFICADAS}")
 
     # ---- 4. escreve
