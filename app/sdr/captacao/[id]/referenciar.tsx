@@ -5,7 +5,9 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { referenciarCaptacao, type Resultado } from '../../actions';
 
-export default function ReferenciarCaptacao({ id }: { id: string }) {
+export type SugestaoLoja = { unidade: string; whatsapp: string; email: string | null; regiao: string; rotulo: string };
+
+export default function ReferenciarCaptacao({ id, sugestoes = [] }: { id: string; sugestoes?: SugestaoLoja[] }) {
   const router = useRouter();
   const [aberto, setAberto] = useState(false);
   const [d, setD] = useState({ corretor_nome: '', corretor_whatsapp: '', unidade: '', email: '', regiao: '' });
@@ -29,6 +31,15 @@ export default function ReferenciarCaptacao({ id }: { id: string }) {
       </div>
       {aberto && (
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {sugestoes.length > 0 && (
+            <div className="flex flex-wrap gap-2 sm:col-span-2">
+              <span className="text-xs text-slate-500">Preencher com a loja mais próxima:</span>
+              {sugestoes.map((g) => (
+                <button key={g.unidade} type="button" onClick={() => setD((x) => ({ ...x, unidade: g.unidade, corretor_whatsapp: g.whatsapp, email: g.email ?? x.email, regiao: g.regiao }))}
+                  className="rounded-full border border-violet-200 px-2.5 py-0.5 text-xs text-violet-700 hover:bg-violet-50">{g.rotulo}</button>
+              ))}
+            </div>
+          )}
           <input className={campo} placeholder="Nome do corretor" value={d.corretor_nome} onChange={set('corretor_nome')} />
           <input className={campo} placeholder="WhatsApp (DDD + número)" inputMode="tel" value={d.corretor_whatsapp} onChange={set('corretor_whatsapp')} />
           <input className={campo} placeholder="Unidade REMAX" value={d.unidade} onChange={set('unidade')} />

@@ -7,6 +7,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { leadDaCaptacao } from '@/app/sdr/lead-captacao';
 import Decisao, { type CorretorOpc } from '../../decisao';
 import ReferenciarCaptacao from './referenciar';
+import { lojasProximas } from '@/lib/lojas-remax';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Captação — SDR REMAX Ville' };
@@ -68,6 +69,10 @@ export default async function CaptacaoSdr({ params }: { params: Promise<{ id: st
     eventos.sort((x, y) => y.t - x.t);
   }
   const resumo = String((c.payload as { resumo?: string } | null)?.resumo ?? '').trim();
+  // Lojas REMAX mais próximas do imóvel (só fora da capital).
+  const enderecoImovel = [c.endereco, c.bairro].filter(Boolean).join(', ');
+  const prox = enderecoImovel ? await lojasProximas(enderecoImovel) : null;
+  const lojas = prox && !prox.capital ? prox.lojas : [];
 
   return (
     <main style={{ backgroundColor: '#f8fafc' }} className="min-h-screen px-4 py-6">
@@ -113,7 +118,22 @@ export default async function CaptacaoSdr({ params }: { params: Promise<{ id: st
           <>
             <Decisao modo="captacao" id={c.id} corretores={(cors ?? []) as CorretorOpc[]} filaAtual={[]}
               podeOfertar podeSegurar={false} podeDescartar emCascata={false} />
-            <ReferenciarCaptacao id={c.id} />
+            {lojas.length > 0 && (
+              <section style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
+                <h2 className="text-sm font-semibold text-slate-900">Lojas REMAX mais próximas</h2>
+                <p className="text-xs text-slate-500">Imóvel em {prox?.cidade}{prox?.uf ? ' (' + prox.uf + ')' : ''}, fora da capital. Fonte: site da REMAX Brasil.</p>
+                <ul className="mt-2 divide-y divide-slate-100">
+                  {lojas.map((l) => (
+                    <li key={l.id} className="py-2 text-sm">
+                      <p className="font-medium text-slate-900">{l.nome} · {l.km.toLocaleString('pt-BR')} km</p>
+                      <p className="text-slate-600">{l.endereco} — {l.cidade}/{l.uf}</p>
+                      <p className="text-slate-600">{l.telefone || 'sem telefone'}{l.email ? ' · ' + l.email : ''} · {l.anuncios} anúncios</p>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            <ReferenciarCaptacao id={c.id} sugestoes={lojas.map((l) => ({ unidade: l.nome, whatsapp: l.telefone.replace(/\D/g, ''), email: l.email, regiao: [prox?.cidade, prox?.uf].filter(Boolean).join(' / '), rotulo: l.nome + ' (' + l.km.toLocaleString('pt-BR') + ' km)' }))} />
           </>
         ) : (
           <p className="rounded-xl bg-slate-100 px-4 py-3 text-sm text-slate-600">Esta captação não tem telefone (foi só um clique no WhatsApp).</p>
