@@ -29,6 +29,45 @@ export default async function CaptacaoSdr({ params }: { params: Promise<{ id: st
   }
   const { data: cors } = await sb.from('corretores_associados').select('phone,nome,apelido,foto_url').eq('status', 'ativo').not('phone', 'is', null).order('nome');
   const quer = /^alug/i.test(String(c.intencao ?? '')) ? 'Alugar' : 'Vender';
+  // Conversa do proprietário com a Eva (17/10): mensagens do cliente (mensagens_buffer) + respostas da Eva
+  // (n8n_chat_histories) + avisos do sistema para este telefone (sdr_mensagens), em ordem de horário.
+  type Ev = { k: string; t: number; rotulo: string; texto: string };
+  const eventos: Ev[] = [];
+  const fim8 = tel.slice(-8);
+  if (fim8.length === 8) {
+    const desde = new Date(new Date(c.criado_em).getTime() - 864e5).toISOString();
+    const [{ data: buf }, { data: hist }, { data: sm }] = await Promise.all([
+      sb.from('mensagens_buffer').select('id,mensagem_texto,tipo_msg,created_at,processado_em').like('phone', '%' + fim8).gte('created_at', desde).order('created_at').limit(200),
+      sb.from('n8n_chat_histories').select('id,message').like('session_id', '%' + fim8).order('id', { ascending: false }).limit(120),
+      sb.from('sdr_mensagens').select('id,created_at,direcao,interlocutor,conteudo').like('telefone', '%' + fim8).gte('created_at', desde).order('created_at', { ascending: false }).limit(40),
+    ]);
+    const bufs = (buf ?? []) as { id: number; mensagem_texto: string | null; tipo_msg: string | null; created_at: string; processado_em: string | null }[];
+    for (const b of bufs) {
+      const tx = (b.mensagem_texto || '').trim() || (b.tipo_msg && b.tipo_msg !== 'text' ? '[' + b.tipo_msg + ']' : '');
+      if (tx) eventos.push({ k: 'b' + b.id, t: new Date(b.created_at).getTime(), rotulo: 'cliente → Eva', texto: tx });
+    }
+    const msgs = (sm ?? []) as { id: string; created_at: string; direcao: string; interlocutor: string; conteudo: string | null }[];
+    const enviados = new Set(msgs.map((m) => String(m.conteudo ?? '').trim()));
+    const limpa = (x: string) => x.replace(/^(\s*\[[^\]]*\]\s*)+/, '').trim();
+    let ptr = 0; let tRef: number | null = null; let seq = 0;
+    for (const h of [...((hist ?? []) as { id: number; message: { type?: string; content?: string } }[])].reverse()) {
+      const x = String(h.message?.content ?? '');
+      if (h.message?.type === 'human') {
+        const tx = limpa(x); tRef = null; seq = 0;
+        for (let i = ptr; i < bufs.length; i++) {
+          const bt = (bufs[i].mensagem_texto || '').trim();
+          if (bt && tx && (tx.includes(bt) || bt.includes(tx))) { tRef = new Date(bufs[i].processado_em || bufs[i].created_at).getTime(); ptr = i + 1; break; }
+        }
+      } else if (h.message?.type === 'ai' && tRef != null) {
+        const tx = x.trim();
+        if (!tx || tx.startsWith('[') || enviados.has(tx)) continue;
+        eventos.push({ k: 'h' + h.id, t: tRef + 1000 * ++seq, rotulo: 'Eva → cliente', texto: tx });
+      }
+    }
+    for (const m of msgs) eventos.push({ k: 'm' + m.id, t: new Date(m.created_at).getTime(), rotulo: (m.direcao === 'in' ? 'de ' : 'para ') + m.interlocutor, texto: String(m.conteudo ?? '') });
+    eventos.sort((x, y) => y.t - x.t);
+  }
+  const resumo = String((c.payload as { resumo?: string } | null)?.resumo ?? '').trim();
 
   return (
     <main style={{ backgroundColor: '#f8fafc' }} className="min-h-screen px-4 py-6">
@@ -50,8 +89,22 @@ export default async function CaptacaoSdr({ params }: { params: Promise<{ id: st
             <div className="flex gap-3"><dt className="w-24 text-slate-500">Quer</dt><dd className="text-slate-900">{[quer, c.tipo, c.bairro].filter(Boolean).join(' · ')}</dd></div>
             {c.endereco && <div className="flex gap-3"><dt className="w-24 text-slate-500">Endereço</dt><dd className="text-slate-900">{c.endereco}</dd></div>}
             <div className="flex gap-3"><dt className="w-24 text-slate-500">Entrou</dt><dd className="text-slate-900">{fmt.format(new Date(c.criado_em))}</dd></div>
+            {resumo && <div className="flex gap-3"><dt className="w-24 shrink-0 text-slate-500">Resumo</dt><dd className="min-w-0 whitespace-pre-line break-words text-slate-900">{resumo}</dd></div>}
           </dl>
         </header>
+
+        <section style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
+          <h2 className="text-sm font-semibold text-slate-900">Conversa</h2>
+          <ul className="mt-2 divide-y divide-slate-100">
+            {eventos.slice(0, 40).map((e) => (
+              <li key={e.k} className="py-2 text-sm">
+                <p className={'text-xs ' + (e.rotulo.includes('Eva') ? 'font-medium text-blue-700' : 'text-slate-500')}>{fmt.format(new Date(e.t))} · {e.rotulo}</p>
+                <p className="mt-0.5 whitespace-pre-line break-words text-slate-800">{e.texto.slice(0, 600)}</p>
+              </li>
+            ))}
+            {!eventos.length && <li className="py-2 text-sm text-slate-400">Sem conversa registrada.</li>}
+          </ul>
+        </section>
         {c.referenciado_em ? (
           <p className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-800">Referenciada em {fmt.format(new Date(c.referenciado_em))}. O aceite e o e-mail seguem pela Eva; acompanhe em Referenciamentos.</p>
         ) : c.descartado_em ? (
