@@ -70,7 +70,14 @@ export default async function CaptacaoSdr({ params }: { params: Promise<{ id: st
   }
   const resumo = String((c.payload as { resumo?: string } | null)?.resumo ?? '').trim();
   // Lojas REMAX mais próximas do imóvel (só fora da capital).
-  const enderecoImovel = [c.endereco, c.bairro].filter(Boolean).join(', ');
+  // Endereço: o desta captação ou, se vazio, o que a Eva registrou depois (resumo do WhatsApp) para o mesmo telefone.
+  let endBase = { endereco: c.endereco as string | null, bairro: c.bairro as string | null };
+  if (!endBase.endereco && fim8.length === 8) {
+    const { data: outra } = await sb.from('captacao_leads').select('endereco,bairro').like('telefone', '%' + fim8).not('endereco', 'is', null)
+      .gte('criado_em', new Date(new Date(c.criado_em).getTime() - 30 * 864e5).toISOString()).order('criado_em', { ascending: false }).limit(1).maybeSingle();
+    if (outra) endBase = { endereco: outra.endereco, bairro: outra.bairro };
+  }
+  const enderecoImovel = [endBase.endereco, endBase.bairro && endBase.bairro !== 'Outro' ? endBase.bairro : ''].filter(Boolean).join(', ');
   const prox = enderecoImovel ? await lojasProximas(enderecoImovel) : null;
   const lojas = prox && !prox.capital ? prox.lojas : [];
 
@@ -92,7 +99,7 @@ export default async function CaptacaoSdr({ params }: { params: Promise<{ id: st
           <dl className="mt-3 space-y-1.5 text-sm">
             {tel && <div className="flex gap-3"><dt className="w-24 text-slate-500">Telefone</dt><dd><a href={'https://wa.me/' + tel55} target="_blank" className="text-blue-700 underline">{telFmt(tel55)}</a></dd></div>}
             <div className="flex gap-3"><dt className="w-24 text-slate-500">Quer</dt><dd className="text-slate-900">{[quer, c.tipo, c.bairro].filter(Boolean).join(' · ')}</dd></div>
-            {c.endereco && <div className="flex gap-3"><dt className="w-24 text-slate-500">Endereço</dt><dd className="text-slate-900">{c.endereco}</dd></div>}
+            {endBase.endereco && <div className="flex gap-3"><dt className="w-24 text-slate-500">Endereço</dt><dd className="text-slate-900">{endBase.endereco}{endBase.bairro && endBase.bairro !== 'Outro' ? ' · ' + endBase.bairro : ''}</dd></div>}
             <div className="flex gap-3"><dt className="w-24 text-slate-500">Entrou</dt><dd className="text-slate-900">{fmt.format(new Date(c.criado_em))}</dd></div>
             {resumo && <div className="flex gap-3"><dt className="w-24 shrink-0 text-slate-500">Resumo</dt><dd className="min-w-0 whitespace-pre-line break-words text-slate-900">{resumo}</dd></div>}
           </dl>
