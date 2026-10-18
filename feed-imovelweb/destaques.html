@@ -219,7 +219,7 @@
   var partes = location.pathname.split('/').filter(Boolean);
   var sucursal = partes[partes.length - 1] || '';
   var sb = null, sessao = null;
-  var itens = [], caros = [], linhas = [], cotaH = 0, cotaD = 0, sujo = false;
+  var itens = [], caros = [], linhas = [], cotaH = 0, cotaD = 0, sujo = false, porCodigo = {};
   var manual = {};   // codigo -> HOME | DESTACADO | SIMPLE (escolha de gente)
   var efetivo = {};  // codigo -> o que vai sair no XML
   var totais = {HOME:0, DESTACADO:0, SIMPLE:0, escolhaH:0, escolhaD:0, escolhaS:0};
@@ -302,11 +302,15 @@
   // Reproduz aqui a mesma decisao que o servidor toma ao gerar: primeiro o
   // que foi escolhido nesta tela, depois as vagas que sobram vao para os
   // imoveis de maior valor, pulando os marcados como simples de proposito.
+  // 18/10/2026: superdestaque so para imovel da carteira propria (iList da
+  // sucursal), ate a cota (100). O pool da roleta so pode ser destaque.
+  function carteira(it){ return it && it.d === sucursal; }
+
   function calcular(){
     efetivo = {};
     var nh = 0, nd = 0;
     itens.forEach(function(it){
-      if (manual[it.c] === 'HOME' && nh < cotaH) { efetivo[it.c]='HOME'; nh++; }
+      if (manual[it.c] === 'HOME' && carteira(it) && nh < cotaH) { efetivo[it.c]='HOME'; nh++; }
     });
     itens.forEach(function(it){
       if (manual[it.c] === 'DESTACADO' && nd < cotaD) { efetivo[it.c]='DESTACADO'; nd++; }
@@ -314,11 +318,15 @@
     itens.forEach(function(it){
       if (manual[it.c] === 'SIMPLE') { efetivo[it.c]='SIMPLE'; }
     });
-    for (var i = 0; i < caros.length && (nh < cotaH || nd < cotaD); i++) {
-      var c = caros[i].c;
-      if (efetivo[c]) continue;
-      if (nh < cotaH) { efetivo[c]='HOME'; nh++; }
-      else if (nd < cotaD) { efetivo[c]='DESTACADO'; nd++; }
+    // vagas que sobram: super pelos mais caros DA CARTEIRA; destaque pelos
+    // mais caros de toda a lista
+    for (var i = 0; i < caros.length && nh < cotaH; i++) {
+      if (!carteira(caros[i]) || efetivo[caros[i].c]) continue;
+      efetivo[caros[i].c]='HOME'; nh++;
+    }
+    for (var j = 0; j < caros.length && nd < cotaD; j++) {
+      if (efetivo[caros[j].c]) continue;
+      efetivo[caros[j].c]='DESTACADO'; nd++;
     }
     var eh = 0, ed = 0, es = 0;
     for (var c in manual) {
@@ -401,6 +409,11 @@
     if (manual[codigo] === tipo) {
       delete manual[codigo];
     } else {
+      if (tipo === 'HOME' && !carteira(porCodigo[codigo])) {
+        recado('Superdestaque só para imóvel da carteira própria (iList da sua ' +
+               'unidade). Imóvel do Nonstop pode ser destaque.', 'err');
+        return;
+      }
       if (tipo !== 'SIMPLE') {
         // Conta o mesmo que o contador mostra: so as escolhas cujo imovel
         // ainda esta no catalogo. Contar as chaves de `manual` incluia as
@@ -567,7 +580,8 @@
         '<td class="preco">' + (it.p ? moeda.format(it.p) : '—') +
           (it.o === 'ALUGUEL' ? '<small>por mês</small>' : '') + '</td>' +
         '<td class="acoes">' +
-          '<button class="' + cls('HOME','super') + '" data-c="' + cod + '" data-t="HOME"' + trava + '>Super</button>' +
+          '<button class="' + cls('HOME','super') + '" data-c="' + cod + '" data-t="HOME"' +
+            (carteira(it) ? trava : ' disabled title="Superdestaque só para imóvel da carteira própria"') + '>Super</button>' +
           '<button class="' + cls('DESTACADO','dest') + '" data-c="' + cod + '" data-t="DESTACADO"' + trava + '>Destaque</button>' +
           '<button class="' + cls('SIMPLE','simp') + '" data-c="' + cod + '" data-t="SIMPLE">Simples</button>' +
         '</td></tr>';
@@ -683,6 +697,15 @@
           return;
         }
         itens = d.catalogo.itens;
+        porCodigo = {};
+        itens.forEach(function(x){ porCodigo[x.c] = x; });
+        // 18/10/2026: super escolhido fora da carteira deixa de valer
+        var tirados = 0, naCarteira = 0;
+        itens.forEach(function(x){
+          if (manual[x.c] !== 'HOME') return;
+          if (!carteira(x)) { delete manual[x.c]; tirados++; } else naCarteira++;
+        });
+        if (tirados) sujo = true;
         // usada pelo preenchimento automatico a cada clique: ordenar uma vez
         caros = itens.slice().sort(function(a, b){ return (b.p || 0) - (a.p || 0); });
         var i = 0, n = 0;
@@ -691,7 +714,13 @@
           ? new Date(d.catalogo.gerado_em).toLocaleString('pt-BR') : '—';
         $('subtitulo').textContent = num(itens.length) + ' imóveis · ' +
           num(i) + ' do iList e ' + num(n) + ' do Nonstop · lista gerada em ' + quando;
-        aviso('As cotas já saem cheias: o que você não escolher é preenchido pelos ' +
+        aviso('<b>Superdestaque: até ' + cotaH + ', só imóveis da carteira própria</b> ' +
+              '(iList da sua unidade). Imóvel do Nonstop pode ser destaque, não super.' +
+              (tirados ? '<br><b>' + tirados + ' superdestaque' + (tirados > 1 ? 's' : '') +
+                ' do Nonstop saíram da sua escolha</b> por essa regra — clique em Salvar para gravar.' : '') +
+              (naCarteira > cotaH ? '<br><b>Você tinha ' + naCarteira + ' superdestaques na carteira;</b> ' +
+                'valem os ' + cotaH + ' primeiros. Tire os que sobram e salve.' : '') +
+              '<br>As cotas já saem cheias: o que você não escolher é preenchido pelos ' +
               'imóveis de maior valor, para nenhuma vaga ficar ociosa. Nos contadores, ' +
               'o número grande é o que <b>você</b> escolheu e o cinza é o que o sistema ' +
               'completou. Marcar um imóvel como <b>Simples</b> tira ele desse ' +
@@ -723,7 +752,13 @@
     $('salvar').disabled = true;
     recado('salvando…');
     var corpo = {HOME:[], DESTACADO:[], SIMPLE:[]};
-    itens.forEach(function(it){ if (manual[it.c]) corpo[manual[it.c]].push(it.c); });
+    itens.forEach(function(it){
+      var m = manual[it.c];
+      if (!m) return;
+      // super que nao coube (fora da carteira ou alem da cota) nao vai
+      if (m === 'HOME' && efetivo[it.c] !== 'HOME') return;
+      corpo[m].push(it.c);
+    });
     pedir('/api/destaques/' + encodeURIComponent(sucursal), {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
