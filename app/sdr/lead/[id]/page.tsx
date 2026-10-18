@@ -6,6 +6,7 @@ import { exigirSdrGestao } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import Decisao, { type CorretorOpc, type ImovelRef } from '../../decisao';
 import Resgatar from './resgatar';
+import MensagemEva, { type DestinoMsg } from './mensagem';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Lead — SDR REMAX Ville' };
@@ -129,6 +130,27 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
   }
   eventos.sort((a, b) => b.t - a.t);
   const linhaTempo = eventos.slice(0, 40);
+  // Enviar mensagem pela Eva (18/10): cliente, corretor Ville do lead e corretores parceiros dos imóveis.
+  const { data: parcs } = await sb.from('sdr_imoveis_lead').select('id,ref,parceiro_nome,parceiro_telefone,parceiro_origem').eq('lead_id', id).not('parceiro_telefone', 'is', null).order('created_at', { ascending: false });
+  const destinosMsg: DestinoMsg[] = [{ chave: 'cliente', destino: 'cliente', rotulo: 'Cliente', detalhe: (l.nome ? l.nome.split(' ')[0] + ' · ' : '') + telFmt(l.telefone), janela: false }];
+  if (l.corretor_phone) destinosMsg.push({ chave: 'corretor', destino: 'corretor', rotulo: 'Corretor Ville', detalhe: nomeCor(l.corretor_phone) + ' · ' + telFmt(l.corretor_phone), janela: false });
+  const vistosMsg = new Set<string>();
+  for (const p of (parcs ?? []) as { id: string; ref: string | null; parceiro_nome: string | null; parceiro_telefone: string; parceiro_origem: string | null }[]) {
+    const tel = p.parceiro_telefone.replace(/\D/g, '');
+    if (['ville', 'proprietario', 'pulado'].includes(p.parceiro_origem ?? '') || tel.length < 10 || vistosMsg.has(tel.slice(-8))) continue;
+    vistosMsg.add(tel.slice(-8));
+    destinosMsg.push({ chave: 'p' + p.id, destino: 'parceiro', imovelId: p.id, rotulo: 'Parceiro' + (p.ref ? ' · ' + p.ref : ''), detalhe: (p.parceiro_nome?.trim() || 'Corretor') + ' · ' + telFmt(tel), janela: false });
+  }
+  const desde23 = new Date(Date.now() - 23 * 3600e3).toISOString();
+  await Promise.all(destinosMsg.map(async (dm) => {
+    const tel = dm.destino === 'cliente' ? l.telefone : dm.destino === 'corretor' ? String(l.corretor_phone) : dm.detalhe;
+    const f8 = tel.replace(/\D/g, '').slice(-8);
+    const [{ count: a }, { count: b }] = await Promise.all([
+      sb.from('mensagens_buffer').select('id', { count: 'exact', head: true }).like('phone', '%' + f8).gte('created_at', desde23),
+      sb.from('sdr_mensagens').select('id', { count: 'exact', head: true }).like('telefone', '%' + f8).eq('direcao', 'in').gte('created_at', desde23),
+    ]);
+    dm.janela = (a ?? 0) + (b ?? 0) > 0;
+  }));
   const st = STATUS[l.status] ?? { t: l.status, c: 'bg-slate-100 text-slate-700' };
   const aberto = ['aguardando_guilherme', 'em_cascata'].includes(l.status) && !l.corretor_phone;
   // Encaminhar está sempre disponível; fora de "esperando você"/"ofertando" ele reabre o lead.
@@ -220,6 +242,8 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
             {l.corretor_phone ? ', sai do corretor atual' : ''} e a oferta começa pelo primeiro da fila.
           </p>
         )}
+
+        <MensagemEva leadId={l.id} destinos={destinosMsg} />
 
         <section style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
           <h2 className="text-sm font-semibold text-slate-900">Últimos acontecimentos</h2>
