@@ -26,6 +26,7 @@ export function GerarCCV({ diligenciaId }: { diligenciaId: string }) {
   const [gerando, setGerando] = useState(false);
   const [ccv, setCcv] = useState<CcvStatus>(null);
   const [parecerAprovado, setParecerAprovado] = useState(false);
+  const [abrindoDocs, setAbrindoDocs] = useState(false);
   const ccvIdInicial = useRef<string | null>(null);
 
   // Gate: o botão só habilita quando o parecer da diligência está 'aprovado'.
@@ -87,6 +88,28 @@ export function GerarCCV({ diligenciaId }: { diligenciaId: string }) {
     });
   }
 
+  // "Abrir no Google Docs": o painel gera o .docx, o n8n salva na pasta da diligência
+  // no Drive (guilhermebiliazzi@remax.com.br) já como Google Docs e devolve o link.
+  // A aba abre antes do fetch para o navegador não bloquear como pop-up.
+  async function abrirNoDocs() {
+    setErro(null);
+    setAbrindoDocs(true);
+    const aba = window.open('', '_blank');
+    if (aba) aba.document.write('<p style="font-family:sans-serif;padding:24px">Preparando o CCV no Google Docs…</p>');
+    try {
+      const r = await fetch(`/api/adm/ccv-gdocs/${diligenciaId}`, { method: 'POST' });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.url) throw new Error(data.error || `erro ${r.status}`);
+      if (aba) aba.location.href = data.url;
+      else window.location.href = data.url;
+    } catch (e) {
+      if (aba) aba.close();
+      setErro(e instanceof Error ? e.message : 'erro ao abrir no Google Docs');
+    } finally {
+      setAbrindoDocs(false);
+    }
+  }
+
   const ineditavel = pending || gerando;
   // Sem gate de parecer: gerar CCV é prerrogativa do admin.
   const desabilitado = ineditavel;
@@ -112,6 +135,21 @@ export function GerarCCV({ diligenciaId }: { diligenciaId: string }) {
         >
           Baixar .docx
         </a>
+      )}
+      {ccv && (
+        <button
+          type="button"
+          onClick={abrirNoDocs}
+          disabled={abrindoDocs}
+          className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+            abrindoDocs
+              ? 'cursor-wait border-slate-200 bg-slate-100 text-slate-400'
+              : 'border-sky-300 bg-white text-sky-700 hover:bg-sky-50'
+          }`}
+          title="Cria uma cópia do CCV em Google Docs na pasta da diligência no Drive e abre para editar"
+        >
+          {abrindoDocs ? 'Abrindo…' : 'Abrir no Docs'}
+        </button>
       )}
       <button
         type="button"
