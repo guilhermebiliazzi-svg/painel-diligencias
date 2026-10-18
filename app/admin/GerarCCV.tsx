@@ -10,6 +10,7 @@
 // não existe, gera sem essa seção. O status do parecer é apenas informado no
 // tooltip — nunca bloqueia.
 
+import { btn } from './botoes';
 import { useState, useEffect, useRef, useTransition, useCallback } from 'react';
 import { gerarCCV } from './actions';
 
@@ -115,13 +116,13 @@ export function GerarCCV({ diligenciaId }: { diligenciaId: string }) {
   const desabilitado = ineditavel;
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       {ccv && (
         <a
           href={`/api/ccv-html/${diligenciaId}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+          className={btn('verde')}
           title="Abrir CCV"
         >
           Ver CCV{ccv.status === 'aprovado' ? '' : ' (rascunho)'}
@@ -130,7 +131,7 @@ export function GerarCCV({ diligenciaId }: { diligenciaId: string }) {
       {ccv && (
         <a
           href={`/api/ccv-docx/${diligenciaId}`}
-          className="rounded-md border border-sky-300 bg-white px-3 py-1.5 text-xs font-medium text-sky-700 hover:bg-sky-50"
+          className={btn('verde')}
           title="Baixar o CCV em Word (.docx)"
         >
           Baixar .docx
@@ -141,32 +142,24 @@ export function GerarCCV({ diligenciaId }: { diligenciaId: string }) {
           type="button"
           onClick={abrirNoDocs}
           disabled={abrindoDocs}
-          className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
-            abrindoDocs
-              ? 'cursor-wait border-slate-200 bg-slate-100 text-slate-400'
-              : 'border-sky-300 bg-white text-sky-700 hover:bg-sky-50'
-          }`}
+          className={btn(abrindoDocs ? 'inativo' : 'verde')}
           title="Cria uma cópia do CCV em Google Docs na pasta da diligência no Drive e abre para editar"
         >
-          {abrindoDocs ? 'Abrindo…' : 'Abrir no Docs'}
+          {abrindoDocs ? 'Abrindo…' : 'Abrir no Google Docs'}
         </button>
       )}
       <button
         type="button"
         onClick={disparar}
         disabled={desabilitado}
-        className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
-          desabilitado
-            ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
-            : 'border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50'
-        }`}
+        className={btn(desabilitado ? 'inativo' : 'verde')}
         title={
           parecerAprovado
             ? 'Gera o CCV a partir do parecer liberado e dos dados do negócio'
             : 'Gera o CCV com os dados do negócio. O parecer ainda não foi liberado, então a minuta sai sem as pendências/situação registral dele.'
         }
       >
-        {gerando ? 'Gerando…' : ccv ? '↻ Gerar CCV de novo' : '📄 Gerar CCV'}
+        {gerando ? 'Gerando…' : ccv ? 'Gerar CCV de novo' : 'Gerar CCV'}
       </button>
       {erro && <span className="text-xs text-rose-600">{erro}</span>}
     </div>
