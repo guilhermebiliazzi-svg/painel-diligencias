@@ -73,3 +73,9 @@ export function prazo(data: string): string {
 export function atrasada(t: { status: string; data_prevista: string }, hoje: string): boolean {
   return (t.status === 'pendente' || t.status === 'reprovada') && prazo(t.data_prevista) < hoje;
 }
+
+// Início da janela de 24h do WhatsApp (com folga de 10 min): quem escreveu depois
+// disso pode receber texto livre; antes, só pelo modelo aprovado.
+export function inicioJanela(): string {
+  return new Date(Date.now() - (23 * 60 + 50) * 60 * 1000).toISOString();
+}
