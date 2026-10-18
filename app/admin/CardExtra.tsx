@@ -26,7 +26,9 @@ type CardExtraNovoProps = {
  * Duas origens para o arquivo:
  *  - "Do computador" (padrão): cria o card e já envia o arquivo escolhido para a
  *    pasta do Drive do grupo (mesmo caminho do botão "Enviar arquivo" do card);
- *  - "Já está no Drive": escolhe um PDF que já está na pasta do grupo.
+ *  - "Já está no Drive": escolhe um PDF que já está na pasta do grupo;
+ *  - "Enviar depois": cria o card pendente, aguardando o documento (o arquivo vai
+ *    depois pelo botão "Enviar arquivo" do próprio card).
  */
 export function CardExtraNovo({
   diligencia_id,
@@ -37,7 +39,7 @@ export function CardExtraNovo({
 }: CardExtraNovoProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [origem, setOrigem] = useState<'computador' | 'drive'>('computador');
+  const [origem, setOrigem] = useState<'computador' | 'drive' | 'pendente'>('computador');
   const [enviando, setEnviando] = useState<'' | 'criando' | 'subindo' | 'drive'>('');
   const [pending, startTransition] = useTransition();
   const [erro, setErro] = useState<string | null>(null);
@@ -110,9 +112,24 @@ export function CardExtraNovo({
     });
   }
 
+  function soCard(fd: FormData) {
+    preencher(fd);
+    fd.delete('drive_file_id');
+    fd.set('url_pdf', '');
+    startTransition(async () => {
+      try {
+        await criarCertidaoExtra(fd);
+        fechar();
+      } catch (e) {
+        setErro(e instanceof Error ? e.message : 'erro desconhecido');
+      }
+    });
+  }
+
   function submeter(fd: FormData) {
     setErro(null);
     if (origem === 'computador') void doComputador(fd);
+    else if (origem === 'pendente') soCard(fd);
     else doDrive(fd);
   }
 
@@ -120,8 +137,9 @@ export function CardExtraNovo({
     enviando === 'criando' ? 'Criando card…'
       : enviando === 'subindo' ? 'Enviando arquivo…'
         : enviando === 'drive' ? 'Salvando no Drive…'
-          : pending ? 'Salvando…' : 'Adicionar';
-  const podeEnviar = origem === 'computador' ? !!arquivo : pdfsDisponiveis.length > 0;
+          : pending ? 'Salvando…' : origem === 'pendente' ? 'Criar card' : 'Adicionar';
+  const podeEnviar =
+    origem === 'computador' ? !!arquivo : origem === 'pendente' ? true : pdfsDisponiveis.length > 0;
 
   const abaCls = (ativa: boolean) =>
     `flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition ${
@@ -175,6 +193,9 @@ export function CardExtraNovo({
               <button type="button" disabled={ocupado} onClick={() => { setOrigem('drive'); setErro(null); }} className={abaCls(origem === 'drive')}>
                 Já está no Drive
               </button>
+              <button type="button" disabled={ocupado} onClick={() => { setOrigem('pendente'); setErro(null); }} className={abaCls(origem === 'pendente')}>
+                Enviar depois
+              </button>
             </div>
 
             <form ref={formRef} action={submeter} className="space-y-3">
@@ -193,7 +214,12 @@ export function CardExtraNovo({
                 />
               </div>
 
-              {origem === 'computador' ? (
+              {origem === 'pendente' ? (
+                <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
+                  O card é criado como <b>pendente</b>, aguardando o documento. Quando tiver o arquivo,
+                  use o botão &quot;Enviar arquivo&quot; do próprio card.
+                </p>
+              ) : origem === 'computador' ? (
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-700">
                     Arquivo
