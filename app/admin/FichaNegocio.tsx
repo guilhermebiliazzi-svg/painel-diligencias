@@ -6,6 +6,7 @@
 // VENDEDORA com rateio percentual (vários vendedores/herdeiros).
 // Salva em diligencias.dados_completos.negocio — a fonte dos FATOS do CCV.
 
+import { btn } from './botoes';
 import { useState, useTransition } from 'react';
 import { carregarNegocio, salvarNegocio } from './actions';
 
@@ -217,10 +218,10 @@ export function FichaNegocio({ diligenciaId }: { diligenciaId: string }) {
       <button
         type="button"
         onClick={abrir}
-        className="rounded-md border border-violet-300 bg-white px-3 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-50"
+        className={btn('neutro')}
         title="Preço, parcelas, comissão (pagador, alínea e split) e contas de crédito da parte vendedora — fonte dos FATOS do CCV"
       >
-        💼 Dados do negócio
+        Dados do negócio
       </button>
 
       {open && (
