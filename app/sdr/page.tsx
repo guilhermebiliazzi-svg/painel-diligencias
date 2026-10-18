@@ -45,7 +45,9 @@ type Lead = {
   corretor_phone: string | null;
 };
 
-type Etapa = { rotulo: string; n: number };
+// Itens: quem está na etapa (18/10) — clicar na etapa abre a lista com link para cada lead.
+type ItemEtapa = { id: string; href: string; nome: string; sub: string };
+type Etapa = { rotulo: string; n: number; itens?: ItemEtapa[] };
 
 const PERIODOS = [
   { k: '7', rotulo: '7 dias' },
@@ -204,20 +206,39 @@ function Funil({ etapas, nota }: { etapas: Etapa[]; nota?: string }) {
   return (
     <>
       <ol className="space-y-3">
-        {etapas.map((e, i) => (
-          <li key={e.rotulo}>
-            <div className="flex items-baseline justify-between gap-3 text-sm">
-              <span className="text-slate-700">{e.rotulo}</span>
-              <span className="tabular-nums text-slate-900">
-                <strong>{e.n}</strong>
-                {i > 0 && <span className="ml-2 text-xs text-slate-500">{pct(e.n, etapas[0].n)}%</span>}
-              </span>
-            </div>
-            <div className="mt-1 h-2.5 w-full rounded-full bg-slate-100">
-              <div className="h-2.5 rounded-full bg-blue-600" style={{ width: `${Math.max((e.n / topo) * 100, e.n ? 2 : 0)}%` }} />
-            </div>
-          </li>
-        ))}
+        {etapas.map((e, i) => {
+          const linha = (
+            <>
+              <div className="flex items-baseline justify-between gap-3 text-sm">
+                <span className={e.itens?.length ? 'text-blue-700 underline decoration-dotted underline-offset-2' : 'text-slate-700'}>{e.rotulo}</span>
+                <span className="tabular-nums text-slate-900">
+                  <strong>{e.n}</strong>
+                  {i > 0 && <span className="ml-2 text-xs text-slate-500">{pct(e.n, etapas[0].n)}%</span>}
+                </span>
+              </div>
+              <div className="mt-1 h-2.5 w-full rounded-full bg-slate-100">
+                <div className="h-2.5 rounded-full bg-blue-600" style={{ width: `${Math.max((e.n / topo) * 100, e.n ? 2 : 0)}%` }} />
+              </div>
+            </>
+          );
+          return (
+            <li key={e.rotulo}>
+              {e.itens?.length ? (
+                <details>
+                  <summary className="cursor-pointer list-none">{linha}</summary>
+                  <ul className="mt-2 max-h-80 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
+                    {e.itens.map((it) => (
+                      <li key={it.id} className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-sm">
+                        <Link href={it.href} className="min-w-0 truncate text-blue-700 hover:underline">{it.nome}</Link>
+                        <span className="shrink-0 text-xs text-slate-500">{it.sub}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : linha}
+            </li>
+          );
+        })}
       </ol>
       {nota && <p className="mt-4 text-xs text-slate-500">{nota}</p>}
     </>
@@ -264,13 +285,16 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
   const cartao = (l: Lead) => !!l.cartao_enviado_em || assumiu(l);
   const contato = (l: Lead) => assumiu(l) && (l.feito || l.visita_agendada || l.proposta);
   const visita = (l: Lead) => assumiu(l) && (l.visita_agendada || l.proposta);
+  const itensDe = (xs: Lead[]): ItemEtapa[] => xs.map((l) => ({ id: l.id, href: '/sdr/lead/' + l.id, nome: l.nome || 'Cliente',
+    sub: [l.corretor, l.endereco, fmtData.format(new Date(l.created_at))].filter(Boolean).join(' · ') }));
+  const etapa = (rotulo: string, f: (l: Lead) => boolean): Etapa => { const xs = sdr.filter(f); return { rotulo, n: xs.length, itens: itensDe(xs) }; };
   const etapas: Etapa[] = [
-    { rotulo: 'Entraram no SDR', n: sdr.length },
-    { rotulo: 'Cartão enviado a você', n: sdr.filter(cartao).length },
-    { rotulo: 'Corretor assumiu', n: sdr.filter(assumiu).length },
-    { rotulo: 'Contato feito', n: sdr.filter(contato).length },
-    { rotulo: 'Visita agendada', n: sdr.filter(visita).length },
-    { rotulo: 'Proposta', n: sdr.filter((l) => assumiu(l) && l.proposta).length },
+    etapa('Entraram no SDR', () => true),
+    etapa('Cartão enviado a você', cartao),
+    etapa('Corretor assumiu', assumiu),
+    etapa('Contato feito', contato),
+    etapa('Visita agendada', visita),
+    etapa('Proposta', (l) => assumiu(l) && l.proposta),
   ];
   const responderam = sdr.filter((l) => l.respondeu).length;
   const qualificados = sdr.filter((l) => l.qualificado).length;
@@ -473,13 +497,19 @@ async function FunilProprietario({ dias, alugar }: { dias: number | null; alugar
     if (o >= 0) nivel.set(e.lead_id, Math.max(nivel.get(e.lead_id) ?? -1, o));
   }
   const nivelDe = (c: Captacao) => { const l = leadDe(c); return l ? nivel.get(l.id) ?? -1 : -1; };
+  const itensCap = (xs: Captacao[]): ItemEtapa[] => xs.map((c) => {
+    const l = leadDe(c);
+    return { id: c.id, href: l ? '/sdr/lead/' + l.id : c.id.startsWith('lead-') ? '/sdr/lead/' + c.id.slice(5) : '/sdr/captacao/' + c.id, nome: c.nome || 'Proprietário',
+      sub: [l?.corretor_phone ? nomeCor.get(fim8(l.corretor_phone)) : null, c.endereco || c.bairro, fmtData.format(new Date(c.criado_em))].filter(Boolean).join(' · ') };
+  });
+  const etapaCap = (rotulo: string, xs: Captacao[]): Etapa => ({ rotulo, n: xs.length, itens: itensCap(xs) });
   const etapas: Etapa[] = [
     { rotulo: 'Cliques no WhatsApp da landing', n: cliques },
-    { rotulo: 'Contatos (formulário ou conversa)', n: contatos.length },
-    { rotulo: 'Fila de captadores definida', n: comFila.length },
-    { rotulo: 'Captador assumiu', n: assumiu.length },
-    { rotulo: 'Contato feito pelo captador', n: feito.length },
-    ...(alugar ? [] : ETAPAS_CAP.map((e, i) => ({ rotulo: e.rotulo, n: contatos.filter((c) => nivelDe(c) >= i).length }))),
+    etapaCap('Contatos (formulário ou conversa)', contatos),
+    etapaCap('Fila de captadores definida', comFila),
+    etapaCap('Captador assumiu', assumiu),
+    etapaCap('Contato feito pelo captador', feito),
+    ...(alugar ? [] : ETAPAS_CAP.map((e, i) => etapaCap(e.rotulo, contatos.filter((c) => nivelDe(c) >= i)))),
   ];
   // por captador (venda)
   const agoraIso = desde(0);
