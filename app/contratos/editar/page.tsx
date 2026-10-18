@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import DocumentosContrato from "@/app/_components/DocumentosContrato";
+import { useEffect, useRef, useState } from "react";
+import DocumentosContrato, { type DocumentosContratoHandle } from "@/app/_components/DocumentosContrato";
+import PartesContrato from "@/app/_components/PartesContrato";
 import ContaRepasse from "@/app/_components/ContaRepasse";
 
 type Contrato = Record<string, any>;
@@ -40,6 +41,7 @@ export default function EditarContrato() {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const docsRef = useRef<DocumentosContratoHandle>(null);
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
@@ -297,9 +299,11 @@ export default function EditarContrato() {
               </button>
             </div>
 
+            <PartesContrato contratoId={Number(c.id)} onDocsMudaram={() => docsRef.current?.recarregar()} />
+
             <ContaRepasse contratoId={Number(c.id)} />
 
-            <DocumentosContrato contratoId={Number(c.id)} />
+            <DocumentosContrato ref={docsRef} contratoId={Number(c.id)} />
           </>
         )}
       </main>
