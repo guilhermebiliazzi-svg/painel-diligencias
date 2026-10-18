@@ -21,6 +21,26 @@ async function post(body: unknown) {
   return d;
 }
 
+/**
+ * Sobe um arquivo do computador para o card: URL assinada do Storage -> PUT ->
+ * n8n salva na pasta do Drive do card e confere (IA) ou conclui (doc manual).
+ * Usado pelo botão "Enviar arquivo" e pelo "Adicionar documento" (card extra).
+ */
+export async function enviarArquivoParaCard(certidaoId: string, file: File, aoMudarEtapa?: (e: 'subindo' | 'drive') => void) {
+  if (file.size > LIMITE) throw new Error('Arquivo acima de 50 MB.');
+  aoMudarEtapa?.('subindo');
+  const mime = file.type || (/\.pdf$/i.test(file.name) ? 'application/pdf' : '');
+  const u = await post({ acao: 'upload-url', certidao_id: certidaoId, nome: file.name, mime });
+  const r = await fetch(u.signedUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': mime || 'application/octet-stream' },
+    body: file,
+  });
+  if (!r.ok) throw new Error(`Falha no envio do arquivo (HTTP ${r.status}).`);
+  aoMudarEtapa?.('drive');
+  return (await post({ acao: 'enviar', certidao_id: certidaoId, path: u.path, nome: file.name })) as { manual?: boolean };
+}
+
 export function EnviarArquivoCard({ certidaoId, temPdf }: { certidaoId: string; temPdf: boolean }) {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
@@ -37,18 +57,7 @@ export function EnviarArquivoCard({ certidaoId, temPdf }: { certidaoId: string; 
     }
     if (temPdf && !window.confirm('Este card já tem um PDF. Substituir pelo arquivo novo?')) return;
     try {
-      setEtapa('subindo');
-      const mime = file.type || (/\.pdf$/i.test(file.name) ? 'application/pdf' : '');
-      const u = await post({ acao: 'upload-url', certidao_id: certidaoId, nome: file.name, mime });
-      const r = await fetch(u.signedUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': mime || 'application/octet-stream' },
-        body: file,
-      });
-      if (!r.ok) throw new Error(`Falha no envio do arquivo (HTTP ${r.status}).`);
-
-      setEtapa('drive');
-      const out = await post({ acao: 'enviar', certidao_id: certidaoId, path: u.path, nome: file.name });
+      const out = await enviarArquivoParaCard(certidaoId, file, setEtapa);
       setEtapa('ok');
       setMsg(out.manual ? 'Salvo no Drive. Card concluído.' : 'Salvo no Drive. A IA está conferindo…');
       // a conferência roda no n8n; atualiza a tela algumas vezes
