@@ -20,7 +20,7 @@ type ParecerStatus = {
   criado_em: string | null;
 } | null;
 
-export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
+export function GerarParecer({ diligenciaId, faltando = [] }: { diligenciaId: string; faltando?: string[] }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [erro, setErro] = useState<string | null>(null);
@@ -172,12 +172,21 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
         <button
           type="button"
           onClick={abrir}
-          disabled={ineditavel}
-          className={btn(ineditavel ? 'inativo' : 'azul')}
-          title="Gera o parecer de diligência a partir das certidões e dos dados do negócio"
+          disabled={ineditavel || faltando.length > 0}
+          className={btn(ineditavel || faltando.length > 0 ? 'inativo' : 'azul')}
+          title={
+            faltando.length > 0
+              ? `Só dá para gerar o parecer com todos os cards marcados em "Mostrar" preenchidos. Faltam:\n• ${faltando.slice(0, 15).join('\n• ')}${faltando.length > 15 ? `\n… e mais ${faltando.length - 15}` : ''}`
+              : 'Gera o parecer de diligência a partir das certidões e dos dados do negócio'
+          }
         >
           {gerando ? 'Gerando…' : parecer ? 'Gerar parecer de novo' : 'Gerar parecer'}
         </button>
+        {faltando.length > 0 && !gerando && (
+          <span className="text-[11px] text-amber-700">
+            Faltam {faltando.length} documento{faltando.length === 1 ? '' : 's'}
+          </span>
+        )}
       </div>
 
       {open && (
