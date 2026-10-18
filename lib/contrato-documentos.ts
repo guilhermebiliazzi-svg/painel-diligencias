@@ -8,6 +8,7 @@ export const CATEGORIAS_DOC = [
   { v: "vistoria_saida", t: "Vistoria de saída", dica: "" },
   { v: "termo_entrega_chaves", t: "Termo de quitação e entrega de chaves", dica: "" },
   { v: "notificacao", t: "Notificações e cobranças", dica: "" },
+  { v: "documentos_partes", t: "Documentos das partes", dica: "RG, comprovantes, certidões… enviados em Partes do contrato" },
   { v: "outros", t: "Outros", dica: "" },
 ] as const;
 
