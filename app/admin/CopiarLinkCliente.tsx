@@ -1,5 +1,6 @@
 'use client';
 
+import { btn } from './botoes';
 import { useState } from 'react';
 
 type Props = {
@@ -44,25 +45,21 @@ export function CopiarLinkCliente({
   }
 
   const cls =
-    estado === 'ok'
-      ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
-      : estado === 'erro'
-        ? 'border-rose-500 bg-rose-50 text-rose-700'
-        : 'border-blue-300 bg-white text-blue-700 hover:bg-blue-50';
+    estado === 'ok' ? btn('ok') : estado === 'erro' ? btn('erro') : btn('neutro');
 
   const label =
     estado === 'ok'
-      ? '✓ Link copiado!'
+      ? '✓ Link copiado'
       : estado === 'erro'
         ? 'Falha ao copiar'
-        : '🔗 Compartilhar link';
+        : 'Compartilhar link';
 
   return (
     <button
       type="button"
       onClick={copiar}
       title={`Copia o link público do painel do cliente: ${url}`}
-      className={`rounded-md border px-3 py-1.5 text-xs font-medium transition ${cls}`}
+      className={cls}
     >
       {label}
     </button>
