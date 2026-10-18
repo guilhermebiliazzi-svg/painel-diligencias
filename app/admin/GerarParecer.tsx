@@ -6,6 +6,7 @@
 // do cadastro (carregarDadosParecer), dispara o workflow B
 // (fire-and-forget) e acompanha o resultado pelo /api/parecer-status.
 
+import { btn } from './botoes';
 import { useState, useEffect, useRef, useTransition, useCallback } from 'react';
 import { gerarParecer, liberarParecer, carregarDadosParecer } from './actions';
 import type { DadosParecer } from './actions';
@@ -140,20 +141,20 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
 
   return (
     <>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {parecer?.pdf_url && (
           <a
             href={parecer.pdf_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-md border border-blue-300 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50"
+            className={btn('azul')}
             title={parecer.veredito ? `Veredito: ${parecer.veredito}` : 'Abrir parecer'}
           >
             Ver parecer{parecer.status === 'aprovado' ? '' : ' (rascunho)'}
           </a>
         )}
         {parecer && parecer.status === 'aprovado' && (
-          <span className="rounded-md border border-green-300 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700">
+          <span className={btn('ok') + ' shadow-none'}>
             ✓ Liberado
           </span>
         )}
@@ -162,11 +163,7 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
             type="button"
             onClick={liberar}
             disabled={ineditavel || liberando}
-            className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
-              ineditavel || liberando
-                ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
-                : 'border-green-600 bg-green-600 text-white hover:bg-green-700'
-            }`}
+            className={btn(ineditavel || liberando ? 'inativo' : 'cheio')}
             title="Congela este rascunho como versão final aprovada e remove a tarja de rascunho da versão pública"
           >
             {liberando ? 'Liberando…' : '✓ Liberar'}
@@ -176,14 +173,10 @@ export function GerarParecer({ diligenciaId }: { diligenciaId: string }) {
           type="button"
           onClick={abrir}
           disabled={ineditavel}
-          className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
-            ineditavel
-              ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
-              : 'border-blue-300 bg-white text-blue-700 hover:bg-blue-50'
-          }`}
+          className={btn(ineditavel ? 'inativo' : 'azul')}
           title="Gera o parecer de diligência a partir das certidões e dos dados do negócio"
         >
-          {gerando ? 'Gerando…' : parecer ? '↻ Gerar de novo' : '⚖ Gerar parecer'}
+          {gerando ? 'Gerando…' : parecer ? 'Gerar parecer de novo' : 'Gerar parecer'}
         </button>
       </div>
 
