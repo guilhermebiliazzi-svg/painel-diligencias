@@ -804,6 +804,17 @@ def chaves_ofertaveis(sucursal):
             for it in cat["itens"] if it.get("c")}
 
 
+def chaves_carteira(sucursal):
+    """Chaves dos imóveis da CARTEIRA PRÓPRIA da sucursal (iList dela) no
+    catálogo da tela. Desde 18/10/2026 só eles podem ser superdestaque.
+    None se o catálogo não existir."""
+    cat = ler_config(f"catalogo_{sucursal}.json", None)
+    if not cat or not isinstance(cat.get("itens"), list):
+        return None
+    return {uf.chave_compartilhada(str(it.get("c", "")).strip())
+            for it in cat["itens"] if it.get("c") and it.get("d") == sucursal}
+
+
 def destaques_de_outras(sucursal):
     """Imóveis que as OUTRAS sucursais já marcaram como destaque.
 
@@ -830,10 +841,14 @@ def destaques_de_outras(sucursal):
         if not esc:
             continue
         dela = chaves_ofertaveis(outra)
+        carteira_dela = chaves_carteira(outra)
         for nivel in ("HOME", "DESTACADO"):
             for codigo in (esc.get(nivel) or []):
                 chave = uf.chave_compartilhada(str(codigo).strip())
                 if dela is not None and chave not in dela:
+                    continue
+                # 18/10/2026: super fora da carteira dela não vale mais
+                if nivel == "HOME" and carteira_dela is not None and chave not in carteira_dela:
                     continue
                 # HOME tem precedência: é o que a geração também faz
                 if chave in tomados and tomados[chave]["nivel"] == "HOME":
@@ -881,6 +896,12 @@ def salvar_destaques(
             descartados += len(valores) - len(ok)
             return ok
         home, destacado, simples = filtra(home), filtra(destacado), filtra(simples)
+    # 18/10/2026: superdestaque só em imóvel da carteira própria (iList dela)
+    carteira = chaves_carteira(sucursal)
+    if carteira is not None:
+        ok = [v for v in home if uf.chave_compartilhada(v) in carteira]
+        descartados += len(home) - len(ok)
+        home = ok
     for a, b, rotulo in ((home, destacado, "superdestaque e destaque"),
                          (home, simples, "superdestaque e simples"),
                          (destacado, simples, "destaque e simples")):
