@@ -5,6 +5,7 @@
 // "Minhas diligências". Entram sozinhos quem criou a diligência e quem está no
 // split da comissão (Dados do negócio); aqui dá para incluir ou tirar à mão.
 
+import { btn } from './botoes';
 import { useState, useTransition } from 'react';
 import {
   listarCorretoresDiligencia,
@@ -66,10 +67,10 @@ export function CorretoresDiligencia({ diligenciaId }: { diligenciaId: string })
       <button
         type="button"
         onClick={abrir}
-        className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+        className={btn('neutro')}
         title="Corretores que enxergam esta diligência em 'Minhas diligências'"
       >
-        👥 Corretores
+        Corretores
       </button>
 
       {open && (
