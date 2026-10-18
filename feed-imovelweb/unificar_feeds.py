@@ -1074,6 +1074,10 @@ def marcar_dono(bloco, dono):
 
 
 COTAS_SUCURSAL = {
+    # 18/10/2026: volta para 300 superdestaques, 100 por sucursal, e o
+    #   superdestaque passa a ser SO da carteira propria (iList da sucursal).
+    #   O portal aplicava so parte dos 400: o Marquise Ibirapuera (VIL) ia como
+    #   HOME desde 13/10 e aparecia como Simples (decisao do Guilherme).
     # 13/10/2026: plano do ImovelWeb passou para 400 superdestaques (+100).
     #   Os 100 novos: 34 Homemark, 33 Ville, 33 Alcance (decisao do Guilherme).
     #   Antes (aditivo de 15/09): 100 + 100 + 100 = 300.
@@ -1081,9 +1085,9 @@ COTAS_SUCURSAL = {
     #   O destaque nao mudou: 175 x 3 = 525.
     # Os totais da conta unica saem da soma desta tabela — nao existe numero
     # de cota escrito em nenhum outro lugar deste arquivo.
-    "ville":    {"HOME": 133, "DESTACADO": 175},
-    "homemark": {"HOME": 134, "DESTACADO": 175},
-    "alcance":  {"HOME": 133, "DESTACADO": 175},
+    "ville":    {"HOME": 100, "DESTACADO": 175},
+    "homemark": {"HOME": 100, "DESTACADO": 175},
+    "alcance":  {"HOME": 100, "DESTACADO": 175},
 }
 
 
@@ -1124,6 +1128,11 @@ def decidir_marcacao_unificada(itens, dono_de, por_sucursal, traducao,
     sucursal — a Homemark gastava cota destacando um exclusivo da Ville e a
     Ville nao conseguia marcar o proprio imovel. Escolha fora disso e ignorada
     e contada em diag['fora'].
+
+    18/10/2026: SUPERDESTAQUE SO NA CARTEIRA PROPRIA. HOME escolhido em imovel
+    do pool da roleta e ignorado (diag['home_fora_carteira']) e o pool nao
+    completa mais a cota de HOME — so a de DESTACADO. Se a carteira nao encher
+    as 100 vagas, a sobra fica sem uso.
     """
     presentes = {c for c, _ in itens}
     preco = {c: p for c, p in itens}
@@ -1136,6 +1145,7 @@ def decidir_marcacao_unificada(itens, dono_de, por_sucursal, traducao,
         return traducao.get(chave_compartilhada(str(codigo).strip()))
 
     fora = {n: 0 for n in COTAS_SUCURSAL}
+    home_fora_carteira = {n: 0 for n in COTAS_SUCURSAL}
 
     def participa(nome, final):
         """Mesma regra de ofertavel() no app.py — quem pode marcar o imovel."""
@@ -1172,6 +1182,9 @@ def decidir_marcacao_unificada(itens, dono_de, por_sucursal, traducao,
                 if not participa(nome, final):
                     fora[nome] += 1
                     continue
+                if rotulo == "HOME" and dono_de.get(final) != nome:
+                    home_fora_carteira[nome] += 1   # super so na carteira propria
+                    continue
                 if final in marcacao:
                     conflitos += 1        # ja levado por outra sucursal
                     continue
@@ -1196,10 +1209,11 @@ def decidir_marcacao_unificada(itens, dono_de, por_sucursal, traducao,
                 usado[nome][rotulo] += 1
 
     # --- 3. o que sobrou vem do pool da roleta, em rodizio
+    #     (so DESTACADO: superdestaque e exclusivo da carteira propria)
     pool = sorted([c for c, _ in itens if dono_de.get(c) == DONO_ROLETA],
                   key=lambda c: -preco.get(c, 0))
     do_pool = {"HOME": 0, "DESTACADO": 0}
-    for rotulo in ("HOME", "DESTACADO"):
+    for rotulo in ("DESTACADO",):
         i = 0
         faltam = True
         while faltam and i < len(pool):
@@ -1220,6 +1234,7 @@ def decidir_marcacao_unificada(itens, dono_de, por_sucursal, traducao,
     diag = {
         "orfas": orfas,
         "fora": fora,
+        "home_fora_carteira": home_fora_carteira,
         "conflitos": conflitos,
         "do_pool": do_pool,
         "por_sucursal": {
