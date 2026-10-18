@@ -48,6 +48,7 @@ type ItemFila = { key: string; file: File; categoria: string; apolice?: Apolice 
 
 export type DocumentosContratoHandle = {
   temFila: () => boolean;
+  recarregar: () => Promise<void>;
   // vinculos: apólice nova da fila desse tipo vai para o seguro já criado (ex.: { residencial: 12 })
   enviarFila: (contratoId: number, vinculos?: Record<string, number>) => Promise<{ enviados: number; falhas: string[] }>;
 };
@@ -59,7 +60,10 @@ const fmtData = (iso: string | null | undefined) =>
 const fmtTam = (n: number | null) =>
   n == null ? "" : n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1).replace(".", ",")} MB`;
 
-async function enviarArquivo(contratoId: number, file: File, categoria: string, apolice?: Apolice) {
+// extra: documentos das partes (parte_id, tipo_documento, descricao) — usado por PartesContrato
+export type ExtraDoc = { parte_id?: number | null; tipo_documento?: string; descricao?: string };
+
+export async function enviarArquivo(contratoId: number, file: File, categoria: string, apolice?: Apolice, extra?: ExtraDoc) {
   if (file.size > LIMITE_BYTES) throw new Error(`${file.name}: arquivo acima de 50 MB.`);
   const r1 = await fetch("/api/adm/contrato-documentos", {
     method: "POST",
@@ -88,6 +92,7 @@ async function enviarArquivo(contratoId: number, file: File, categoria: string, 
       tamanho: file.size,
       mime: file.type || null,
       apolice: categoria === "apolice" ? apolice || {} : undefined,
+      ...(extra || {}),
     }),
   });
   const d3 = await r3.json().catch(() => ({}));
@@ -162,6 +167,7 @@ const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: nu
       ref,
       () => ({
         temFila: () => filaRef.current.length > 0,
+        recarregar: () => carregar(),
         enviarFila: async (id: number, vinculos?: Record<string, number>) => {
           const falhas: string[] = [];
           let enviados = 0;
@@ -182,7 +188,7 @@ const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: nu
           return { enviados, falhas };
         },
       }),
-      []
+      [carregar]
     );
 
     async function adicionar(categoria: string, files: File[], apolice?: Apolice) {
@@ -352,16 +358,17 @@ const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: nu
         {erro && <div className="vj-dc-erro">{erro}</div>}
 
         <div className="vj-dc-grid">
-          {CATEGORIAS_DOC.map((cat) => {
+          {CATEGORIAS_DOC.filter((cat) => contratoId || cat.v !== "documentos_partes").map((cat) => {
             const lista = docsDe(cat.v);
             const pend = filaDe(cat.v);
             const isAp = cat.v === "apolice";
+            const isPartes = cat.v === "documentos_partes";
             return (
               <div
                 key={cat.v}
                 className={"vj-dc-cat" + (isAp ? " vj-dc-cat-ap" : "")}
                 onDragOver={(e) => e.preventDefault()}
-                onDrop={soltar(cat.v)}
+                onDrop={isPartes ? (e) => e.preventDefault() : soltar(cat.v)}
               >
                 <div className="vj-dc-cat-cab">
                   <div>
@@ -496,7 +503,16 @@ const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: nu
                   </>
                 )}
 
-                {!isAp && (
+                {isPartes && (
+                  <>
+                    <ul className="vj-dc-lista">
+                      {lista.map((d) => <LinhaDoc key={d.id} d={d} />)}
+                    </ul>
+                    <a className="vj-dc-link" href="#partes-contrato">Enviar em Partes do contrato ↑</a>
+                  </>
+                )}
+
+                {!isAp && !isPartes && (
                   <>
                     <ul className="vj-dc-lista">
                       {lista.map((d) => <LinhaDoc key={d.id} d={d} />)}
