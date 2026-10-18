@@ -570,6 +570,22 @@ export async function gerarParecer(fd: FormData) {
   const diligencia_id = String(fd.get('diligencia_id') || '');
   if (!diligencia_id) throw new Error('diligencia_id ausente');
 
+  // Regra (18/10/2026): só gera o parecer quando todos os cards marcados para
+  // mostrar (card e pessoa visíveis) já têm o documento.
+  const falta = await pool.query(
+    `SELECT count(*)::int AS n
+       FROM painel.v_painel_cliente_admin
+      WHERE diligencia_id = $1
+        AND NOT COALESCE(card_oculto, false)
+        AND NOT COALESCE(titular_oculto, false)
+        AND (drive_file_id IS NULL OR drive_file_id = '')`,
+    [diligencia_id]
+  );
+  const n = Number(falta.rows[0]?.n || 0);
+  if (n > 0) {
+    throw new Error(`Ainda faltam ${n} documento${n === 1 ? '' : 's'} nos cards marcados para mostrar. Envie os arquivos ou desmarque "Mostrar" antes de gerar o parecer.`);
+  }
+
   // Quando o modal veio pré-preenchido do cadastro e o nome não foi alterado,
   // manda a lista estruturada (um item por comprador) em vez do texto concatenado.
   let compradores: CompradorParecer[] | null = null;
