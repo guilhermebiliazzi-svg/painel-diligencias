@@ -3,6 +3,8 @@
 // A tela é servida pelo n8n e recebe o diligencia_id por query string.
 'use client';
 
+import { btn } from './botoes';
+
 type Props = {
   diligenciaId: string;
   /** true = ambiente de testes (sandbox). Troque para false quando for para produção. */
@@ -20,7 +22,7 @@ export function EmitirCobranca({ diligenciaId, sandbox = true }: Props) {
       type="button"
       onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
       title="Abre a tela para emitir a cobrança da comissão com split entre os intermediadores"
-      className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
+      className={btn('vermelho')}
     >
       Emitir cobrança{sandbox ? ' (teste)' : ''}
     </button>
