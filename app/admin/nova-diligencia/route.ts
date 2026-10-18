@@ -9,7 +9,7 @@
 //
 // Acesso: /admin/* exige login + pode_diligencias (proxy.ts).
 import { NextResponse } from 'next/server';
-import { acessoDiligencias } from '@/lib/diligencia-acesso';
+import { acessoDiligencias, podeVerDiligencia } from '@/lib/diligencia-acesso';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -60,8 +60,30 @@ p.then(function(r){if(r&&r.ok&&b.endereco)setTimeout(function(){marcar(b.enderec
 return p;};
 })();</script>`;
 
-export async function GET() {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Botão "Editar diligência" (tela da diligência): /admin/nova-diligencia?editar=<id>
+// abre este mesmo formulário já carregado com a diligência (a mesma função
+// carregarDiligencia do "Editar diligência existente"), com título de edição e
+// a busca escondida.
+function scriptEditar(id: string) {
+  return `<script>(function(){
+var ID=${JSON.stringify(id)};
+function iniciar(){
+  try{var h=document.querySelector('.card h1');if(h)h.textContent='Editar diligência';
+  var sub=document.querySelector('.card .subtitle');if(sub)sub.textContent='RE/MAX Ville — confira e ajuste os dados do imóvel e dos vendedores';
+  var b=document.getElementById('busca-dilig');var n=b;while(n&&n.parentElement&&!(n.querySelector&&n.querySelector('h2')))n=n.parentElement;
+  if(n&&b){for(var i=0;i<n.children.length;i++){var c=n.children[i];if(c.id!=='edit-aviso')c.style.display='none';}n.style.padding='0';n.style.border='0';n.style.background='transparent';}}catch(e){}
+  if(typeof carregarDiligencia==='function')carregarDiligencia(ID);
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',iniciar);else iniciar();
+})();</script>`;
+}
+
+export async function GET(req: Request) {
   const acesso = await acessoDiligencias();
+  const editar = new URL(req.url).searchParams.get('editar') || '';
+  const editId = UUID_RE.test(editar) && acesso?.todas && (await podeVerDiligencia(editar)) ? editar : '';
   let html: string;
   try {
     const r = await fetch(`${N8N}/nova-diligencia`, { cache: 'no-store', signal: AbortSignal.timeout(20000) });
@@ -87,7 +109,11 @@ export async function GET() {
 
   const cfg = `<script>var N8N_BASE = ${JSON.stringify(N8N)};</script>` + (acesso && !acesso.todas ? SCRIPT_CORRETOR : '');
   html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + cfg) : cfg + html;
-  html = /<body[^>]*>/i.test(html) ? html.replace(/<body[^>]*>/i, (m) => m + BARRA + aviso) : html;
+  const barra = editId
+    ? BARRA.replace('href="/admin"', `href="/admin/d/${editId}"`).replace('← Voltar às diligências', '← Voltar à diligência')
+    : BARRA;
+  html = /<body[^>]*>/i.test(html) ? html.replace(/<body[^>]*>/i, (m) => m + barra + aviso) : html;
+  if (editId) html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, scriptEditar(editId) + '</body>') : html + scriptEditar(editId);
 
   return new NextResponse(html, {
     status: 200,
