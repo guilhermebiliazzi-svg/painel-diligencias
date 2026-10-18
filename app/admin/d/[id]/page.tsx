@@ -1035,6 +1035,16 @@ export default async function AdminDiligenciaPage({
           {/* Barra de ações: botões do mesmo tamanho, agrupados por assunto */}
           <div className="mt-5 flex flex-wrap items-start gap-x-8 gap-y-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
             <GrupoAcoes titulo="Diligência">
+              {gerir && (
+                // rota (route.ts), não página: <a> em vez de <Link>
+                <a
+                  href={`/admin/nova-diligencia?editar=${id}`}
+                  className={btn('neutro')}
+                  title="Abre o formulário da diligência já preenchido para corrigir imóvel, vendedores e compradores"
+                >
+                  Editar diligência
+                </a>
+              )}
               <CopiarLinkCliente diligencia_id={id} />
               <form
                 action={async () => {
