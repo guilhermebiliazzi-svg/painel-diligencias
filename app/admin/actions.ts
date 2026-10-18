@@ -456,8 +456,13 @@ export async function togglePessoaOculta(
 
 /**
  * Cria um card EXTRA (documento avulso) num grupo da diligencia.
- * NAO faz upload — o admin sobe o PDF manualmente no Drive (na pasta do grupo)
- * e seleciona ele aqui pelo dropdown. Apenas vincula no banco.
+ * Dois jeitos:
+ *  - com drive_file_id: o PDF ja esta na pasta do grupo no Drive (dropdown) e o
+ *    card nasce concluido;
+ *  - sem drive_file_id: o card nasce pendente e o navegador envia o arquivo do
+ *    computador logo em seguida (EnviarArquivoCard -> /api/adm/diligencia-upload
+ *    -> n8n "Painel — Enviar arquivo para o card"), que salva na pasta e conclui.
+ * Devolve o id do card criado.
  *
  * - documento_normalizado e titular: identificam a pessoa dona do card
  *   (NULL pra cards de imovel — nao tem pessoa).
@@ -465,7 +470,7 @@ export async function togglePessoaOculta(
  *   grupo onde o card sera inserido).
  * - drive_file_id e url_pdf: do PDF ja existente no Drive.
  */
-export async function criarCertidaoExtra(formData: FormData) {
+export async function criarCertidaoExtra(formData: FormData): Promise<string> {
   await garantirGerirDiligencias();
   const diligencia_id = String(formData.get('diligencia_id') || '');
   const documento_normalizado = String(formData.get('documento_normalizado') || '');
@@ -478,7 +483,7 @@ export async function criarCertidaoExtra(formData: FormData) {
   if (!diligencia_id) throw new Error('diligencia_id obrigatorio');
   if (!pasta_id) throw new Error('pasta_id obrigatoria');
   if (!descricao) throw new Error('descricao obrigatoria');
-  if (!drive_file_id) throw new Error('selecione um PDF da pasta');
+  const doComputador = !drive_file_id;
 
   const insert = await pool.query(
     `INSERT INTO certidoes_status (
@@ -490,9 +495,11 @@ export async function criarCertidaoExtra(formData: FormData) {
      ) VALUES (
        $1, 'extra', NULLIF($2,''), NULLIF($3,''), $4,
        $5, $5, TRUE,
-       'concluido', 'validado', NULL,
-       $6, $7,
-       NOW(), NOW(), TRUE
+       CASE WHEN $8 THEN 'pendente' ELSE 'concluido' END,
+       CASE WHEN $8 THEN NULL ELSE 'validado' END,
+       NULL,
+       NULLIF($6,''), NULLIF($7,''),
+       CASE WHEN $8 THEN NULL ELSE NOW() END, NOW(), TRUE
      )
      RETURNING id`,
     [
@@ -503,6 +510,7 @@ export async function criarCertidaoExtra(formData: FormData) {
       descricao,
       drive_file_id,
       url_pdf,
+      doComputador,
     ]
   );
 
@@ -512,10 +520,11 @@ export async function criarCertidaoExtra(formData: FormData) {
     acao: 'criar_extra',
     certidao_id,
     drive_file_id_novo: drive_file_id,
-    detalhe: { diligencia_id, descricao, pasta_id, documento_normalizado, titular },
+    detalhe: { diligencia_id, descricao, pasta_id, documento_normalizado, titular, origem: doComputador ? 'computador' : 'drive' },
   });
 
   revalidatePath(`/admin/d/${diligencia_id}`);
+  return certidao_id;
 }
 
 /**
