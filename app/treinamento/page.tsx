@@ -72,9 +72,14 @@ export default async function TreinamentoPage() {
               trabalho ou padrinho, fale com o Max pelo seu número.
             </p>
           </div>
-          <Link href="/treinamento" className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
-            Atualizar
-          </Link>
+          <div className="flex gap-2">
+            <Link href="/treinamento/enviar" className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">
+              Mensagem pelo Max
+            </Link>
+            <Link href="/treinamento" className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
+              Atualizar
+            </Link>
+          </div>
         </div>
 
         {erro && (

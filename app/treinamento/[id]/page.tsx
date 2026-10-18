@@ -6,8 +6,9 @@ import { exigirTela } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import {
   TOTAL_DIAS, nomeDias, hojeSP, dm, diaSemanaDm, dataHora, telefone, atrasada,
-  STATUS_TAREFA, STATUS_NOVATO, type StatusTarefa,
+  STATUS_TAREFA, STATUS_NOVATO, inicioJanela, type StatusTarefa,
 } from '../util';
+import EnviarMensagem from '../EnviarMensagem';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Novato — Treinamento — REMAX Ville' };
@@ -91,6 +92,8 @@ export default async function NovatoPage({ params }: { params: Promise<{ id: str
   const padrinho = (padr.data as { nome: string } | null)?.nome ?? null;
 
   const hoje = hojeSP();
+  const limiteJanela = inicioJanela();
+  const janela = msgs.some((m) => m.direcao === 'in' && m.criado_em >= limiteJanela);
   const feitas = tarefas.filter((t) => t.status === 'aprovada' || t.status === 'dispensada').length;
   const atras = tarefas.filter((t) => atrasada(t, hoje)).length;
   const fim = tarefas.reduce((m, t) => (t.data_prevista > m ? t.data_prevista : m), '');
@@ -186,7 +189,36 @@ export default async function NovatoPage({ params }: { params: Promise<{ id: str
           </div>
 
           {/* Coluna direita: quizzes, visitas, contatos e conversa */}
-          <div className="space-y-6 lg:col-span-2">
+          <div className="order-first space-y-6 lg:order-none lg:col-span-2">
+            <Secao
+              titulo="Conversa com o Max"
+              extra={<span className="text-xs text-slate-500">{msgs.length >= LIMITE_MSGS ? `últimas ${LIMITE_MSGS}` : `${msgs.length} mensagens`}</span>}
+            >
+              <div className="mb-4 border-b border-slate-100 pb-4">
+                <EnviarMensagem destinatarios={[{ id: n.id, nome: n.nome, status: n.status, janela }]} />
+              </div>
+              {msgs.length === 0 ? (
+                <p className="text-sm text-slate-500">Ainda não há mensagens.</p>
+              ) : (
+                <div className="max-h-[70vh] space-y-2 overflow-y-auto pr-1">
+                  {msgs.map((m) => {
+                    const max = m.direcao === 'out';
+                    const erroEnvio = (m.texto ?? '').startsWith('[ERRO');
+                    return (
+                      <div key={m.id} className={`flex ${max ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${erroEnvio ? 'bg-rose-50 text-rose-900' : max ? (m.tipo.startsWith('painel') ? 'bg-blue-50 text-slate-800' : 'bg-emerald-50 text-slate-800') : 'bg-slate-100 text-slate-800'}`}>
+                          <p className="whitespace-pre-line break-words">{m.texto || (m.tipo !== 'text' ? `[${m.tipo}]` : '')}</p>
+                          <p className="mt-1 text-right text-[10px] text-slate-400">
+                            {max ? (m.tipo.startsWith('painel') ? 'Você, pelo Max' : 'Max') : n.nome.split(' ')[0]}{m.tipo === 'template' || m.tipo === 'painel_modelo' ? ' · modelo' : m.tipo !== 'text' && m.tipo !== 'painel' ? ` · ${m.tipo}` : ''} · {dataHora(m.criado_em)}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Secao>
+
             <Secao titulo="Quizzes">
               {quizzes.length === 0 ? (
                 <p className="text-sm text-slate-500">Nenhum quiz ainda.</p>
@@ -241,31 +273,6 @@ export default async function NovatoPage({ params }: { params: Promise<{ id: str
               )}
             </Secao>
 
-            <Secao
-              titulo="Conversa com o Max"
-              extra={<span className="text-xs text-slate-500">{msgs.length >= LIMITE_MSGS ? `últimas ${LIMITE_MSGS}` : `${msgs.length} mensagens`}</span>}
-            >
-              {msgs.length === 0 ? (
-                <p className="text-sm text-slate-500">Ainda não há mensagens.</p>
-              ) : (
-                <div className="max-h-[70vh] space-y-2 overflow-y-auto pr-1">
-                  {msgs.map((m) => {
-                    const max = m.direcao === 'out';
-                    const erroEnvio = (m.texto ?? '').startsWith('[ERRO');
-                    return (
-                      <div key={m.id} className={`flex ${max ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${erroEnvio ? 'bg-rose-50 text-rose-900' : max ? 'bg-emerald-50 text-slate-800' : 'bg-slate-100 text-slate-800'}`}>
-                          <p className="whitespace-pre-line break-words">{m.texto || (m.tipo !== 'text' ? `[${m.tipo}]` : '')}</p>
-                          <p className="mt-1 text-right text-[10px] text-slate-400">
-                            {max ? 'Max' : n.nome.split(' ')[0]}{m.tipo === 'template' ? ' · modelo' : m.tipo !== 'text' ? ` · ${m.tipo}` : ''} · {dataHora(m.criado_em)}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </Secao>
           </div>
         </div>
       </main>
