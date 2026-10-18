@@ -21,6 +21,7 @@ import { CardExtraNovo, ExcluirCardExtra } from '../../CardExtra';
 import { GerarParecer } from '../../GerarParecer';
 import { rotaDoTipo } from '@/lib/rota-certidao';
 import { GerarCCV } from '../../GerarCCV';
+import { btn } from '../../botoes';
 import { FichaNegocio } from '../../FichaNegocio';
 import { EmitirCobranca } from '../../EmitirCobranca';
 import { EnviarArquivoCard } from '../../EnviarArquivoCard';
@@ -1008,52 +1009,65 @@ export default async function AdminDiligenciaPage({
   return (
     <div style={{ backgroundColor: '#f8fafc' }} className="min-h-screen">
       <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
-        <header className="mb-6 flex items-start justify-between gap-4">
-          <div>
+        <header className="mb-6">
+          <div className="flex items-center justify-between gap-4">
             <Link
               href="/admin"
               className="text-xs font-semibold uppercase tracking-wider text-blue-600 hover:underline"
             >
               ← Voltar para {gerir ? 'diligências' : 'minhas diligências'}
             </Link>
-            <h1 className="mt-2 text-2xl font-semibold text-slate-900 sm:text-3xl">
-              {endereco}
-            </h1>
-            {cliente_nome && (
-              <p className="mt-1 text-sm text-slate-600">
-                Titular: {cliente_nome}
-              </p>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <CopiarLinkCliente diligencia_id={id} />
-            <form
-              action={async () => {
-                'use server';
-                await auditarDiligencia(id);
-              }}
-            >
-              <SubmitButtonAsync
-                pendingLabel="Auditando..."
-                className="rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
-                title="Dispara o WF-07 (auditoria) para varrer todos os PDFs nas pastas dessa diligência e tentar vincular nos cards pendentes"
-              >
-                ↻ Auditar diligência
-              </SubmitButtonAsync>
-            </form>
-            <FichaNegocio diligenciaId={id} />
-            {gerir && <CorretoresDiligencia diligenciaId={id} />}
-            {gerir && <GerarParecer diligenciaId={id} />}
-            {gerir && <GerarCCV diligenciaId={id} />}
-            {gerir && <EmitirCobranca diligenciaId={id} />}
             <form action={logoutAction}>
-              <button
-                type="submit"
-                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-              >
+              <button type="submit" className={btn('neutro')}>
                 Sair
               </button>
             </form>
+          </div>
+          <h1 className="mt-3 text-2xl font-semibold leading-tight text-slate-900 sm:text-3xl">
+            {endereco}
+          </h1>
+          {cliente_nome && (
+            <p className="mt-1 text-sm text-slate-600">
+              Titular: {cliente_nome}
+            </p>
+          )}
+
+          {/* Barra de ações: botões do mesmo tamanho, agrupados por assunto */}
+          <div className="mt-5 flex flex-wrap items-start gap-x-8 gap-y-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <GrupoAcoes titulo="Diligência">
+              <CopiarLinkCliente diligencia_id={id} />
+              <form
+                action={async () => {
+                  'use server';
+                  await auditarDiligencia(id);
+                }}
+              >
+                <SubmitButtonAsync
+                  pendingLabel="Auditando…"
+                  className={btn('neutro')}
+                  title="Dispara o WF-07 (auditoria) para varrer todos os PDFs nas pastas dessa diligência e tentar vincular nos cards pendentes"
+                >
+                  Auditar diligência
+                </SubmitButtonAsync>
+              </form>
+              <FichaNegocio diligenciaId={id} />
+              {gerir && <CorretoresDiligencia diligenciaId={id} />}
+            </GrupoAcoes>
+            {gerir && (
+              <GrupoAcoes titulo="Parecer">
+                <GerarParecer diligenciaId={id} />
+              </GrupoAcoes>
+            )}
+            {gerir && (
+              <GrupoAcoes titulo="Contrato (CCV)">
+                <GerarCCV diligenciaId={id} />
+              </GrupoAcoes>
+            )}
+            {gerir && (
+              <GrupoAcoes titulo="Cobrança">
+                <EmitirCobranca diligenciaId={id} />
+              </GrupoAcoes>
+            )}
           </div>
         </header>
 
@@ -1080,6 +1094,16 @@ export default async function AdminDiligenciaPage({
           REMAX Ville — Painel admin
         </footer>
       </main>
+    </div>
+  );
+}
+
+// Grupo da barra de ações do cabeçalho: rótulo pequeno em cima, botões numa linha.
+function GrupoAcoes({ titulo, children }: { titulo: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{titulo}</p>
+      <div className="flex flex-wrap items-center gap-2">{children}</div>
     </div>
   );
 }
