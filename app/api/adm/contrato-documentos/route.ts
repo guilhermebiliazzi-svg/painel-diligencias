@@ -3,7 +3,8 @@
 // GET    ?contrato=ID                      -> documentos (com link temporário) + apólices do contrato
 // POST   { acao: "upload-url", ... }       -> URL assinada p/ o NAVEGADOR subir o arquivo direto
 //                                             no Storage (não passa pela Vercel -> sem limite de 4,5 MB)
-// POST   { acao: "registrar", ... }        -> grava o documento (e cria/atualiza a apólice, se for o caso)
+// POST   { acao: "registrar", ... }        -> grava o documento (e cria/atualiza a apólice, se for o caso;
+//                                             documentos_partes aceita parte_id e tipo_documento)
 // POST   { acao: "seguro", ... }           -> atualiza dados/vigência de uma apólice do contrato
 // PATCH  ?id=DOC  { descricao?, categoria? }
 // DELETE ?id=DOC                           -> exclusão suave (some da tela; arquivo fica no Storage)
@@ -11,6 +12,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { acessoContratos } from "@/lib/adm-acesso";
 import { CATEGORIAS_VALIDAS, TIPOS_SEGURO_VALIDOS, diasAte, normalizarCobrancaSeguro } from "@/lib/contrato-documentos";
+import { TIPOS_DOC_PARTE_VALIDOS } from "@/lib/contrato-partes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,7 +67,7 @@ export async function GET(req: Request) {
   const [docsR, segR] = await Promise.all([
     sb
       .from("adm_contrato_documentos")
-      .select("id,categoria,seguro_id,descricao,nome,path,tamanho,mime,enviado_por,criado_em")
+      .select("id,categoria,seguro_id,parte_id,tipo_documento,descricao,nome,path,tamanho,mime,enviado_por,criado_em")
       .eq("contrato_id", contrato)
       .is("excluido_em", null)
       .order("criado_em", { ascending: false }),
@@ -181,6 +183,24 @@ export async function POST(req: Request) {
       }
     }
 
+    // documento de uma parte (RG, comprovante, certidão…): tipo + parte (opcional até a parte ser salva)
+    let parteId: number | null = null;
+    let tipoDoc: string | null = null;
+    if (categoria === "documentos_partes") {
+      tipoDoc = TIPOS_DOC_PARTE_VALIDOS.has(String(body.tipo_documento)) ? String(body.tipo_documento) : null;
+      const pid = idValido(body.parte_id);
+      if (pid) {
+        const { data: pt } = await sb
+          .from("adm_contrato_partes")
+          .select("id")
+          .eq("id", pid)
+          .eq("contrato_id", contrato)
+          .maybeSingle();
+        if (!pt) return erro("Parte não pertence a este contrato.");
+        parteId = pid;
+      }
+    }
+
     const tamanho = Number(body.tamanho);
     const { data: doc, error } = await sb
       .from("adm_contrato_documentos")
@@ -188,6 +208,8 @@ export async function POST(req: Request) {
         contrato_id: contrato,
         categoria,
         seguro_id: seguroId,
+        parte_id: parteId,
+        tipo_documento: tipoDoc,
         descricao: textoOuNull(body.descricao),
         nome: textoOuNull(body.nome, 250) || "arquivo",
         bucket: BUCKET,
