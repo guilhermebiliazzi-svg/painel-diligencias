@@ -981,6 +981,10 @@ export default async function AdminDiligenciaPage({
 
   const { endereco, cliente_nome } = rows[0];
   const grupos = agrupar(rows, endereco);
+  // Parecer só com todos os cards marcados para mostrar já preenchidos (com PDF)
+  const faltandoParecer = rows
+    .filter((r) => !r.card_oculto && !r.titular_oculto && !r.drive_file_id)
+    .map((r) => `${r.certidao || r.tipo}${r.titular ? ' — ' + r.titular : ''}`);
 
   const pastaIds = Array.from(
     new Set(
@@ -1065,7 +1069,7 @@ export default async function AdminDiligenciaPage({
             </GrupoAcoes>
             {gerir && (
               <GrupoAcoes titulo="Parecer">
-                <GerarParecer diligenciaId={id} />
+                <GerarParecer diligenciaId={id} faltando={faltandoParecer} />
               </GrupoAcoes>
             )}
             {gerir && (
