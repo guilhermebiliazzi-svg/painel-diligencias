@@ -310,6 +310,7 @@ export default function FechamentoMes() {
         <a href="/cobrancas" className="vj-mark vj-marklink">REMAX <span>Ville</span></a>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <div className="vj-crumb">Administração · Fechamento do mês</div>
+          <a href="/contratos" className="vj-back">Contratos</a>
           <a href="/contratos/novo" className="vj-back">+ Novo contrato</a>
           <a href="/" className="vj-back">← Painel</a>
         </div>
