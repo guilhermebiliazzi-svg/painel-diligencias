@@ -50,9 +50,12 @@ export default function EditarContrato() {
     setId(cid);
     if (p.get("novo")) {
       setMsg(
-        p.get("falhas")
+        (p.get("falhas")
           ? `Contrato criado. ${p.get("falhas")} documento(s) não subiram — anexe de novo abaixo.`
-          : "Contrato criado. Confira os dados e os documentos abaixo."
+          : "Contrato criado. Confira os dados e os documentos abaixo.") +
+          (p.get("minuta_falhou")
+            ? ` Atenção: as partes e os documentos da minuta nº ${p.get("minuta_falhou")} não vieram para o contrato.`
+            : "")
       );
     }
     if (!cid) {
