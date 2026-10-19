@@ -20,6 +20,7 @@ type Doc = {
   enviado_por: string | null;
   criado_em: string;
   url: string | null;
+  link_externo?: string | null; // contrato gerado pelo painel: link do Google Docs
 };
 type Seguro = {
   id: number;
@@ -315,6 +316,12 @@ const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: nu
               {fmtData(d.criado_em)}
               {d.tamanho ? " · " + fmtTam(d.tamanho) : ""}
               {d.enviado_por ? " · " + d.enviado_por.split("@")[0] : ""}
+              {d.link_externo ? (
+                <>
+                  {" · "}
+                  <a href={d.link_externo} target="_blank" rel="noreferrer" style={{ fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>Google Docs</a>
+                </>
+              ) : null}
             </small>
           </div>
           <div className="vj-dc-doc-acoes">
