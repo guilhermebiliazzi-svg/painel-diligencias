@@ -80,7 +80,11 @@ export const TIPOS_DOC_PARTE = [
   { v: "contrato_social", t: "Contrato social", curto: "Contrato social" },
   { v: "cartao_cnpj", t: "Cartão CNPJ", curto: "Cartão CNPJ" },
   { v: "matricula_fiador", t: "Matrícula do imóvel do fiador", curto: "Matrícula" },
+  { v: "identidade_conjuge", t: "RG ou CNH do cônjuge", curto: "RG/CNH cônjuge" },
 ] as const;
+
+// o que a leitura automática (n8n) recebe como tipo: o RG/CNH do cônjuge é lido como identidade
+export const tipoLeitura = (tipo: string) => (tipo === "identidade_conjuge" ? "identidade" : tipo);
 export type TipoDocParte = (typeof TIPOS_DOC_PARTE)[number]["v"];
 export const TIPOS_DOC_PARTE_VALIDOS = new Set<string>(TIPOS_DOC_PARTE.map((t) => t.v));
 
@@ -239,20 +243,37 @@ function rgComOrgao(d: any): string | null {
   return org && !rg.toUpperCase().includes(org.toUpperCase().split("/")[0]) ? `${rg} ${org}` : rg;
 }
 
+// gênero do representante: o que o documento trouxe; sem isso, pelo primeiro nome
+function generoDe(adm: any): "M" | "F" {
+  if (adm?.genero === "M" || adm?.genero === "F") return adm.genero;
+  const primeiro = String(adm?.nome || "").trim().split(/\s+/)[0]?.toLowerCase() || "";
+  return /a$/.test(primeiro) && !/^(luca|joshua|nikita|jonatha)$/.test(primeiro) ? "F" : "M";
+}
+
+const FEMININO: [RegExp, string][] = [
+  [/\bsócio\b/gi, "sócia"],
+  [/\badministrador\b/gi, "administradora"],
+  [/\bdiretor\b/gi, "diretora"],
+  [/\bprocurador\b/gi, "procuradora"],
+  [/\bgerente\b/gi, "gerente"],
+];
+
 export function textoRepresentacao(adm: any): string | null {
   const nome = limpo(adm?.nome);
   if (!nome) return null;
-  const cargo = limpo(adm?.cargo);
+  const f = generoDe(adm) === "F";
+  let cargo = (limpo(adm?.cargo) || "").toLowerCase();
+  if (f) for (const [re, t] of FEMININO) cargo = cargo.replace(re, t);
   const pedacos = [
-    `neste ato representada por ${cargo ? "seu(sua) " + cargo.toLowerCase() + " " : ""}${nome}`,
+    `neste ato representada por ${cargo ? (f ? "sua " : "seu ") + cargo + " " : ""}${nome}`,
     limpo(adm?.nacionalidade),
     limpo(adm?.estado_civil),
     limpo(adm?.profissao),
   ].filter(Boolean) as string[];
   const rg = rgComOrgao(adm);
-  if (rg) pedacos.push(`portador(a) do RG nº ${rg}`);
+  if (rg) pedacos.push(`${f ? "portadora" : "portador"} do RG nº ${rg}`);
   const cpf = soDigitos(adm?.cpf);
-  if (cpf.length === 11) pedacos.push(`inscrito(a) no CPF sob nº ${fmtCpfCnpj(cpf)}`);
+  if (cpf.length === 11) pedacos.push(`${f ? "inscrita" : "inscrito"} no CPF sob nº ${fmtCpfCnpj(cpf)}`);
   return pedacos.join(", ");
 }
 
@@ -283,7 +304,7 @@ export function aplicarLeitura(
   if (tipo === "identidade") {
     if (p.tipo_pessoa === "PJ") {
       // RG/CNH do representante da empresa
-      const rep = textoRepresentacao({ nome: dados.nome, cpf: dados.cpf, rg: dados.rg, rg_orgao: dados.rg_orgao, nacionalidade: dados.nacionalidade });
+      const rep = textoRepresentacao({ nome: dados.nome, cpf: dados.cpf, rg: dados.rg, rg_orgao: dados.rg_orgao, nacionalidade: dados.nacionalidade, genero: dados.genero });
       if (rep && !limpo(p.representacao)) {
         p.representacao = rep;
         preenchidos.push("Representação");
@@ -302,6 +323,29 @@ export function aplicarLeitura(
       const nacTxt = nac && /^brasil/i.test(nac) ? NACIONALIDADE[g || p.genero || "M"] : nac;
       campo("nacionalidade", "Nacionalidade", nacTxt);
     }
+  } else if (tipo === "identidade_conjuge") {
+    const c = { ...(p.conjuge || {}) };
+    const put = (k: keyof Conjuge, rotulo: string, valor: string | null | undefined) => {
+      const v = limpo(valor);
+      if (!v) return;
+      if (!limpo(c[k])) {
+        c[k] = v;
+        preenchidos.push(rotulo);
+      } else if (!semelhante(String(c[k]), v)) {
+        divergencias.push({
+          campo: `conjuge.${k}`, rotulo, atual: String(c[k]), lido: v,
+          aplicar: (x) => ({ ...x, conjuge: { ...(x.conjuge || {}), [k]: v } }),
+        });
+      }
+    };
+    put("nome", "Nome do cônjuge", dados.nome);
+    const cpfC = soDigitos(dados.cpf);
+    if (cpfC.length === 11) put("cpf", "CPF do cônjuge", fmtCpfCnpj(cpfC));
+    put("rg", "RG do cônjuge", rgComOrgao(dados));
+    const nac = limpo(dados.nacionalidade);
+    const gC = dados.genero === "M" || dados.genero === "F" ? dados.genero : "M";
+    put("nacionalidade", "Nacionalidade do cônjuge", nac && /^brasil/i.test(nac) ? NACIONALIDADE[gC] : nac);
+    p.conjuge = c;
   } else if (tipo === "comprovante_endereco") {
     campo("endereco", p.tipo_pessoa === "PJ" ? "Sede" : "Endereço", montarEndereco(dados));
   } else if (tipo === "certidao_estado_civil") {
