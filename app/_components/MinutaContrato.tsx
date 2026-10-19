@@ -202,6 +202,19 @@ export function CondicoesContrato({ c, setMin, contratoId, minutaId }: { c: C; s
           <input type="checkbox" checked={cd.primeiro_aluguel_ville !== false} onChange={(e) => setMin("condicoes", "primeiro_aluguel_ville", e.target.checked)} />
           <span>1º aluguel pago à Ville como intermediação</span>
         </label>
+        {minutaId ? (
+          <label className="vj-f vj-check">
+            <input type="checkbox" checked={cd.administrada !== false} onChange={(e) => setMin("condicoes", "administrada", e.target.checked)} />
+            <span>
+              Locação administrada pela Ville{" "}
+              <small className="vj-mc-mut">
+                {cd.administrada !== false
+                  ? "(boleto da Ville, repasse ao locador e contrato de administração)"
+                  : "— não administrada: o inquilino paga direto na conta do locador e não há contrato de administração"}
+              </small>
+            </span>
+          </label>
+        ) : null}
       </div>
 
       <div className="vj-mc-sub">Testemunhas <small>Em branco, o contrato sai com as linhas para preencher à mão.</small></div>
@@ -214,18 +227,22 @@ export function CondicoesContrato({ c, setMin, contratoId, minutaId }: { c: C; s
         ))}
       </div>
 
-      <div className="vj-mc-sub">Contrato de administração</div>
-      <div className="vj-grid">
-        <label className="vj-f">
-          <span>Valor mínimo do aluguel (R$)</span>
-          <input type="number" step="0.01" value={ad.valor_minimo ?? ""} placeholder={String(c.valor_atual_aluguel || c.valor_primeiro_aluguel || "")} onChange={(e) => setMin("administracao", "valor_minimo", e.target.value)} />
-          <small>Em branco = valor do aluguel.</small>
-        </label>
-        <label className="vj-f">
-          <span>Comissão se vender ao inquilino (%)</span>
-          <input type="number" step="0.01" value={ad.comissao_venda ?? ""} placeholder="6" onChange={(e) => setMin("administracao", "comissao_venda", e.target.value)} />
-        </label>
-      </div>
+      {cd.administrada !== false && (
+        <>
+        <div className="vj-mc-sub">Contrato de administração</div>
+        <div className="vj-grid">
+          <label className="vj-f">
+            <span>Valor mínimo do aluguel (R$)</span>
+            <input type="number" step="0.01" value={ad.valor_minimo ?? ""} placeholder={String(c.valor_atual_aluguel || c.valor_primeiro_aluguel || "")} onChange={(e) => setMin("administracao", "valor_minimo", e.target.value)} />
+            <small>Em branco = valor do aluguel.</small>
+          </label>
+          <label className="vj-f">
+            <span>Comissão se vender ao inquilino (%)</span>
+            <input type="number" step="0.01" value={ad.comissao_venda ?? ""} placeholder="6" onChange={(e) => setMin("administracao", "comissao_venda", e.target.value)} />
+          </label>
+        </div>
+        </>
+      )}
 
       <div className="vj-mc-sub">Pasta do imóvel no Google Drive</div>
       <div className="vj-mc-pasta">
@@ -251,10 +268,12 @@ export function GerarContratos({
   contratoId,
   minutaId,
   salvarAntes,
+  administrada = true,
 }: {
   contratoId?: number | null;
   minutaId?: number | null;
   salvarAntes: () => Promise<boolean>;
+  administrada?: boolean; // false = sem contrato de administração
 }) {
   const dono = alvo(contratoId, minutaId);
   const donoKey = donoQS(dono);
@@ -366,7 +385,7 @@ export function GerarContratos({
         </div>
       )}
       {bloco("locacao", "Contrato de locação")}
-      {bloco("administracao", "Contrato de administração")}
+      {administrada && bloco("administracao", "Contrato de administração")}
       <style dangerouslySetInnerHTML={{ __html: CSS_MC }} />
     </section>
   );
