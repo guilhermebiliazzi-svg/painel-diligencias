@@ -36,7 +36,7 @@ type Dados = DadosContrato & { pastaDrive: string | null; titulo: string };
 // minuta: monta contrato/imóvel/conta a partir do formulário do Novo contrato guardado em adm_minutas.dados
 async function carregarMinuta(sb: SB, id: number): Promise<Dados | null> {
   const { data: m } = await sb.from("adm_minutas").select("*").eq("id", id).maybeSingle();
-  if (!m || m.status !== "rascunho") return null;
+  if (!m || !["rascunho", "assinada"].includes(m.status)) return null;
   const f = (m.dados || {}) as Record<string, any>;
   const num = (v: unknown) => (/^\d+$/.test(String(v ?? "")) ? Number(v) : null);
   const c = { ...(f.c || {}) } as Record<string, any>;
@@ -122,6 +122,7 @@ export async function GET(req: Request) {
     administracao: { pendencias: montarAdministracao(d).pendencias },
     geradas: geradas || [],
     pasta_drive: d.pastaDrive,
+    administrada: d.contrato?.minuta?.condicoes?.administrada !== false,
   });
 }
 
@@ -147,7 +148,7 @@ export async function POST(req: Request) {
         .from("adm_minutas")
         .update({ drive_pasta_id: m ? m[1] : null, updated_at: new Date().toISOString() })
         .eq("id", dono.id)
-        .eq("status", "rascunho")
+        .in("status", ["rascunho", "assinada"])
         .select("id");
       if (error) return erro("Falha ao salvar a pasta.", 502, error.message);
       if (!data?.length) return erro("Minuta não encontrada.", 404);
@@ -165,6 +166,9 @@ export async function POST(req: Request) {
   const d = await carregar(sb, dono);
   if (!d) return erro(dono.tipo === "contrato" ? "Contrato não encontrado." : "Minuta não encontrada.", 404);
 
+  if (tipo === "administracao" && d.contrato?.minuta?.condicoes?.administrada === false) {
+    return erro("Locação não administrada: não há contrato de administração.");
+  }
   const { blocos } = montar(tipo, d);
   let docx: Buffer;
   try {
