@@ -93,6 +93,7 @@ export default function NovoContrato() {
   const [minutaDoc, setMinutaDoc] = useState<Record<string, any>>({});
   const [minutaMsg, setMinutaMsg] = useState<string | null>(null);
   const [minutaFechada, setMinutaFechada] = useState<{ status: string; contrato_id: number | null } | null>(null);
+  const [assinada, setAssinada] = useState(false); // locação não administrada já assinada (minuta encerrada)
   const [salvandoMinuta, setSalvandoMinuta] = useState(false);
   const contaModoPendente = useRef<string | null>(null); // conta escolhida na minuta, aplicada quando as contas do locador chegam
   const minutaIdRef = useRef<number | null>(null);
@@ -189,7 +190,8 @@ export default function NovoContrato() {
           return;
         }
         const m = d.minuta;
-        if (m.status !== "rascunho") {
+        if (m.status === "assinada") setAssinada(true);
+        else if (m.status !== "rascunho") {
           setMinutaFechada({ status: m.status, contrato_id: m.contrato_id });
           return;
         }
@@ -439,14 +441,36 @@ export default function NovoContrato() {
 
   const mostraValidadeGarantia = GARANTIA_COM_VALIDADE.has(c.garantia_categoria);
 
+  const administrada = minutaDoc?.condicoes?.administrada !== false;
+
+  // locação não administrada: assinada, a minuta só é encerrada (não vira contrato no painel)
+  async function encerrarMinuta() {
+    if (!minutaId) return;
+    if (!window.confirm("O contrato foi assinado? A minuta sai de Em elaboração e fica em Assinadas (não administradas). Nada entra em cobranças ou repasses.")) return;
+    if (!(await salvarMinuta())) return;
+    const r = await fetch("/api/adm/minutas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ acao: "encerrar", id: minutaId }),
+    });
+    if (r.ok) window.location.href = "/contratos";
+    else setErro((await r.json().catch(() => ({})))?.error || "Falha ao encerrar a minuta.");
+  }
+
   const botoes = () => (
     <div className="vj-acoes">
       <button className="vj-btn-sec" onClick={salvarMinuta} disabled={salvandoMinuta || salvando || !listas}>
-        {salvandoMinuta ? "Salvando…" : minutaId ? "Salvar minuta" : "Salvar como minuta"}
+        {salvandoMinuta ? "Salvando…" : minutaId ? (assinada ? "Salvar" : "Salvar minuta") : "Salvar como minuta"}
       </button>
-      <button className="vj-btn-salvar" onClick={criar} disabled={salvando || salvandoMinuta || !listas}>
-        {salvando ? etapa || "Salvando…" : minutaId ? "Contrato assinado: criar contrato" : "Criar contrato"}
-      </button>
+      {assinada ? null : minutaId && !administrada ? (
+        <button className="vj-btn-salvar" onClick={encerrarMinuta} disabled={salvando || salvandoMinuta || !listas}>
+          Contrato assinado: encerrar minuta
+        </button>
+      ) : (
+        <button className="vj-btn-salvar" onClick={criar} disabled={salvando || salvandoMinuta || !listas}>
+          {salvando ? etapa || "Salvando…" : minutaId ? "Contrato assinado: criar contrato" : "Criar contrato"}
+        </button>
+      )}
     </div>
   );
 
@@ -462,7 +486,9 @@ export default function NovoContrato() {
           <div>
             <h1 className="vj-h1">{minutaId ? "Minuta de locação" : "Novo contrato de locação"}</h1>
             <p className="vj-sub">
-              {minutaId
+              {minutaId && assinada
+                ? `Minuta nº ${minutaId} · locação assinada, não administrada pela Ville (fora de cobranças e repasses).`
+                : minutaId
                 ? `Minuta nº ${minutaId}. Ainda não é contrato: não entra em cobranças nem repasses.`
                 : "Escolha da base ou cadastre na hora. Os documentos sobem junto ao criar."}
             </p>
@@ -553,7 +579,9 @@ export default function NovoContrato() {
 
             {/* Conta de repasse */}
             <section className="vj-card">
-              <h2 className="vj-h2">Conta para repasse (dados bancários do locador)</h2>
+              <h2 className="vj-h2">
+                {administrada ? "Conta para repasse (dados bancários do locador)" : "Conta do locador (o inquilino paga o aluguel nesta conta)"}
+              </h2>
               <div className="vj-grid">
                 <label className="vj-f vj-larga">
                   <span>Conta</span>
@@ -567,7 +595,11 @@ export default function NovoContrato() {
                     <option value="depois">Cadastrar depois</option>
                   </select>
                   {contaModo === "depois" && (
-                    <small className="vj-alerta">Sem conta, o repasse por Pix não sai. Dá para cadastrar depois no Editar contrato.</small>
+                    <small className="vj-alerta">
+                      {administrada
+                        ? "Sem conta, o repasse por Pix não sai. Dá para cadastrar depois no Editar contrato."
+                        : "Sem conta, o contrato sai com os dados bancários em branco."}
+                    </small>
                   )}
                 </label>
               </div>
@@ -766,7 +798,7 @@ export default function NovoContrato() {
             {minutaId ? (
               <>
                 <CondicoesContrato c={{ ...c, minuta: minutaDoc }} setMin={setMin} minutaId={minutaId} />
-                <GerarContratos minutaId={minutaId} salvarAntes={async () => !!(await salvarMinuta())} />
+                <GerarContratos minutaId={minutaId} administrada={administrada} salvarAntes={async () => !!(await salvarMinuta())} />
               </>
             ) : (
               <section className="vj-card">
@@ -781,7 +813,7 @@ export default function NovoContrato() {
             <DocumentosContrato ref={docsRef} contratoId={null} minutaId={minutaId} />
 
             <div className="vj-foot">
-              {minutaId && (
+              {minutaId && !assinada && (
                 <button className="vj-btn-link" onClick={descartarMinuta} disabled={salvando || salvandoMinuta}>
                   Descartar minuta
                 </button>
