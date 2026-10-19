@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import DocumentosContrato, { type DocumentosContratoHandle } from "@/app/_components/DocumentosContrato";
-import PartesContrato from "@/app/_components/PartesContrato";
+import PessoasContrato from "@/app/_components/PessoasContrato";
 import { CondicoesContrato, GarantiaDetalhes, GerarContratos } from "@/app/_components/MinutaContrato";
 import ContaRepasse from "@/app/_components/ContaRepasse";
 
@@ -319,7 +319,28 @@ export default function EditarContrato() {
               </button>
             </div>
 
-            <PartesContrato contratoId={Number(c.id)} onDocsMudaram={() => docsRef.current?.recarregar()} />
+            <PessoasContrato
+              papel="locador"
+              titulo="Locadores (proprietários)"
+              subtitulo="Qualificação que vai no contrato. Envie o RG ou a CNH e os campos se preenchem sozinhos."
+              dono={{ contrato: Number(c.id) }}
+              onDocsMudaram={() => docsRef.current?.recarregar()}
+            />
+            <PessoasContrato
+              papel="locatario"
+              titulo="Locatários (inquilinos)"
+              dono={{ contrato: Number(c.id) }}
+              onDocsMudaram={() => docsRef.current?.recarregar()}
+            />
+            {c.garantia_categoria === "fiador" && (
+              <PessoasContrato
+                papel="fiador"
+                titulo="Fiadores"
+                subtitulo="Fiador casado: o cônjuge assina dando a outorga. Envie a matrícula do imóvel dado em garantia."
+                dono={{ contrato: Number(c.id) }}
+                onDocsMudaram={() => docsRef.current?.recarregar()}
+              />
+            )}
 
             <GerarContratos
               contratoId={Number(c.id)}
