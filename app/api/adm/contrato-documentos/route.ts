@@ -67,7 +67,7 @@ export async function GET(req: Request) {
   const [docsR, segR] = await Promise.all([
     sb
       .from("adm_contrato_documentos")
-      .select("id,categoria,seguro_id,parte_id,tipo_documento,descricao,nome,path,tamanho,mime,enviado_por,criado_em")
+      .select("id,categoria,seguro_id,parte_id,tipo_documento,descricao,nome,path,tamanho,mime,enviado_por,criado_em,link_externo")
       .eq("contrato_id", contrato)
       .is("excluido_em", null)
       .order("criado_em", { ascending: false }),
