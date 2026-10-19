@@ -9,7 +9,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import DocumentosContrato, { type DocumentosContratoHandle } from "@/app/_components/DocumentosContrato";
-import PartesContrato from "@/app/_components/PartesContrato";
+import PessoasContrato from "@/app/_components/PessoasContrato";
+import type { Parte } from "@/lib/contrato-partes";
 import { CondicoesContrato, EstilosMinuta, GarantiaDetalhes, GerarContratos } from "@/app/_components/MinutaContrato";
 import { FormConta, contaVazia, resumoConta, type ContaForm } from "@/app/_components/ContaRepasse";
 import { normalizarConta } from "@/lib/bancos";
@@ -94,6 +95,9 @@ export default function NovoContrato() {
   const [minutaFechada, setMinutaFechada] = useState<{ status: string; contrato_id: number | null } | null>(null);
   const [salvandoMinuta, setSalvandoMinuta] = useState(false);
   const contaModoPendente = useRef<string | null>(null); // conta escolhida na minuta, aplicada quando as contas do locador chegam
+  const minutaIdRef = useRef<number | null>(null);
+  minutaIdRef.current = minutaId;
+  const criandoMinuta = useRef<Promise<number | null> | null>(null);
   function setMin(secao: "garantia" | "condicoes" | "administracao", campo: string, valor: any) {
     setMinutaDoc((prev) => ({ ...prev, [secao]: { ...(prev[secao] || {}), [campo]: valor } }));
   }
@@ -218,8 +222,19 @@ export default function NovoContrato() {
     return () => clearTimeout(t);
   }, [minutaMsg]);
 
-  async function salvarMinuta(): Promise<boolean> {
-    if (salvandoMinuta) return false;
+  // devolve o nº da minuta (cria na primeira vez) ou null se falhou
+  async function salvarMinuta(): Promise<number | null> {
+    if (criandoMinuta.current) return criandoMinuta.current;
+    const p = salvarMinutaAgora();
+    if (!minutaIdRef.current) criandoMinuta.current = p;
+    try {
+      return await p;
+    } finally {
+      criandoMinuta.current = null;
+    }
+  }
+
+  async function salvarMinutaAgora(): Promise<number | null> {
     setErro(null);
     setMinutaMsg(null);
     setSalvandoMinuta(true);
@@ -228,22 +243,23 @@ export default function NovoContrato() {
       const r = await fetch("/api/adm/minutas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ acao: "salvar", id: minutaId, dados, minuta: minutaDoc }),
+        body: JSON.stringify({ acao: "salvar", id: minutaIdRef.current, dados, minuta: minutaDoc }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
         setErro(d?.error || "Falha ao salvar a minuta.");
-        return false;
+        return null;
       }
-      if (!minutaId) {
+      if (!minutaIdRef.current) {
+        minutaIdRef.current = d.id;
         setMinutaId(d.id);
         window.history.replaceState(null, "", `/contratos/novo?minuta=${d.id}`);
       }
       setMinutaMsg("Minuta salva.");
-      return true;
+      return d.id as number;
     } catch {
       setErro("Erro de rede ao salvar a minuta.");
-      return false;
+      return null;
     } finally {
       setSalvandoMinuta(false);
     }
@@ -258,6 +274,41 @@ export default function NovoContrato() {
     });
     if (r.ok) window.location.href = "/contratos";
     else setErro((await r.json().catch(() => ({})))?.error || "Falha ao descartar.");
+  }
+
+  // pessoas digitadas nos quadros -> vínculo com o cadastro (locador/locatário já existentes
+  // pelo CPF/CNPJ; senão, cadastro novo ao criar o contrato)
+  const doc = (v: unknown) => String(v ?? "").replace(/\D/g, "");
+  function sincronizar(
+    partes: Parte[],
+    base: Pessoa[],
+    sel: string,
+    setSel: (v: string) => void,
+    novo: typeof vazioPessoa,
+    setNovo: (v: typeof vazioPessoa) => void
+  ) {
+    const p = partes[0];
+    if (!p) return;
+    const d = doc(p.cpf_cnpj);
+    const igual = d ? base.find((x) => doc(x.cpf_cnpj) === d) : undefined;
+    if (igual) {
+      if (sel !== String(igual.id)) setSel(String(igual.id));
+      return;
+    }
+    const n = { nome: p.nome || "", cpf_cnpj: p.cpf_cnpj || "", email: p.email || "", telefone: p.telefone || "" };
+    if (sel !== NOVO) setSel(NOVO);
+    if (JSON.stringify(n) !== JSON.stringify(novo)) setNovo(n);
+  }
+  function locadoresMudaram(partes: Parte[]) {
+    if (imovelSel && imovelSel !== NOVO) return; // imóvel do cadastro já define o locador
+    sincronizar(partes, listas?.locadores || [], locadorSel, setLocadorSel, locadorNovo, setLocadorNovo);
+  }
+  function locatariosMudaram(partes: Parte[]) {
+    sincronizar(partes, listas?.locatarios || [], locatarioSel, setLocatarioSel, locatarioNovo, setLocatarioNovo);
+  }
+  async function obterDono() {
+    const id = minutaIdRef.current || (await salvarMinuta());
+    return id ? { minuta: id } : null;
   }
 
   // imóveis do locador escolhido (ou todos, se locador ainda não escolhido)
@@ -311,10 +362,10 @@ export default function NovoContrato() {
 
     // validações rápidas (o servidor valida de novo)
     if (!imovelSel) return setErro("Escolha o imóvel (ou “Cadastrar novo”).");
-    if (imovelSel === NOVO && !locadorSel_) return setErro("Escolha o locador (ou “Cadastrar novo”).");
+    if (imovelSel === NOVO && !locadorSel_) return setErro("Preencha o locador (proprietário).");
     if (imovelSel === NOVO && locadorSel_ === NOVO && !locadorNovo_.nome.trim()) return setErro("Informe o nome do locador.");
     if (imovelSel === NOVO && (!imovelNovo.rua.trim() || !imovelNovo.numero.trim())) return setErro("Informe rua e número do imóvel.");
-    if (!locatarioSel_) return setErro("Escolha o locatário (ou “Cadastrar novo”).");
+    if (!locatarioSel_) return setErro("Preencha o locatário (inquilino).");
     if (locatarioSel_ === NOVO && !locatarioNovo_.nome.trim()) return setErro("Informe o nome do locatário.");
     if (!c.valor_primeiro_aluguel) return setErro("Informe o valor do aluguel.");
     if (!c.data_inicio) return setErro("Informe a data de início.");
@@ -399,15 +450,6 @@ export default function NovoContrato() {
     </div>
   );
 
-  const camposPessoa = (p: typeof vazioPessoa, setP: (x: typeof vazioPessoa) => void) => (
-    <div className="vj-grid vj-sub-grid">
-      <label className="vj-f"><span>Nome *</span><input value={p.nome} onChange={(e) => setP({ ...p, nome: e.target.value })} /></label>
-      <label className="vj-f"><span>CPF / CNPJ</span><input value={p.cpf_cnpj} onChange={(e) => setP({ ...p, cpf_cnpj: e.target.value })} /></label>
-      <label className="vj-f"><span>E-mail</span><input type="email" value={p.email} onChange={(e) => setP({ ...p, email: e.target.value })} /></label>
-      <label className="vj-f"><span>Telefone</span><input value={p.telefone} onChange={(e) => setP({ ...p, telefone: e.target.value })} /></label>
-    </div>
-  );
-
   return (
     <div className="vj-wrap">
       <header className="vj-top">
@@ -442,10 +484,10 @@ export default function NovoContrato() {
         )}
         {listas && !minutaId && !minutaFechada && (
           <div className="vj-card vj-info">
-            <b>Locação ainda não assinada?</b> Preencha o que já souber e clique em <b>Salvar como minuta</b>. Na minuta
-            você cadastra as partes com a leitura dos documentos e gera o contrato de locação e o de administração no
-            Google Docs, sem nada entrar em cobranças ou repasses. Depois da assinatura, abra a minuta em Contratos e
-            clique em <b>Contrato assinado: criar contrato</b>.
+            <b>Antes da assinatura, tudo fica como minuta.</b> Ao enviar o primeiro documento ou preencher a primeira
+            pessoa, a locação é salva como minuta: dá para gerar o contrato de locação e o de administração no Google
+            Docs sem nada entrar em cobranças ou repasses. Depois da assinatura, abra a minuta em Contratos e clique em{" "}
+            <b>Contrato assinado: criar contrato</b>.
           </div>
         )}
 
@@ -453,7 +495,7 @@ export default function NovoContrato() {
           <>
             {/* Imóvel e locador */}
             <section className="vj-card">
-              <h2 className="vj-h2">Imóvel e locador</h2>
+              <h2 className="vj-h2">Imóvel</h2>
               <div className="vj-grid">
                 <label className="vj-f vj-larga">
                   <span>Imóvel *</span>
@@ -471,29 +513,7 @@ export default function NovoContrato() {
                   ) : null}
                 </label>
 
-                <label className="vj-f vj-larga">
-                  <span>Locador (proprietário) {imovelSel === NOVO ? "*" : ""}</span>
-                  <select
-                    value={locadorSel}
-                    disabled={!!imovelSel && imovelSel !== NOVO}
-                    onChange={(e) => { setLocadorSel(e.target.value); if (imovelSel !== NOVO) setImovelSel(""); }}
-                  >
-                    <option value="">— escolha —</option>
-                    <option value={NOVO}>+ Cadastrar locador novo</option>
-                    {listas.locadores.map((p) => (
-                      <option key={p.id} value={p.id}>{p.nome}{p.cpf_cnpj ? ` · ${p.cpf_cnpj}` : ""}</option>
-                    ))}
-                  </select>
-                  {imovelSel && imovelSel !== NOVO && <small>Definido pelo imóvel escolhido.</small>}
-                </label>
               </div>
-
-              {imovelSel === NOVO && locadorSel === NOVO && (
-                <>
-                  <h3 className="vj-h3">Novo locador</h3>
-                  {camposPessoa(locadorNovo, setLocadorNovo)}
-                </>
-              )}
 
               {imovelSel === NOVO && (
                 <>
@@ -519,6 +539,17 @@ export default function NovoContrato() {
                 </>
               )}
             </section>
+
+            <PessoasContrato
+              papel="locador"
+              titulo="Locadores (proprietários)"
+              subtitulo="Envie o RG ou a CNH e os campos se preenchem sozinhos. Os documentos ficam guardados na pasta da locação."
+              dono={minutaId ? { minuta: minutaId } : null}
+              obterDono={obterDono}
+              base={imovelEscolhido ? listas.locadores.find((x) => x.id === imovelEscolhido.locador_id) || null : null}
+              onMudou={locadoresMudaram}
+              onDocsMudaram={() => docsRef.current?.recarregar()}
+            />
 
             {/* Conta de repasse */}
             <section className="vj-card">
@@ -551,23 +582,14 @@ export default function NovoContrato() {
               )}
             </section>
 
-            {/* Locatário */}
-            <section className="vj-card">
-              <h2 className="vj-h2">Locatário (inquilino)</h2>
-              <div className="vj-grid">
-                <label className="vj-f vj-larga">
-                  <span>Locatário *</span>
-                  <select value={locatarioSel} onChange={(e) => setLocatarioSel(e.target.value)}>
-                    <option value="">— escolha —</option>
-                    <option value={NOVO}>+ Cadastrar locatário novo</option>
-                    {listas.locatarios.map((p) => (
-                      <option key={p.id} value={p.id}>{p.nome}{p.cpf_cnpj ? ` · ${p.cpf_cnpj}` : ""}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              {locatarioSel === NOVO && camposPessoa(locatarioNovo, setLocatarioNovo)}
-            </section>
+            <PessoasContrato
+              papel="locatario"
+              titulo="Locatários (inquilinos)"
+              dono={minutaId ? { minuta: minutaId } : null}
+              obterDono={obterDono}
+              onMudou={locatariosMudaram}
+              onDocsMudaram={() => docsRef.current?.recarregar()}
+            />
 
             {/* Aluguel e prazo */}
             <section className="vj-card">
@@ -642,6 +664,17 @@ export default function NovoContrato() {
                 </p>
               )}
             </section>
+
+            {c.garantia_categoria === "fiador" && (
+              <PessoasContrato
+                papel="fiador"
+                titulo="Fiadores"
+                subtitulo="Fiador casado: o cônjuge assina dando a outorga. Envie a matrícula do imóvel dado em garantia."
+                dono={minutaId ? { minuta: minutaId } : null}
+                obterDono={obterDono}
+                onDocsMudaram={() => docsRef.current?.recarregar()}
+              />
+            )}
 
             {/* Seguro residencial */}
             <section className="vj-card">
@@ -733,19 +766,15 @@ export default function NovoContrato() {
             {minutaId ? (
               <>
                 <CondicoesContrato c={{ ...c, minuta: minutaDoc }} setMin={setMin} minutaId={minutaId} />
-                <PartesContrato minutaId={minutaId} onDocsMudaram={() => docsRef.current?.recarregar()} />
-                <GerarContratos minutaId={minutaId} salvarAntes={salvarMinuta} />
+                <GerarContratos minutaId={minutaId} salvarAntes={async () => !!(await salvarMinuta())} />
               </>
             ) : (
               <section className="vj-card">
-                <h2 className="vj-h2">Partes e texto do contrato</h2>
+                <h2 className="vj-h2">Gerar contratos</h2>
                 <p className="vj-nota" style={{ marginTop: 0 }}>
-                  Para cadastrar as partes com a leitura dos documentos e gerar o contrato de locação e o de administração,
-                  salve primeiro como minuta.
+                  Aparece assim que a minuta for salva: preencha as pessoas acima (ou clique em Salvar minuta) e gere o
+                  contrato de locação e o de administração no Google Docs.
                 </p>
-                <button className="vj-btn-sec" style={{ marginTop: 12 }} onClick={salvarMinuta} disabled={salvandoMinuta}>
-                  {salvandoMinuta ? "Salvando…" : "Salvar como minuta"}
-                </button>
               </section>
             )}
 
