@@ -14,6 +14,7 @@ const semAcento = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, 
 
 export default function Contratos() {
   const [minutas, setMinutas] = useState<Minuta[] | null>(null);
+  const [assinadas, setAssinadas] = useState<Minuta[]>([]);
   const [contratos, setContratos] = useState<Contrato[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [busca, setBusca] = useState("");
@@ -30,6 +31,7 @@ export default function Contratos() {
         const dc = await rc.json().catch(() => ({}));
         if (!rm.ok || !rc.ok) setErro(dm?.error || dc?.error || "Falha ao carregar.");
         setMinutas(dm.minutas || []);
+        setAssinadas(dm.assinadas || []);
         setContratos(dc.contratos || []);
       } catch {
         setErro("Erro de rede.");
@@ -92,6 +94,22 @@ export default function Contratos() {
             </div>
           )}
         </section>
+
+        {assinadas.length > 0 && (
+          <section className="vj-card">
+            <h2 className="vj-h2">Assinadas · não administradas <small>a Ville só intermediou: fora de cobranças e repasses</small></h2>
+            <div className="vj-lista">
+              {assinadas.map((m) => (
+                <a key={m.id} href={`/contratos/novo?minuta=${m.id}`} className="vj-linha">
+                  <span className="vj-tag">Minuta {m.id}</span>
+                  <span className="vj-tit">{m.titulo || "Minuta sem imóvel"}</span>
+                  <span className="vj-meta">assinada · atualizada {quando(m.updated_at)}</span>
+                  <span className="vj-ir">Abrir →</span>
+                </a>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="vj-card">
           <h2 className="vj-h2">Contratos cadastrados</h2>
