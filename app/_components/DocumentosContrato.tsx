@@ -4,10 +4,12 @@
 // - Com contratoId: lista/abre/renomeia/exclui e envia na hora.
 // - Sem contratoId (tela "Novo contrato"): guarda os arquivos numa fila; a tela chama
 //   ref.enviarFila(id) depois de criar o contrato.
+// - Com minutaId (locação ainda não assinada): envia na hora para a minuta; sem apólices.
 // O arquivo vai DIRETO do navegador para o Storage (URL assinada) — sem limite da Vercel.
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { CATEGORIAS_DOC, TIPOS_SEGURO, nomeTipoSeguro, ALERTA_APOLICE_DIAS, mesCurto } from "@/lib/contrato-documentos";
+import { donoQS, donoRef, type DonoRef } from "@/lib/contrato-dono";
 
 type Doc = {
   id: number;
@@ -64,12 +66,13 @@ const fmtTam = (n: number | null) =>
 // extra: documentos das partes (parte_id, tipo_documento, descricao) — usado por PartesContrato
 export type ExtraDoc = { parte_id?: number | null; tipo_documento?: string; descricao?: string };
 
-export async function enviarArquivo(contratoId: number, file: File, categoria: string, apolice?: Apolice, extra?: ExtraDoc) {
+export async function enviarArquivo(dono: number | DonoRef, file: File, categoria: string, apolice?: Apolice, extra?: ExtraDoc) {
+  const alvo: DonoRef = typeof dono === "number" ? { contrato: dono } : dono;
   if (file.size > LIMITE_BYTES) throw new Error(`${file.name}: arquivo acima de 50 MB.`);
   const r1 = await fetch("/api/adm/contrato-documentos", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ acao: "upload-url", contrato: contratoId, categoria, nome: file.name }),
+    body: JSON.stringify({ acao: "upload-url", ...alvo, categoria, nome: file.name }),
   });
   const d1 = await r1.json().catch(() => ({}));
   if (!r1.ok) throw new Error(d1?.error || "Falha ao preparar o envio.");
@@ -86,7 +89,7 @@ export async function enviarArquivo(contratoId: number, file: File, categoria: s
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       acao: "registrar",
-      contrato: contratoId,
+      ...alvo,
       categoria,
       path: d1.path,
       nome: file.name,
@@ -122,8 +125,10 @@ function resumoCobranca(s: Seguro): string {
   return `No boleto: ${v} por mês`;
 }
 
-const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: number | null }>(
-  function DocumentosContrato({ contratoId }, ref) {
+const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: number | null; minutaId?: number | null }>(
+  function DocumentosContrato({ contratoId, minutaId }, ref) {
+    const dono = donoRef(contratoId, minutaId);
+    const donoKey = dono ? donoQS(dono) : "";
     const [docs, setDocs] = useState<Doc[]>([]);
     const [seguros, setSeguros] = useState<Seguro[]>([]);
     const [carregando, setCarregando] = useState(false);
@@ -143,10 +148,10 @@ const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: nu
     const inputs = useRef<Record<string, HTMLInputElement | null>>({});
 
     const carregar = useCallback(async () => {
-      if (!contratoId) return;
+      if (!donoKey) return;
       setCarregando(true);
       try {
-        const r = await fetch(`/api/adm/contrato-documentos?contrato=${contratoId}`, { cache: "no-store" });
+        const r = await fetch(`/api/adm/contrato-documentos?${donoKey}`, { cache: "no-store" });
         const d = await r.json();
         if (!r.ok) setErro(d?.error || "Falha ao carregar documentos.");
         else {
@@ -158,7 +163,7 @@ const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: nu
       } finally {
         setCarregando(false);
       }
-    }, [contratoId]);
+    }, [donoKey]);
 
     useEffect(() => {
       carregar();
@@ -201,7 +206,7 @@ const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: nu
         files = files.filter((f) => f.size <= LIMITE_BYTES);
         if (!files.length) return;
       }
-      if (!contratoId) {
+      if (!dono) {
         setFila((q) => [
           ...q,
           ...files.map((file, i) => ({ key: `${Date.now()}-${i}-${file.name}`, file, categoria, apolice })),
@@ -213,7 +218,7 @@ const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: nu
       let ap2 = apolice;
       for (const f of files) {
         try {
-          const r = await enviarArquivo(contratoId, f, categoria, ap2);
+          const r = await enviarArquivo(dono, f, categoria, ap2);
           // 2º arquivo da mesma apólice nova vai pra MESMA apólice (não cria outra)
           if (categoria === "apolice" && r.seguro_id) ap2 = { seguro_id: r.seguro_id };
         } catch (e: any) {
@@ -365,7 +370,7 @@ const DocumentosContrato = forwardRef<DocumentosContratoHandle, { contratoId: nu
         {erro && <div className="vj-dc-erro">{erro}</div>}
 
         <div className="vj-dc-grid">
-          {CATEGORIAS_DOC.filter((cat) => contratoId || cat.v !== "documentos_partes").map((cat) => {
+          {CATEGORIAS_DOC.filter((cat) => (dono || cat.v !== "documentos_partes") && (contratoId || !minutaId || cat.v !== "apolice")).map((cat) => {
             const lista = docsDe(cat.v);
             const pend = filaDe(cat.v);
             const isAp = cat.v === "apolice";
