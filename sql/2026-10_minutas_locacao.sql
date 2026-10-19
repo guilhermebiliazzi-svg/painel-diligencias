@@ -32,3 +32,7 @@ ALTER TABLE adm_contrato_documentos ALTER COLUMN contrato_id DROP NOT NULL;
 ALTER TABLE adm_contrato_documentos DROP CONSTRAINT IF EXISTS adm_contrato_documentos_dono_check;
 ALTER TABLE adm_contrato_documentos ADD CONSTRAINT adm_contrato_documentos_dono_check CHECK (contrato_id IS NOT NULL OR minuta_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS adm_contrato_documentos_minuta ON adm_contrato_documentos (minuta_id) WHERE minuta_id IS NOT NULL;
+
+-- 19/10: locação NÃO administrada pela Ville — depois de assinada, a minuta só é encerrada (status 'assinada')
+ALTER TABLE adm_minutas DROP CONSTRAINT IF EXISTS adm_minutas_status_check;
+ALTER TABLE adm_minutas ADD CONSTRAINT adm_minutas_status_check CHECK (status IN ('rascunho','convertida','descartada','assinada'));
