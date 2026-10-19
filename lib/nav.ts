@@ -16,7 +16,7 @@ export type ItemNav = {
 const EMOJI: Record<string, string> = {
   sdr: '🔻', captacao: '🔎', estudo: '📝', representacao: '✍️', diligencias: '📄', postagens: '🖼️', vitrine: '📣',
   'cobranca-avulsa': '💳', 'notas-comissao': '🧾',
-  cobrancas: '💳', repasse: '🔁', pagamentos: '🏦', locador: '🏢', notas: '🧾',
+  cobrancas: '💳', contratos: '📑', repasse: '🔁', pagamentos: '🏦', locador: '🏢', notas: '🧾',
   usuarios: '👥', treinamento: '🎓',
 };
 
@@ -49,6 +49,7 @@ export function getNav(): ItemNav[] {
     item('notas-comissao', 'Notas de comissão', 'NFS-e de corretagem sobre os recebimentos do Asaas e notas avulsas.', 'PAINEL_URL_NOTAS_COMISSAO', '/notas-comissao', 'notas', 'violet', 'notas', 'venda'),
     // Administração
     item('cobrancas', 'Cobranças', 'Boletos, faturas e situação de pagamentos.', 'PAINEL_URL_COBRANCAS', '/cobrancas', 'cobrancas', 'amber', 'cobrancas'),
+    item('contratos', 'Contratos', 'Minutas de locação antes da assinatura (partes, garantia e contrato no Google Docs) e contratos cadastrados.', 'PAINEL_URL_CONTRATOS', '/contratos', 'cobrancas', 'amber', 'cobrancas'),
     item('repasse', 'Repasse', 'Repasses aos locadores e conciliação de valores.', 'PAINEL_URL_REPASSE', '/repasses', 'repasse', 'emerald', 'repasse'),
     item('pagamentos', 'Pagamentos', 'Pagar boletos da imobiliária (IPTU/condomínio) pelo Banco Inter.', 'PAINEL_URL_PAGAMENTOS', '/pagamentos', 'cobrancas', 'slate', 'pagamentos'),
     item('locador', 'Portal do locador', 'Ver o portal de cada locador: recibos, comprovantes e envio por e-mail.', 'PAINEL_URL_LOCADOR', '/locador', 'locador', 'emerald', 'locador'),
