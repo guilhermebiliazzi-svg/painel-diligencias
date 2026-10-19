@@ -321,8 +321,12 @@ export function montarLocacao(d: DadosContrato): { blocos: Bloco[]; pendencias: 
     if (!s) {
       pend.push("Seguro fiança: escolha a seguradora.");
       gar = ["[ESCOLHA A SEGURADORA NO CADASTRO DO CONTRATO]"];
+    } else if (s === "too" && !administrada) {
+      // a Too só é usada nas locações administradas pela Ville
+      pend.push("Seguro fiança Too só vale para locação administrada pela Ville: escolha outra seguradora.");
+      gar = ["[SEGURO TOO SÓ PARA LOCAÇÃO ADMINISTRADA PELA VILLE: ESCOLHA OUTRA SEGURADORA]"];
     } else {
-      gar = clausulaSeguro({ seguradora: s, coberturas: g.coberturas || [], locatariosPF, quitacaoVille: g.quitacao_ville !== false });
+      gar = clausulaSeguro({ seguradora: s, coberturas: g.coberturas || [], locatariosPF, quitacaoVille: administrada && g.quitacao_ville !== false });
     }
   } else if (categoria === "capitalizacao") {
     const k = g.capitalizacao || {};
