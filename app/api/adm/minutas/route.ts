@@ -6,6 +6,8 @@
 // POST { acao: "converter", id, contrato }      -> depois de cadastrar o contrato assinado: partes, documentos,
 //                                                  condições e pasta do Drive passam para o contrato
 // POST { acao: "descartar", id }                -> some da lista (nada é apagado)
+// POST { acao: "encerrar", id }                 -> locação NÃO administrada assinada: a minuta vira "assinada"
+//                                                  (não cria contrato no painel; documentos e contratos gerados ficam)
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { acessoContratos } from "@/lib/adm-acesso";
@@ -71,12 +73,16 @@ export async function GET(req: Request) {
   }
   const { data, error } = await sb
     .from("adm_minutas")
-    .select("id,titulo,criado_por,created_at,updated_at")
-    .eq("status", "rascunho")
+    .select("id,status,titulo,criado_por,created_at,updated_at")
+    .in("status", ["rascunho", "assinada"])
     .order("updated_at", { ascending: false })
-    .limit(100);
+    .limit(200);
   if (error) return erro("Falha ao carregar as minutas.", 502, error.message);
-  return NextResponse.json({ minutas: data || [] });
+  const lista = data || [];
+  return NextResponse.json({
+    minutas: lista.filter((m) => m.status === "rascunho"),
+    assinadas: lista.filter((m) => m.status === "assinada"),
+  });
 }
 
 export async function POST(req: Request) {
@@ -98,7 +104,7 @@ export async function POST(req: Request) {
     if (body.minuta !== undefined) patch.minuta = normalizarMinuta(body.minuta);
     const id = idValido(body.id);
     if (id) {
-      const { data, error } = await sb.from("adm_minutas").update(patch).eq("id", id).eq("status", "rascunho").select("id");
+      const { data, error } = await sb.from("adm_minutas").update(patch).eq("id", id).in("status", ["rascunho", "assinada"]).select("id");
       if (error) return erro("Falha ao salvar a minuta.", 502, error.message);
       if (!data?.length) return erro("Minuta não encontrada (ou já virou contrato).", 404);
       return NextResponse.json({ ok: true, id });
@@ -116,6 +122,15 @@ export async function POST(req: Request) {
   if (!id) return erro("Minuta inválida.");
   const { data: m } = await sb.from("adm_minutas").select("id,status,minuta,drive_pasta_id").eq("id", id).maybeSingle();
   if (!m) return erro("Minuta não encontrada.", 404);
+  if (body.acao === "encerrar") {
+    if (m.status !== "rascunho") return erro("Esta minuta não está em elaboração.");
+    if ((m.minuta as any)?.condicoes?.administrada !== false) {
+      return erro("Locação administrada: use “Contrato assinado: criar contrato”.");
+    }
+    await sb.from("adm_minutas").update({ status: "assinada", updated_at: agora }).eq("id", id);
+    return NextResponse.json({ ok: true });
+  }
+
   if (m.status !== "rascunho") return erro("Esta minuta já virou contrato ou foi descartada.");
 
   if (body.acao === "descartar") {
