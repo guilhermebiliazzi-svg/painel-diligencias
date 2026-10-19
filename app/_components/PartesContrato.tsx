@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { enviarArquivo } from "@/app/_components/DocumentosContrato";
+import { donoQS, type DonoRef } from "@/lib/contrato-dono";
 import {
   COM_CONJUGE,
   ESTADOS_CIVIS,
@@ -39,7 +40,17 @@ const vazio = (papel: Papel): Parte => ({ papel, tipo_pessoa: "PF", nome: "" });
 const chave = (p: Parte, i: number) => (p.id ? `p${p.id}` : `s-${p.papel}-${i}`);
 const ACEITA = "application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif";
 
-export default function PartesContrato({ contratoId, onDocsMudaram }: { contratoId: number; onDocsMudaram?: () => void }) {
+export default function PartesContrato({
+  contratoId,
+  minutaId,
+  onDocsMudaram,
+}: {
+  contratoId?: number | null;
+  minutaId?: number | null; // locação ainda não assinada
+  onDocsMudaram?: () => void;
+}) {
+  const dono: DonoRef = contratoId ? { contrato: contratoId } : { minuta: Number(minutaId) };
+  const donoKey = donoQS(dono);
   const [itens, setItens] = useState<Item[]>([]);
   const [docs, setDocs] = useState<DocParte[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -59,7 +70,7 @@ export default function PartesContrato({ contratoId, onDocsMudaram }: { contrato
 
   const carregar = useCallback(async () => {
     try {
-      const r = await fetch(`/api/adm/contrato-partes?contrato=${contratoId}`, { cache: "no-store" });
+      const r = await fetch(`/api/adm/contrato-partes?${donoKey}`, { cache: "no-store" });
       const d = await r.json();
       if (!r.ok) {
         setErro(d?.error || "Falha ao carregar as partes.");
@@ -75,7 +86,7 @@ export default function PartesContrato({ contratoId, onDocsMudaram }: { contrato
     } finally {
       setCarregando(false);
     }
-  }, [contratoId]);
+  }, [donoKey]);
 
   useEffect(() => {
     carregar();
@@ -113,7 +124,7 @@ export default function PartesContrato({ contratoId, onDocsMudaram }: { contrato
     setLeituras((l) => ({ ...l, [tipo]: { estado: "enviando" } }));
     let docId: number;
     try {
-      const r = await enviarArquivo(contratoId, file, "documentos_partes", undefined, {
+      const r = await enviarArquivo(dono, file, "documentos_partes", undefined, {
         parte_id: form.id || null,
         tipo_documento: tipo,
         descricao: `${rotuloDoc(tipo)} — ${form.nome || "parte em cadastro"}`,
@@ -132,7 +143,7 @@ export default function PartesContrato({ contratoId, onDocsMudaram }: { contrato
       const r = await fetch("/api/adm/contrato-partes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ acao: "ler", contrato: contratoId, documento_id: docId }),
+        body: JSON.stringify({ acao: "ler", ...dono, documento_id: docId }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || "Não consegui ler o documento.");
@@ -163,7 +174,7 @@ export default function PartesContrato({ contratoId, onDocsMudaram }: { contrato
       const r = await fetch("/api/adm/contrato-partes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ acao: "salvar", contrato: contratoId, parte: form, documentos: docsNovos }),
+        body: JSON.stringify({ acao: "salvar", ...dono, parte: form, documentos: docsNovos }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
@@ -183,7 +194,7 @@ export default function PartesContrato({ contratoId, onDocsMudaram }: { contrato
   async function remover() {
     if (!form?.id) return;
     if (!window.confirm(`Remover ${form.nome} das partes do contrato? Os documentos continuam na pasta do contrato.`)) return;
-    const r = await fetch(`/api/adm/contrato-partes?id=${form.id}&contrato=${contratoId}`, { method: "DELETE" });
+    const r = await fetch(`/api/adm/contrato-partes?id=${form.id}&${donoKey}`, { method: "DELETE" });
     if (!r.ok) {
       setErroForm((await r.json().catch(() => ({})))?.error || "Falha ao remover.");
       return;
