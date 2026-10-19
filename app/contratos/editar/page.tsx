@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import DocumentosContrato, { type DocumentosContratoHandle } from "@/app/_components/DocumentosContrato";
 import PartesContrato from "@/app/_components/PartesContrato";
+import { CondicoesContrato, GarantiaDetalhes, GerarContratos } from "@/app/_components/MinutaContrato";
 import ContaRepasse from "@/app/_components/ContaRepasse";
 
 type Contrato = Record<string, any>;
@@ -77,8 +78,18 @@ export default function EditarContrato() {
     setC((prev) => (prev ? { ...prev, [campo]: valor } : prev));
   }
 
-  async function salvar() {
-    if (!c || !id || salvando) return;
+  // condições que só existem no texto do contrato (adm_contratos.minuta)
+  function setMin(secao: "garantia" | "condicoes" | "administracao", campo: string, valor: any) {
+    setC((prev) => {
+      if (!prev) return prev;
+      const m = { ...(prev.minuta || {}) };
+      m[secao] = { ...(m[secao] || {}), [campo]: valor };
+      return { ...prev, minuta: m };
+    });
+  }
+
+  async function salvar(): Promise<boolean> {
+    if (!c || !id || salvando) return false;
     setSalvando(true);
     setMsg(null);
     setErro(null);
@@ -89,13 +100,16 @@ export default function EditarContrato() {
         body: JSON.stringify(c),
       });
       const d = await res.json();
-      if (!res.ok) setErro(d?.error || "Falha ao salvar.");
-      else {
-        setMsg("Contrato salvo.");
-        if (d.contrato) setC((prev) => ({ ...prev, ...d.contrato }));
+      if (!res.ok) {
+        setErro(d?.error || "Falha ao salvar.");
+        return false;
       }
+      setMsg("Contrato salvo.");
+      if (d.contrato) setC((prev) => ({ ...prev, ...d.contrato }));
+      return true;
     } catch {
       setErro("Erro de rede ao salvar.");
+      return false;
     } finally {
       setSalvando(false);
     }
@@ -245,6 +259,7 @@ export default function EditarContrato() {
                   </label>
                 )}
               </div>
+              <GarantiaDetalhes c={c} setMin={setMin} />
             </section>
 
             {/* Responsabilidades e taxas */}
@@ -293,6 +308,8 @@ export default function EditarContrato() {
               </div>
             </section>
 
+            <CondicoesContrato c={c} setMin={setMin} contratoId={Number(c.id)} />
+
             <div className="vj-foot">
               <button className="vj-btn-salvar" onClick={salvar} disabled={salvando}>
                 {salvando ? "Salvando…" : "Salvar alterações"}
@@ -300,6 +317,15 @@ export default function EditarContrato() {
             </div>
 
             <PartesContrato contratoId={Number(c.id)} onDocsMudaram={() => docsRef.current?.recarregar()} />
+
+            <GerarContratos
+              contratoId={Number(c.id)}
+              salvarAntes={async () => {
+                const ok = await salvar();
+                await docsRef.current?.recarregar();
+                return ok;
+              }}
+            />
 
             <ContaRepasse contratoId={Number(c.id)} />
 
