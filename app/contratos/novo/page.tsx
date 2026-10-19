@@ -2,9 +2,15 @@
 
 // Cadastro de contrato de locação: locador → imóvel → locatário → contrato → documentos.
 // Locador/imóvel/locatário podem ser escolhidos da base ou cadastrados aqui mesmo.
+// Antes da assinatura, a locação fica como MINUTA (?minuta=ID, tabela adm_minutas): guarda este
+// formulário, as partes, os documentos e as condições do texto, e gera os contratos no Google Docs.
+// Nada da minuta entra em cobranças ou repasses. Depois de assinado, "Contrato assinado: criar
+// contrato" cadastra o contrato e passa para ele as partes, os documentos e as condições.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import DocumentosContrato, { type DocumentosContratoHandle } from "@/app/_components/DocumentosContrato";
+import PartesContrato from "@/app/_components/PartesContrato";
+import { CondicoesContrato, EstilosMinuta, GarantiaDetalhes, GerarContratos } from "@/app/_components/MinutaContrato";
 import { FormConta, contaVazia, resumoConta, type ContaForm } from "@/app/_components/ContaRepasse";
 import { normalizarConta } from "@/lib/bancos";
 import { normalizarCobrancaSeguro } from "@/lib/contrato-documentos";
@@ -81,6 +87,17 @@ export default function NovoContrato() {
 
   const docsRef = useRef<DocumentosContratoHandle>(null);
 
+  // minuta (locação ainda não assinada)
+  const [minutaId, setMinutaId] = useState<number | null>(null);
+  const [minutaDoc, setMinutaDoc] = useState<Record<string, any>>({});
+  const [minutaMsg, setMinutaMsg] = useState<string | null>(null);
+  const [minutaFechada, setMinutaFechada] = useState<{ status: string; contrato_id: number | null } | null>(null);
+  const [salvandoMinuta, setSalvandoMinuta] = useState(false);
+  const contaModoPendente = useRef<string | null>(null); // conta escolhida na minuta, aplicada quando as contas do locador chegam
+  function setMin(secao: "garantia" | "condicoes" | "administracao", campo: string, valor: any) {
+    setMinutaDoc((prev) => ({ ...prev, [secao]: { ...(prev[secao] || {}), [campo]: valor } }));
+  }
+
   // seguro residencial do inquilino
   const [seg, setSeg] = useState({
     tem: false,
@@ -106,7 +123,9 @@ export default function NovoContrato() {
   useEffect(() => {
     setContasLocador([]);
     if (!locadorSel || locadorSel === NOVO) {
-      setContaModo((m) => (m === "nova" || m === "depois" ? m : "nova"));
+      const pend = contaModoPendente.current;
+      contaModoPendente.current = null;
+      setContaModo((m) => (pend === "nova" || pend === "depois" ? pend : m === "nova" || m === "depois" ? m : "nova"));
       return;
     }
     let vivo = true;
@@ -116,7 +135,10 @@ export default function NovoContrato() {
         if (!vivo) return;
         const lista = (d?.contas || []) as (ContaForm & { id: number })[];
         setContasLocador(lista);
-        setContaModo(lista.length ? String(lista[lista.length - 1].id) : "nova");
+        const pend = contaModoPendente.current;
+        contaModoPendente.current = null;
+        if (pend && (pend === "nova" || pend === "depois" || lista.some((x) => String(x.id) === pend))) setContaModo(pend);
+        else setContaModo(lista.length ? String(lista[lista.length - 1].id) : "nova");
       })
       .catch(() => {});
     return () => {
@@ -150,6 +172,94 @@ export default function NovoContrato() {
     })();
   }, []);
 
+  // abrir uma minuta salva (?minuta=ID)
+  useEffect(() => {
+    const mid = Number(new URLSearchParams(window.location.search).get("minuta")) || null;
+    if (!mid) return;
+    (async () => {
+      try {
+        const r = await fetch(`/api/adm/minutas?id=${mid}`, { cache: "no-store" });
+        const d = await r.json();
+        if (!r.ok) {
+          setErro(d?.error || "Falha ao carregar a minuta.");
+          return;
+        }
+        const m = d.minuta;
+        if (m.status !== "rascunho") {
+          setMinutaFechada({ status: m.status, contrato_id: m.contrato_id });
+          return;
+        }
+        const f = (m.dados || {}) as Record<string, any>;
+        if (typeof f.locadorSel === "string") setLocadorSel(f.locadorSel);
+        if (f.locadorNovo) setLocadorNovo({ ...vazioPessoa, ...f.locadorNovo });
+        if (typeof f.imovelSel === "string") setImovelSel(f.imovelSel);
+        if (f.imovelNovo) setImovelNovo({ ...vazioImovel, ...f.imovelNovo });
+        if (typeof f.locatarioSel === "string") setLocatarioSel(f.locatarioSel);
+        if (f.locatarioNovo) setLocatarioNovo({ ...vazioPessoa, ...f.locatarioNovo });
+        if (f.c) setC((p) => ({ ...p, ...f.c }));
+        if (f.seg) setSeg((p) => ({ ...p, ...f.seg }));
+        if (typeof f.contaAuto === "boolean") setContaAuto(f.contaAuto);
+        if (f.contaForm) setContaForm({ ...contaVazia(), ...f.contaForm });
+        if (typeof f.contaModo === "string") {
+          contaModoPendente.current = f.contaModo;
+          setContaModo(f.contaModo);
+        }
+        setMinutaDoc(m.minuta || {});
+        setMinutaId(m.id);
+      } catch {
+        setErro("Erro de rede ao carregar a minuta.");
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!minutaMsg) return;
+    const t = setTimeout(() => setMinutaMsg(null), 4000);
+    return () => clearTimeout(t);
+  }, [minutaMsg]);
+
+  async function salvarMinuta(): Promise<boolean> {
+    if (salvandoMinuta) return false;
+    setErro(null);
+    setMinutaMsg(null);
+    setSalvandoMinuta(true);
+    try {
+      const dados = { locadorSel, locadorNovo, imovelSel, imovelNovo, locatarioSel, locatarioNovo, c, seg, contaModo, contaForm, contaAuto };
+      const r = await fetch("/api/adm/minutas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ acao: "salvar", id: minutaId, dados, minuta: minutaDoc }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setErro(d?.error || "Falha ao salvar a minuta.");
+        return false;
+      }
+      if (!minutaId) {
+        setMinutaId(d.id);
+        window.history.replaceState(null, "", `/contratos/novo?minuta=${d.id}`);
+      }
+      setMinutaMsg("Minuta salva.");
+      return true;
+    } catch {
+      setErro("Erro de rede ao salvar a minuta.");
+      return false;
+    } finally {
+      setSalvandoMinuta(false);
+    }
+  }
+
+  async function descartarMinuta() {
+    if (!minutaId || !window.confirm("Descartar esta minuta? Ela sai da lista de Contratos (nada é apagado).")) return;
+    const r = await fetch("/api/adm/minutas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ acao: "descartar", id: minutaId }),
+    });
+    if (r.ok) window.location.href = "/contratos";
+    else setErro((await r.json().catch(() => ({})))?.error || "Falha ao descartar.");
+  }
+
   // imóveis do locador escolhido (ou todos, se locador ainda não escolhido)
   const imoveisFiltrados = useMemo(() => {
     const todos = listas?.imoveis || [];
@@ -170,17 +280,42 @@ export default function NovoContrato() {
     if (salvando) return;
     setErro(null);
 
+    // minuta: locador/locatário não escolhidos vêm da primeira parte cadastrada
+    let locadorSel_ = locadorSel, locadorNovo_ = locadorNovo, locatarioSel_ = locatarioSel, locatarioNovo_ = locatarioNovo;
+    if (minutaId && (!locatarioSel_ || (imovelSel === NOVO && !locadorSel_))) {
+      try {
+        const r = await fetch(`/api/adm/contrato-partes?minuta=${minutaId}`, { cache: "no-store" });
+        const d = await r.json();
+        const partes = (d?.partes || []) as Record<string, any>[];
+        const pessoa = (p: Record<string, any>) => ({ nome: p.nome || "", cpf_cnpj: p.cpf_cnpj || "", email: p.email || "", telefone: p.telefone || "" });
+        const lt = partes.find((p) => p.papel === "locatario");
+        if (!locatarioSel_ && lt) {
+          locatarioSel_ = NOVO;
+          locatarioNovo_ = pessoa(lt);
+          setLocatarioSel(NOVO);
+          setLocatarioNovo(locatarioNovo_);
+        }
+        const lo = partes.find((p) => p.papel === "locador");
+        if (imovelSel === NOVO && !locadorSel_ && lo) {
+          locadorSel_ = NOVO;
+          locadorNovo_ = pessoa(lo);
+          setLocadorSel(NOVO);
+          setLocadorNovo(locadorNovo_);
+        }
+      } catch {}
+    }
+
     const imovel = imovelSel && imovelSel !== NOVO ? { id: Number(imovelSel) } : { novo: imovelNovo };
-    const locador = locadorSel && locadorSel !== NOVO ? { id: Number(locadorSel) } : { novo: locadorNovo };
-    const locatario = locatarioSel && locatarioSel !== NOVO ? { id: Number(locatarioSel) } : { novo: locatarioNovo };
+    const locador = locadorSel_ && locadorSel_ !== NOVO ? { id: Number(locadorSel_) } : { novo: locadorNovo_ };
+    const locatario = locatarioSel_ && locatarioSel_ !== NOVO ? { id: Number(locatarioSel_) } : { novo: locatarioNovo_ };
 
     // validações rápidas (o servidor valida de novo)
     if (!imovelSel) return setErro("Escolha o imóvel (ou “Cadastrar novo”).");
-    if (imovelSel === NOVO && !locadorSel) return setErro("Escolha o locador (ou “Cadastrar novo”).");
-    if (imovelSel === NOVO && locadorSel === NOVO && !locadorNovo.nome.trim()) return setErro("Informe o nome do locador.");
+    if (imovelSel === NOVO && !locadorSel_) return setErro("Escolha o locador (ou “Cadastrar novo”).");
+    if (imovelSel === NOVO && locadorSel_ === NOVO && !locadorNovo_.nome.trim()) return setErro("Informe o nome do locador.");
     if (imovelSel === NOVO && (!imovelNovo.rua.trim() || !imovelNovo.numero.trim())) return setErro("Informe rua e número do imóvel.");
-    if (!locatarioSel) return setErro("Escolha o locatário (ou “Cadastrar novo”).");
-    if (locatarioSel === NOVO && !locatarioNovo.nome.trim()) return setErro("Informe o nome do locatário.");
+    if (!locatarioSel_) return setErro("Escolha o locatário (ou “Cadastrar novo”).");
+    if (locatarioSel_ === NOVO && !locatarioNovo_.nome.trim()) return setErro("Informe o nome do locatário.");
     if (!c.valor_primeiro_aluguel) return setErro("Informe o valor do aluguel.");
     if (!c.data_inicio) return setErro("Informe a data de início.");
     if (!c.dia_vencimento) return setErro("Informe o dia de vencimento.");
@@ -200,6 +335,10 @@ export default function NovoContrato() {
     }
     if (imovelEscolhido?.contrato_ativo &&
         !window.confirm(`Este imóvel já tem o contrato ativo #${imovelEscolhido.contrato_ativo}. Criar outro mesmo assim?`)) return;
+    if (minutaId) {
+      if (!window.confirm("O contrato já está assinado? Ao criar, ele passa a valer para cobranças e repasses, e as partes e os documentos da minuta vão para ele.")) return;
+      if (!(await salvarMinuta())) return;
+    }
 
     setSalvando(true);
     setEtapa("Criando contrato…");
@@ -225,6 +364,15 @@ export default function NovoContrato() {
       }
       const id = d.id as number;
       let aviso = "";
+      if (minutaId) {
+        setEtapa("Levando partes e documentos da minuta…");
+        const rc = await fetch("/api/adm/minutas", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ acao: "converter", id: minutaId, contrato: id }),
+        }).catch(() => null);
+        if (!rc || !rc.ok) aviso += "&minuta_falhou=" + minutaId;
+      }
       if (docsRef.current?.temFila()) {
         setEtapa("Enviando documentos…");
         const res = await docsRef.current.enviarFila(id, d.seguro_id ? { residencial: d.seguro_id } : undefined);
@@ -239,6 +387,17 @@ export default function NovoContrato() {
   }
 
   const mostraValidadeGarantia = GARANTIA_COM_VALIDADE.has(c.garantia_categoria);
+
+  const botoes = () => (
+    <div className="vj-acoes">
+      <button className="vj-btn-sec" onClick={salvarMinuta} disabled={salvandoMinuta || salvando || !listas}>
+        {salvandoMinuta ? "Salvando…" : minutaId ? "Salvar minuta" : "Salvar como minuta"}
+      </button>
+      <button className="vj-btn-salvar" onClick={criar} disabled={salvando || salvandoMinuta || !listas}>
+        {salvando ? etapa || "Salvando…" : minutaId ? "Contrato assinado: criar contrato" : "Criar contrato"}
+      </button>
+    </div>
+  );
 
   const camposPessoa = (p: typeof vazioPessoa, setP: (x: typeof vazioPessoa) => void) => (
     <div className="vj-grid vj-sub-grid">
@@ -259,18 +418,38 @@ export default function NovoContrato() {
       <main className="vj-main">
         <div className="vj-head">
           <div>
-            <h1 className="vj-h1">Novo contrato de locação</h1>
-            <p className="vj-sub">Escolha da base ou cadastre na hora. Os documentos sobem junto ao criar.</p>
+            <h1 className="vj-h1">{minutaId ? "Minuta de locação" : "Novo contrato de locação"}</h1>
+            <p className="vj-sub">
+              {minutaId
+                ? `Minuta nº ${minutaId}. Ainda não é contrato: não entra em cobranças nem repasses.`
+                : "Escolha da base ou cadastre na hora. Os documentos sobem junto ao criar."}
+            </p>
           </div>
-          <button className="vj-btn-salvar" onClick={criar} disabled={salvando || !listas}>
-            {salvando ? etapa || "Salvando…" : "Criar contrato"}
-          </button>
+          {!minutaFechada && botoes()}
         </div>
 
         {erro && <div className="vj-card vj-erro">{erro}</div>}
+        {minutaMsg && !erro && <div className="vj-okmsg">{minutaMsg}</div>}
         {!listas && !erro && <div className="vj-card">Carregando cadastros…</div>}
+        {minutaFechada && (
+          <div className="vj-card">
+            {minutaFechada.status === "convertida" && minutaFechada.contrato_id ? (
+              <>Esta minuta já virou o contrato nº {minutaFechada.contrato_id}. <a href={`/contratos/editar?id=${minutaFechada.contrato_id}`}>Abrir o contrato →</a></>
+            ) : (
+              <>Esta minuta foi descartada. <a href="/contratos">Voltar para Contratos</a></>
+            )}
+          </div>
+        )}
+        {listas && !minutaId && !minutaFechada && (
+          <div className="vj-card vj-info">
+            <b>Locação ainda não assinada?</b> Preencha o que já souber e clique em <b>Salvar como minuta</b>. Na minuta
+            você cadastra as partes com a leitura dos documentos e gera o contrato de locação e o de administração no
+            Google Docs, sem nada entrar em cobranças ou repasses. Depois da assinatura, abra a minuta em Contratos e
+            clique em <b>Contrato assinado: criar contrato</b>.
+          </div>
+        )}
 
-        {listas && (
+        {listas && !minutaFechada && (
           <>
             {/* Imóvel e locador */}
             <section className="vj-card">
@@ -454,8 +633,13 @@ export default function NovoContrato() {
                   </label>
                 )}
               </div>
+              <GarantiaDetalhes c={{ ...c, minuta: minutaDoc }} setMin={setMin} />
               {mostraValidadeGarantia && (
-                <p className="vj-nota">A vigência da apólice vai no quadro <b>Apólices</b> abaixo — é ela que dispara o alerta de 30 dias.</p>
+                <p className="vj-nota">
+                  {minutaId
+                    ? "A apólice (com a vigência, que dispara o alerta de 30 dias) entra depois de criar o contrato."
+                    : <>A vigência da apólice vai no quadro <b>Apólices</b> abaixo — é ela que dispara o alerta de 30 dias.</>}
+                </p>
               )}
             </section>
 
@@ -546,13 +730,36 @@ export default function NovoContrato() {
               </div>
             </section>
 
-            <DocumentosContrato ref={docsRef} contratoId={null} />
+            {minutaId ? (
+              <>
+                <CondicoesContrato c={{ ...c, minuta: minutaDoc }} setMin={setMin} minutaId={minutaId} />
+                <PartesContrato minutaId={minutaId} onDocsMudaram={() => docsRef.current?.recarregar()} />
+                <GerarContratos minutaId={minutaId} salvarAntes={salvarMinuta} />
+              </>
+            ) : (
+              <section className="vj-card">
+                <h2 className="vj-h2">Partes e texto do contrato</h2>
+                <p className="vj-nota" style={{ marginTop: 0 }}>
+                  Para cadastrar as partes com a leitura dos documentos e gerar o contrato de locação e o de administração,
+                  salve primeiro como minuta.
+                </p>
+                <button className="vj-btn-sec" style={{ marginTop: 12 }} onClick={salvarMinuta} disabled={salvandoMinuta}>
+                  {salvandoMinuta ? "Salvando…" : "Salvar como minuta"}
+                </button>
+              </section>
+            )}
+
+            <DocumentosContrato ref={docsRef} contratoId={null} minutaId={minutaId} />
 
             <div className="vj-foot">
-              <button className="vj-btn-salvar" onClick={criar} disabled={salvando}>
-                {salvando ? etapa || "Salvando…" : "Criar contrato"}
-              </button>
+              {minutaId && (
+                <button className="vj-btn-link" onClick={descartarMinuta} disabled={salvando || salvandoMinuta}>
+                  Descartar minuta
+                </button>
+              )}
+              {botoes()}
             </div>
+            <EstilosMinuta />
           </>
         )}
       </main>
@@ -592,7 +799,15 @@ const CSS = `
 .vj-btn-salvar{background:var(--verm);border:none;color:#fff;font:inherit;font-weight:600;font-size:15px;padding:11px 22px;border-radius:10px;cursor:pointer;white-space:nowrap}
 .vj-btn-salvar:hover:not(:disabled){background:#b8121f}
 .vj-btn-salvar:disabled{opacity:.5;cursor:not-allowed}
-.vj-foot{display:flex;justify-content:flex-end;margin-top:8px}
+.vj-foot{display:flex;justify-content:flex-end;align-items:center;gap:16px;margin-top:8px;flex-wrap:wrap}
+.vj-acoes{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0}
+.vj-head>div:first-child{min-width:0}
+.vj-btn-sec{background:#fff;border:1px solid var(--azul);color:var(--azul);font:inherit;font-weight:600;font-size:15px;padding:10px 18px;border-radius:10px;cursor:pointer;white-space:nowrap}
+.vj-btn-sec:hover:not(:disabled){background:#EEF3FC}
+.vj-btn-sec:disabled{opacity:.5;cursor:not-allowed}
+.vj-btn-link{background:none;border:none;color:var(--mut);font:inherit;font-size:13px;text-decoration:underline;cursor:pointer;margin-right:auto}
+.vj-info{background:#EEF3FC;border-color:#C9D8F2;font-size:14px;line-height:1.5}
+.vj-okmsg{border:1px solid #BCE3D0;background:#EAF7F0;color:var(--ok);border-radius:10px;padding:9px 12px;margin-bottom:16px;font-size:14px}
 .vj-erro{border-color:#F5C2C7;background:#FDECEE;color:#8B1A24}
 @media (max-width:640px){.vj-grid{grid-template-columns:1fr}.vj-head{flex-direction:column}}
 `;
