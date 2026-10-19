@@ -22,14 +22,14 @@ export function donoDe(src: { contrato?: unknown; minuta?: unknown } | URLSearch
   return null;
 }
 
-// contrato existe / minuta existe e ainda está em elaboração
+// contrato existe / minuta existe (em elaboração, ou assinada sem administração)
 export async function donoExiste(sb: any, d: Dono): Promise<boolean> {
   if (d.tipo === "contrato") {
     const { data } = await sb.from("adm_contratos").select("id").eq("id", d.id).maybeSingle();
     return !!data;
   }
   const { data } = await sb.from("adm_minutas").select("id,status").eq("id", d.id).maybeSingle();
-  return !!data && data.status === "rascunho";
+  return !!data && (data.status === "rascunho" || data.status === "assinada");
 }
 
 // navegador: "contrato=12" | "minuta=3" e o mesmo para o corpo JSON
