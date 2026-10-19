@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { CAPITALIZADORAS, COBERTURAS, SEGURADORAS, coberturasDe, type Seguradora } from "@/lib/clausulas-garantia";
+import { donoQS, type DonoRef } from "@/lib/contrato-dono";
 
 type C = Record<string, any>;
 type SetMin = (secao: "garantia" | "condicoes" | "administracao", campo: string, valor: any) => void;
@@ -135,7 +136,13 @@ export function GarantiaDetalhes({ c, setMin }: { c: C; setMin: SetMin }) {
   return null;
 }
 
-export function CondicoesContrato({ c, setMin, contratoId }: { c: C; setMin: SetMin; contratoId: number }) {
+// contratoId (contrato cadastrado) ou minutaId (locação ainda não assinada)
+const alvo = (contratoId?: number | null, minutaId?: number | null): DonoRef =>
+  contratoId ? { contrato: contratoId } : { minuta: Number(minutaId) };
+
+export function CondicoesContrato({ c, setMin, contratoId, minutaId }: { c: C; setMin: SetMin; contratoId?: number | null; minutaId?: number | null }) {
+  const dono = alvo(contratoId, minutaId);
+  const donoKey = donoQS(dono);
   const cd = min(c, "condicoes");
   const ad = min(c, "administracao");
   const test: { nome?: string; cpf?: string }[] = cd.testemunhas || [];
@@ -148,17 +155,17 @@ export function CondicoesContrato({ c, setMin, contratoId }: { c: C; setMin: Set
   const [pastaAtual, setPastaAtual] = useState<string | null>(null);
   const [pastaMsg, setPastaMsg] = useState<string | null>(null);
   useEffect(() => {
-    fetch(`/api/adm/contrato-minuta?contrato=${contratoId}`, { cache: "no-store" })
+    fetch(`/api/adm/contrato-minuta?${donoKey}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => setPastaAtual(d?.pasta_drive || null))
       .catch(() => {});
-  }, [contratoId]);
+  }, [donoKey]);
   async function salvarPasta() {
     setPastaMsg(null);
     const r = await fetch("/api/adm/contrato-minuta", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contrato: contratoId, acao: "pasta", pasta }),
+      body: JSON.stringify({ ...dono, acao: "pasta", pasta }),
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) setPastaMsg(d?.error || "Falha ao salvar.");
@@ -240,7 +247,17 @@ export function CondicoesContrato({ c, setMin, contratoId }: { c: C; setMin: Set
 
 type Gerada = { id: number; categoria: string; nome: string; link_externo: string; criado_em: string; enviado_por: string | null };
 
-export function GerarContratos({ contratoId, salvarAntes }: { contratoId: number; salvarAntes: () => Promise<boolean> }) {
+export function GerarContratos({
+  contratoId,
+  minutaId,
+  salvarAntes,
+}: {
+  contratoId?: number | null;
+  minutaId?: number | null;
+  salvarAntes: () => Promise<boolean>;
+}) {
+  const dono = alvo(contratoId, minutaId);
+  const donoKey = donoQS(dono);
   const [pend, setPend] = useState<{ locacao: string[]; administracao: string[] } | null>(null);
   const [geradas, setGeradas] = useState<Gerada[]>([]);
   const [ocupado, setOcupado] = useState<string | null>(null);
@@ -249,14 +266,14 @@ export function GerarContratos({ contratoId, salvarAntes }: { contratoId: number
 
   const carregar = useCallback(async () => {
     try {
-      const r = await fetch(`/api/adm/contrato-minuta?contrato=${contratoId}`, { cache: "no-store" });
+      const r = await fetch(`/api/adm/contrato-minuta?${donoKey}`, { cache: "no-store" });
       const d = await r.json();
       if (r.ok) {
         setPend({ locacao: d.locacao?.pendencias || [], administracao: d.administracao?.pendencias || [] });
         setGeradas(d.geradas || []);
       }
     } catch {}
-  }, [contratoId]);
+  }, [donoKey]);
   useEffect(() => {
     carregar();
   }, [carregar]);
@@ -276,7 +293,7 @@ export function GerarContratos({ contratoId, salvarAntes }: { contratoId: number
       const r = await fetch("/api/adm/contrato-minuta", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contrato: contratoId, tipo, acao }),
+        body: JSON.stringify({ ...dono, tipo, acao }),
       });
       if (acao === "docx") {
         if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || "Falha ao gerar o .docx.");
@@ -353,6 +370,11 @@ export function GerarContratos({ contratoId, salvarAntes }: { contratoId: number
       <style dangerouslySetInnerHTML={{ __html: CSS_MC }} />
     </section>
   );
+}
+
+// estilos dos blocos acima, para telas que usam só GarantiaDetalhes
+export function EstilosMinuta() {
+  return <style dangerouslySetInnerHTML={{ __html: CSS_MC }} />;
 }
 
 const CSS_MC = `
