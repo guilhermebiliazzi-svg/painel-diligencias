@@ -20,6 +20,7 @@ import {
   normalizarParte,
   rotuloDoc,
   soDigitos,
+  tipoLeitura,
   tipoPorDocumento,
   type Parte,
 } from "@/lib/contrato-partes";
@@ -161,7 +162,9 @@ export async function GET(req: Request) {
   if (error) return erro("Falha ao carregar as partes.", 502, error.message);
   try {
     const documentos = await docsDasPartes(sb, dono);
-    const sug = (partes || []).length ? [] : await sugestoes(sb, dono);
+    // sugestões (do cadastro / do formulário da minuta) só para os papéis ainda sem parte salva
+    const comParte = new Set((partes || []).map((p: any) => p.papel));
+    const sug = (await sugestoes(sb, dono)).filter((p) => !comParte.has(p.papel));
     return NextResponse.json({ partes: partes || [], documentos, sugestoes: sug });
   } catch (e) {
     return erro("Falha ao carregar os documentos das partes.", 502, e);
@@ -272,7 +275,7 @@ export async function POST(req: Request) {
       resp = await fetch(`${N8N}/painel-ler-documento`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-painel-secret": segredo },
-        body: JSON.stringify({ tipo: doc.tipo_documento, url: link.signedUrl, mime: mime || null }),
+        body: JSON.stringify({ tipo: tipoLeitura(doc.tipo_documento), url: link.signedUrl, mime: mime || null }),
         signal: AbortSignal.timeout(80_000),
       });
     } catch {
