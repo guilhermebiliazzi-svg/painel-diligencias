@@ -28,6 +28,7 @@ export function GarantiaDetalhes({ c, setMin }: { c: C; setMin: SetMin }) {
   if (cat === "seguro_fianca") {
     const seg = (g.seguradora || "") as Seguradora | "";
     const disp = coberturasDe(seg || null);
+    const administrada = min(c, "condicoes").administrada !== false; // a Too só nas locações administradas pela Ville
     const cob: string[] = g.coberturas || [];
     return (
       <div className="vj-mc">
@@ -37,10 +38,11 @@ export function GarantiaDetalhes({ c, setMin }: { c: C; setMin: SetMin }) {
             <span>Seguradora da cláusula</span>
             <select value={seg} onChange={(e) => setMin("garantia", "seguradora", e.target.value || null)}>
               <option value="">—</option>
-              {SEGURADORAS.map((s) => <option key={s.v} value={s.v}>{s.t}</option>)}
+              {SEGURADORAS.filter((s) => s.v !== "too" || administrada || seg === "too").map((s) => <option key={s.v} value={s.v}>{s.t}</option>)}
             </select>
+            {seg === "too" && !administrada && <small className="vj-alerta">A Too só vale para locação administrada pela Ville. Escolha outra seguradora.</small>}
           </label>
-          {seg === "too" && (
+          {seg === "too" && administrada && (
             <label className="vj-f vj-check">
               <input type="checkbox" checked={g.quitacao_ville !== false} onChange={(e) => setMin("garantia", "quitacao_ville", e.target.checked)} />
               <span>Ville recebe e dá quitação das indenizações</span>
