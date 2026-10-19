@@ -1,6 +1,7 @@
 // Pasta de documentos do contrato de locação (uso interno).
 //
-// GET    ?contrato=ID                      -> documentos (com link temporário) + apólices do contrato
+// GET    ?contrato=ID | ?minuta=ID         -> documentos (com link temporário) + apólices do contrato
+//                                             (minuta = locação ainda não assinada; não tem apólice)
 // POST   { acao: "upload-url", ... }       -> URL assinada p/ o NAVEGADOR subir o arquivo direto
 //                                             no Storage (não passa pela Vercel -> sem limite de 4,5 MB)
 // POST   { acao: "registrar", ... }        -> grava o documento (e cria/atualiza a apólice, se for o caso;
@@ -13,6 +14,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { acessoContratos } from "@/lib/adm-acesso";
 import { CATEGORIAS_VALIDAS, TIPOS_SEGURO_VALIDOS, diasAte, normalizarCobrancaSeguro } from "@/lib/contrato-documentos";
 import { TIPOS_DOC_PARTE_VALIDOS } from "@/lib/contrato-partes";
+import { donoDe, donoExiste } from "@/lib/contrato-dono";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,32 +53,29 @@ function slug(nome: string): string {
   return (base || "arquivo").slice(-120);
 }
 
-async function contratoExiste(sb: ReturnType<typeof supabaseAdmin>, id: number) {
-  const { data } = await sb.from("adm_contratos").select("id").eq("id", id).maybeSingle();
-  return !!data;
-}
-
 export async function GET(req: Request) {
   const ac = await acessoContratos();
   if (!ac.ok) return erro(ac.error, ac.status);
 
-  const contrato = idValido(new URL(req.url).searchParams.get("contrato"));
-  if (!contrato) return erro("contrato inválido.");
+  const dono = donoDe(new URL(req.url).searchParams);
+  if (!dono) return erro("contrato inválido.");
 
   const sb = supabaseAdmin();
   const [docsR, segR] = await Promise.all([
     sb
       .from("adm_contrato_documentos")
       .select("id,categoria,seguro_id,parte_id,tipo_documento,descricao,nome,path,tamanho,mime,enviado_por,criado_em,link_externo")
-      .eq("contrato_id", contrato)
+      .eq(dono.col, dono.id)
       .is("excluido_em", null)
       .order("criado_em", { ascending: false }),
-    sb
-      .from("adm_seguros")
-      .select("id,tipo,seguradora,numero_apolice,vigencia_inicio,vigencia_fim,ativo,cobrar_no_boleto,valor_mensal,parcelas_total,cobranca_inicio,premio")
-      .eq("contrato_id", contrato)
-      .order("ativo", { ascending: false })
-      .order("vigencia_fim", { ascending: false, nullsFirst: false }),
+    dono.tipo === "contrato"
+      ? sb
+          .from("adm_seguros")
+          .select("id,tipo,seguradora,numero_apolice,vigencia_inicio,vigencia_fim,ativo,cobrar_no_boleto,valor_mensal,parcelas_total,cobranca_inicio,premio")
+          .eq("contrato_id", dono.id)
+          .order("ativo", { ascending: false })
+          .order("vigencia_fim", { ascending: false, nullsFirst: false })
+      : Promise.resolve({ data: [], error: null }),
   ]);
   if (docsR.error) return erro("Falha ao carregar documentos.", 502, docsR.error.message);
   if (segR.error) return erro("Falha ao carregar apólices.", 502, segR.error.message);
@@ -93,7 +92,7 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     documentos: docs.map(({ path, ...d }) => ({ ...d, url: urls.get(path) || null })),
-    seguros: (segR.data || []).map((s) => ({ ...s, dias: diasAte(s.vigencia_fim) })),
+    seguros: ((segR.data || []) as any[]).map((s) => ({ ...s, dias: diasAte(s.vigencia_fim) })),
   });
 }
 
@@ -108,17 +107,21 @@ export async function POST(req: Request) {
     return erro("Corpo inválido.");
   }
 
-  const contrato = idValido(body?.contrato);
-  if (!contrato) return erro("contrato inválido.");
+  const dono = donoDe(body || {});
+  if (!dono) return erro("contrato inválido.");
+  const contrato = dono.id;
   const sb = supabaseAdmin();
-  if (!(await contratoExiste(sb, contrato))) return erro("Contrato não encontrado.", 404);
+  if (!(await donoExiste(sb, dono))) return erro(dono.tipo === "contrato" ? "Contrato não encontrado." : "Minuta não encontrada.", 404);
+  if (dono.tipo === "minuta" && (body.acao === "seguro" || body.categoria === "apolice")) {
+    return erro("Apólices entram depois de cadastrar o contrato assinado.");
+  }
 
   // 1) URL assinada para upload direto do navegador
   if (body.acao === "upload-url") {
     const categoria = String(body.categoria || "");
     if (!CATEGORIAS_VALIDAS.has(categoria)) return erro("Categoria inválida.");
     const nome = String(body.nome || "arquivo");
-    const path = `contratos/${contrato}/${categoria}/${Date.now()}-${slug(nome)}`;
+    const path = `${dono.pasta}/${categoria}/${Date.now()}-${slug(nome)}`;
     const { data, error } = await sb.storage.from(BUCKET).createSignedUploadUrl(path);
     if (error || !data) return erro("Falha ao preparar o envio.", 502, error?.message);
     return NextResponse.json({ path: data.path, signedUrl: data.signedUrl });
@@ -129,7 +132,7 @@ export async function POST(req: Request) {
     const categoria = String(body.categoria || "");
     if (!CATEGORIAS_VALIDAS.has(categoria)) return erro("Categoria inválida.");
     const path = String(body.path || "");
-    if (!path.startsWith(`contratos/${contrato}/${categoria}/`)) return erro("Arquivo inválido.");
+    if (!path.startsWith(`${dono.pasta}/${categoria}/`)) return erro("Arquivo inválido.");
 
     let seguroId: number | null = null;
     if (categoria === "apolice") {
@@ -194,7 +197,7 @@ export async function POST(req: Request) {
           .from("adm_contrato_partes")
           .select("id")
           .eq("id", pid)
-          .eq("contrato_id", contrato)
+          .eq(dono.col, dono.id)
           .maybeSingle();
         if (!pt) return erro("Parte não pertence a este contrato.");
         parteId = pid;
@@ -205,7 +208,7 @@ export async function POST(req: Request) {
     const { data: doc, error } = await sb
       .from("adm_contrato_documentos")
       .insert({
-        contrato_id: contrato,
+        [dono.col]: dono.id,
         categoria,
         seguro_id: seguroId,
         parte_id: parteId,
