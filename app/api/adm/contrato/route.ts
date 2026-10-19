@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { acessoContratos } from "@/lib/adm-acesso";
 import { normalizarConta } from "@/lib/bancos";
 import { normalizarCobrancaSeguro } from "@/lib/contrato-documentos";
+import { normalizarMinuta } from "@/lib/contrato-locacao";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,6 +26,7 @@ const CAMPOS_EDITAVEIS = new Set([
   "garantia_categoria", "garantia_seguradora", "garantia_prazo_meses",
   "validade_garantia", "valor_seguro_fianca",
   "multa_percentual", "mora_percentual", "status",
+  "minuta", // condições que só existem no texto do contrato (garantia detalhada, testemunhas…)
 ]);
 
 // GET /api/adm/contrato?id=15  → contrato + nome do imóvel/locatário
@@ -71,6 +73,10 @@ export async function PATCH(req: Request) {
   const patch: Record<string, any> = {};
   for (const [k, v] of Object.entries(body)) {
     if (!CAMPOS_EDITAVEIS.has(k)) continue;
+    if (k === "minuta") {
+      patch[k] = normalizarMinuta(v);
+      continue;
+    }
     patch[k] = v === "" ? null : v;
   }
   patch["updated_at"] = new Date().toISOString();
