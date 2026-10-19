@@ -39,6 +39,7 @@ export type Minuta = {
     caucao?: { valor?: number | null };
   };
   condicoes?: {
+    administrada?: boolean; // false = a Ville só intermedeia; o inquilino paga direto ao locador
     primeiro_aluguel_ville?: boolean;
     multa_rescisoria_alugueis?: number | null;
     isencao_multa_meses?: number | null;
@@ -177,6 +178,14 @@ function comParagrafos(caput: string | null, pars: string[]): Bloco[] {
 
 export type Pendencia = string;
 
+// "no Banco 341 - ITAÚ – Agência 1234 – Conta corrente 12345-6 em nome de FULANO, CPF …"
+function contaTexto(k: DadosContrato["conta"]): string {
+  if (!k) return "no Banco xxxx – Agência xxx – Conta corrente xxxxxx em nome de xxxxxxxx";
+  const banco = k.banco_ispb ? BANCOS.find((b) => b.ispb === k.banco_ispb) : null;
+  const bancoTxt = banco ? `${banco.codigo} - ${banco.nome.toUpperCase()}` : k.banco_ispb ? `ISPB ${k.banco_ispb}` : "xxxx";
+  return `no Banco ${bancoTxt} – Agência ${k.agencia || "xxx"} – ${k.tipo_conta === "CONTA_POUPANCA" ? "Conta poupança" : "Conta corrente"} ${k.conta || "xxxxxx"} em nome de ${(k.titular || "").toUpperCase()}${k.cpf_cnpj ? `, ${soDigitos(k.cpf_cnpj).length === 14 ? "CNPJ" : "CPF"} ${fmtCpfCnpj(k.cpf_cnpj)}` : ""}`;
+}
+
 // ======================= CONTRATO DE LOCAÇÃO =======================
 export function montarLocacao(d: DadosContrato): { blocos: Bloco[]; pendencias: Pendencia[] } {
   const c = d.contrato;
@@ -184,6 +193,7 @@ export function montarLocacao(d: DadosContrato): { blocos: Bloco[]; pendencias: 
   const cond = m.condicoes || {};
   const g = m.garantia || {};
   const pend: Pendencia[] = [];
+  const administrada = cond.administrada !== false;
 
   const locadores = d.partes.filter((p) => p.papel === "locador");
   const locatarios = d.partes.filter((p) => p.papel === "locatario");
@@ -266,7 +276,12 @@ export function montarLocacao(d: DadosContrato): { blocos: Bloco[]; pendencias: 
     pars4.push(`A título de honorários pela presente intermediação, devidos pelo LOCADOR nos termos do art. 22, inciso VII, da Lei nº 8.245/1991, a ${VILLE_QUALIF}, fará jus ao valor equivalente ao primeiro aluguel integral, no valor de ${aluguelTxt}. Por determinação do LOCADOR, o primeiro aluguel, com vencimento em ${fmtData(venc1)}, será pago pelo LOCATÁRIO diretamente à ${VILLE}, por meio de transferência bancária para o Banco 033 - SANTANDER - Agência 3630 - Conta Corrente nº. 13007368-2, CNPJ 41.132.782/0001-08, sendo que o comprovante do pagamento deverá ser enviado ao endereço eletrônico ville@remax.com.br. O pagamento assim realizado dará ao LOCATÁRIO plena quitação do primeiro aluguel, não constituindo valor adicional ao aluguel ou encargo de responsabilidade do LOCATÁRIO.`);
   }
   const mesIni = p ? nomeMes(p.m) : "____";
-  pars4.push(`Os aluguéis e encargos locatícios serão cobrados mensalmente por meio de boleto único emitido e enviado pela ${VILLE}, administradora da locação, antes de seu vencimento, através de meio eletrônico - e-mail e DDA${encargos.length ? `, à exceção dos valores proporcionais relativos ao ${encargos.join(" e ")} referentes ao mês de ${mesIni}, os quais deverão ser devidamente calculados e reembolsados mediante depósito/transferência diretamente na conta bancária de titularidade do LOCADOR, anteriormente à entrega das chaves do imóvel` : ""}.`);
+  if (administrada) {
+    pars4.push(`Os aluguéis e encargos locatícios serão cobrados mensalmente por meio de boleto único emitido e enviado pela ${VILLE}, administradora da locação, antes de seu vencimento, através de meio eletrônico - e-mail e DDA${encargos.length ? `, à exceção dos valores proporcionais relativos ao ${encargos.join(" e ")} referentes ao mês de ${mesIni}, os quais deverão ser devidamente calculados e reembolsados mediante depósito/transferência diretamente na conta bancária de titularidade do LOCADOR, anteriormente à entrega das chaves do imóvel` : ""}.`);
+  } else {
+    if (!d.conta) pend.push("Locação não administrada: informe a conta do locador para o pagamento do aluguel (seção Conta do locador).");
+    pars4.push(`Os aluguéis${encargos.length ? " e encargos locatícios" : ""} serão pagos pelo LOCATÁRIO diretamente ao LOCADOR, até a data de cada vencimento, mediante depósito ou transferência bancária para a conta de titularidade do LOCADOR ${contaTexto(d.conta)}, servindo o comprovante de depósito ou transferência como recibo de pagamento.`);
+  }
   const multa = num(c.multa_percentual) ?? 10;
   const mora = num(c.mora_percentual) ?? 1;
   pars4.push(`Em caso de mora no pagamento do aluguel, será aplicada multa de ${percentualComExtenso(multa)} sobre o valor devido, bem como juros mensais de ${percentualComExtenso(mora)}, ficando também sujeito a correção monetária, apurada conforme variação do IGP-M no período; e ainda, a pagamento de honorários de advogado que, porventura, o LOCADOR venha a constituir para defesa de seus direitos, mesmo que a respectiva cobrança se processe extrajudicialmente. Além dos honorários mencionados, o LOCATÁRIO arcará com as custas e despesas judiciais e extrajudiciais.`);
@@ -427,7 +442,9 @@ export function montarLocacao(d: DadosContrato): { blocos: Bloco[]; pendencias: 
   B.push(...comParagrafos(
     "Todo e qualquer acordo e/ou alteração contratual deverá ser tratada pelo LOCATÁRIO prévia e diretamente com o LOCADOR e deverá ser obrigatoriamente formalizado por escrito por meio de INSTRUMENTO PARTICULAR DE ADITAMENTO CONTRATUAL.",
     [
-      "Ressalvada a atuação da VILLE JARDINS NEGÓCIOS IMOBILIÁRIOS LTDA. como administradora desta locação, nos termos da CLÁUSULA 16ª, terceiras pessoas em geral, tais como outras imobiliárias, corretores de imóveis, administradoras e administradores, não estão autorizados e não têm poderes e não têm legitimidade para fazerem acordos com os locatários em nome dos locadores. A atuação da administradora não dispensa a assinatura do LOCADOR no instrumento de aditamento previsto no caput.",
+      administrada
+        ? "Ressalvada a atuação da VILLE JARDINS NEGÓCIOS IMOBILIÁRIOS LTDA. como administradora desta locação, nos termos da CLÁUSULA 16ª, terceiras pessoas em geral, tais como outras imobiliárias, corretores de imóveis, administradoras e administradores, não estão autorizados e não têm poderes e não têm legitimidade para fazerem acordos com os locatários em nome dos locadores. A atuação da administradora não dispensa a assinatura do LOCADOR no instrumento de aditamento previsto no caput."
+        : "Terceiras pessoas em geral, tais como imobiliárias, corretores de imóveis, administradoras e administradores, não estão autorizados e não têm poderes e não têm legitimidade para fazerem acordos com os locatários em nome dos locadores.",
       "Serão considerados inválidos, para fins de aditamento contratual, toda e qualquer comunicação e alteração contratual formulada de forma verbal e escrita via mensagem por WhatsApp, SMS, por e-mail, correspondências eletrônicas e fac-símile (fax) e qualquer outro meio de comunicação, mesmo diretamente com o LOCADOR ou com terceiros mandatários e administradoras e imobiliárias.",
     ],
   ));
@@ -443,18 +460,20 @@ export function montarLocacao(d: DadosContrato): { blocos: Bloco[]; pendencias: 
     "As partes assumem a responsabilidade pelas informações prestadas e legitimidade das assinaturas, declarando ter lido e discutido todos os termos e as cláusulas deste contrato, com as quais estão de pleno acordo, não podendo alegar desconhecimento.",
   ]));
 
-  // 16 — administração
-  B.push({ t: "clausula", texto: "CLÁUSULA 16ª - DA ADMINISTRAÇÃO DA LOCAÇÃO" });
-  B.push(...comParagrafos(
-    "A presente locação é administrada pela VILLE JARDINS NEGÓCIOS IMOBILIÁRIOS LTDA. (REMAX Ville), inscrita no CNPJ sob nº 41.132.782/0001-08 e no CRECI/SP sob nº 37.196-J, com sede na Rua Batataes, 148, Jardim Paulista, São Paulo – SP, por contratação do LOCADOR.",
-    [
-      "Os aluguéis e encargos locatícios serão pagos pelo LOCATÁRIO à administradora, na forma da CLÁUSULA 4ª, e os pagamentos assim realizados terão plena eficácia liberatória perante o LOCADOR.",
-      "A administradora fica autorizada a representar o LOCADOR na cobrança dos aluguéis e encargos, no envio e recebimento de notificações e comunicações, na realização das vistorias de entrada, periódicas e de saída, no recebimento das chaves e nos demais atos de administração da locação, servindo o endereço eletrônico ville@remax.com.br para as comunicações do LOCATÁRIO.",
-    ],
-  ));
+  // 16 — administração (só quando a Ville administra)
+  if (administrada) {
+    B.push({ t: "clausula", texto: "CLÁUSULA 16ª - DA ADMINISTRAÇÃO DA LOCAÇÃO" });
+    B.push(...comParagrafos(
+      "A presente locação é administrada pela VILLE JARDINS NEGÓCIOS IMOBILIÁRIOS LTDA. (REMAX Ville), inscrita no CNPJ sob nº 41.132.782/0001-08 e no CRECI/SP sob nº 37.196-J, com sede na Rua Batataes, 148, Jardim Paulista, São Paulo – SP, por contratação do LOCADOR.",
+      [
+        "Os aluguéis e encargos locatícios serão pagos pelo LOCATÁRIO à administradora, na forma da CLÁUSULA 4ª, e os pagamentos assim realizados terão plena eficácia liberatória perante o LOCADOR.",
+        "A administradora fica autorizada a representar o LOCADOR na cobrança dos aluguéis e encargos, no envio e recebimento de notificações e comunicações, na realização das vistorias de entrada, periódicas e de saída, no recebimento das chaves e nos demais atos de administração da locação, servindo o endereço eletrônico ville@remax.com.br para as comunicações do LOCATÁRIO.",
+      ],
+    ));
+  }
 
-  // 17 — foro
-  B.push({ t: "clausula", texto: "CLÁUSULA 17ª - DO FORO" });
+  // 17 (ou 16) — foro
+  B.push({ t: "clausula", texto: `CLÁUSULA ${administrada ? "17ª" : "16ª"} - DO FORO` });
   B.push({ t: "par", texto: "Os eventuais litígios que surjam do presente contrato serão apresentados e julgados no foro competente da comarca em que está localizado o imóvel alugado. Por estarem de justo acordo, as partes assinam o presente contrato, com acompanhamento de 02 (duas) testemunhas." });
 
   // assinaturas
@@ -496,6 +515,7 @@ export function montarAdministracao(d: DadosContrato): { blocos: Bloco[]; penden
   const cond = m.condicoes || {};
   const adm = m.administracao || {};
   const pend: Pendencia[] = [];
+  if (cond.administrada === false) pend.push("Locação não administrada: não há contrato de administração.");
   const locadores = d.partes.filter((p) => p.papel === "locador");
   if (!locadores.length) pend.push("Cadastre o locador em Partes do contrato.");
 
@@ -529,13 +549,8 @@ export function montarAdministracao(d: DadosContrato): { blocos: Bloco[]; penden
     "Para essa finalidade, se compromete o CONTRATADO a efetuar completo levantamento das informações cadastrais dos eventuais pretendentes, de modo a poder selecionar dentre estes, aquele que vier a ser considerado como o mais indicado.",
     "§ ÚNICO: A indicação do pretendente pelo CONTRATADO não obriga o CONTRATANTE, que poderá a seu exclusivo critério, recusá-lo e indicar outro, desde que mediante expressa autorização e sob sua inteira responsabilidade.");
   C("TERCEIRA", `Selecionado o pretendente e obtida a garantia locatícia, com aprovação do CONTRATANTE, compromete-se o CONTRATADO a elaborar e celebrar o respectivo contrato, nele estabelecido o prazo de vigência da locação, desde já estabelecido pelo mínimo de ${prazo} meses, com a menção de que caberá ao inquilino o pagamento de todos os encargos, inclusive o prêmio de seguro-incêndio, desde já estabelecida cobertura mínima pelo valor venal de referência do imóvel e reajuste anual do aluguel pelos índices do (${indice}).`);
-  const k = d.conta;
-  const banco = k?.banco_ispb ? BANCOS.find((b) => b.ispb === k.banco_ispb) : null;
-  const bancoTxt = banco ? `${banco.codigo} - ${banco.nome.toUpperCase()}` : k?.banco_ispb ? `ISPB ${k.banco_ispb}` : "xxxx";
-  if (!k) pend.push("Cadastre a conta de repasse do locador (seção Conta de repasse).");
-  const contaTxt = k
-    ? `no Banco ${bancoTxt} – Agência ${k.agencia || "xxx"} – ${k.tipo_conta === "CONTA_POUPANCA" ? "Conta poupança" : "Conta corrente"} ${k.conta || "xxxxxx"} em nome de ${(k.titular || "").toUpperCase()}${k.cpf_cnpj ? `, ${soDigitos(k.cpf_cnpj).length === 14 ? "CNPJ" : "CPF"} ${fmtCpfCnpj(k.cpf_cnpj)}` : ""}`
-    : "no Banco xxxx – Agência xxx – Conta corrente xxxxxx em nome de xxxxxxxx";
+  if (!d.conta) pend.push("Cadastre a conta de repasse do locador (seção Conta de repasse).");
+  const contaTxt = contaTexto(d.conta);
   C("QUARTA",
     `Pela intermediação da locação será devido ao CONTRATADO o valor equivalente ao primeiro aluguel integral do imóvel e pela administração da locação, será devido ao CONTRATADO o percentual de ${taxa ? percentualComExtenso(taxa) : "__% (__ por cento)"} sobre o valor de cada aluguel mensal.`,
     `§ PRIMEIRO: O aluguel será cobrado do inquilino e depositados na conta do CONTRATANTE, uma vez deduzida a remuneração estabelecida no “caput”, até o segundo dia útil subsequente ao do seu efetivo recebimento ${contaTxt}.`,
@@ -623,6 +638,7 @@ export function normalizarMinuta(b: any): Minuta {
       caucao: { valor: n(g.caucao?.valor) },
     },
     condicoes: {
+      administrada: cd.administrada !== false,
       primeiro_aluguel_ville: cd.primeiro_aluguel_ville !== false,
       multa_rescisoria_alugueis: n(cd.multa_rescisoria_alugueis),
       isencao_multa_meses: n(cd.isencao_multa_meses),
