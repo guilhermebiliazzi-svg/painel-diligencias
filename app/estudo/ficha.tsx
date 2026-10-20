@@ -14,7 +14,7 @@ type Tipo = 'ap' | 'casa' | 'sala';
 type Campo = {
   id: string;
   label: string;
-  type: 'text' | 'money' | 'num' | 'yn' | 'chips' | 'select' | 'textarea';
+  type: 'text' | 'money' | 'num' | 'yn' | 'chips' | 'select' | 'textarea' | 'iptu';
   suf?: string;
   items?: string[];
   showIf?: [string, string];
@@ -63,6 +63,7 @@ const FORMS: Record<Tipo, { label: string; sections: Secao[] }> = {
         F('bairro', 'Bairro', { half: true }),
         num('area_util', 'Área útil', 'm²', { half: true, req: true }),
         num('area_iptu', 'Área total (IPTU)', 'm²', { half: true }),
+        F('sql', 'Nº do contribuinte (SQL)', { type: 'iptu', full: true }),
         num('dorms', 'Dormitórios', '', { half: true }),
         num('suites', 'Suítes', '', { half: true }),
         num('vagas', 'Vagas', '', { half: true }),
@@ -140,6 +141,7 @@ const FORMS: Record<Tipo, { label: string; sections: Secao[] }> = {
         F('bairro', 'Bairro', { half: true }),
         num('area_util', 'Área útil', 'm²', { half: true, req: true }),
         num('area_iptu', 'Área total (IPTU)', 'm²', { half: true }),
+        F('sql', 'Nº do contribuinte (SQL)', { type: 'iptu', full: true }),
         num('banheiros', 'Banheiros', '', { half: true }),
         num('vagas', 'Vagas', '', { half: true }),
         num('andar', 'Andar', '', { half: true }),
@@ -196,6 +198,7 @@ function montarMensagem(tipo: Tipo, vals: Record<string, Valor>): string {
     L.push(line([g('area_terreno') && '*Terreno:* ' + fmtBR(g('area_terreno')!) + ' m²', g('area_construida') && '*Construída:* ' + fmtBR(g('area_construida')!) + ' m²', g('testada') && '*Testada:* ' + fmtBR(g('testada')!) + ' m']));
   } else {
     L.push(line([g('area_util') && '*Área útil:* ' + fmtBR(g('area_util')!) + ' m²', g('area_iptu') && '*Área IPTU:* ' + fmtBR(g('area_iptu')!) + ' m²']));
+    if (g('sql')) L.push('*SQL (IPTU):* ' + g('sql'));
   }
   const dv = line([
     g('dorms') && '*Dorms:* ' + g('dorms') + (g('suites') ? ' (' + g('suites') + ' suíte' + (g('suites') === '1' ? '' : 's') + ')' : ''),
@@ -367,6 +370,13 @@ export default function Ficha() {
                   if (f.showIf && get(f.showIf[0]) !== f.showIf[1]) return null;
                   const v = get(f.id);
                   const sv = typeof v === 'string' ? v : '';
+                  if (f.type === 'iptu') {
+                    return (
+                      <div key={f.id} className="fe-f full">
+                        <IptuBox tipo={tipo} get={get} set={set} />
+                      </div>
+                    );
+                  }
                   return (
                     <div key={f.id} className={`fe-f ${f.half && !f.full ? 'half' : 'full'}`}>
                       <label>
@@ -440,6 +450,103 @@ export default function Ficha() {
   );
 }
 
+// ---------------------------------------------------------------- SQL e certidão do IPTU
+
+type Aviso = { tom: 'ok' | 'alerta' | 'erro'; texto: string } | null;
+const soDigitos = (s: string) => String(s || '').replace(/\D/g, '');
+const fmtSql = (s: string) => {
+  const d = soDigitos(s);
+  return d.length === 11 ? `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 10)}-${d.slice(10)}` : s;
+};
+const fmtM2 = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+const mesAno = (iso: string | null) => (iso ? iso.slice(5, 7) + '/' + iso.slice(0, 4) : '');
+
+function IptuBox({ tipo, get, set }: { tipo: Tipo; get: (id: string) => Valor | undefined; set: (id: string, v: Valor) => void }) {
+  const txt = (id: string) => { const v = get(id); return typeof v === 'string' ? v : ''; };
+  const sql = txt('sql');
+  const [buscando, setBuscando] = useState(false);
+  const [emitindo, setEmitindo] = useState(false);
+  const [aviso, setAviso] = useState<Aviso>(null);
+  const certPdf = txt('cert_pdf');
+  const certInfo = txt('cert_info');
+
+  async function chamar(corpo: Record<string, string>) {
+    const r = await fetch('/api/estudo/iptu', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.erro || 'Falha na consulta.');
+    return j;
+  }
+
+  async function acharPeloEndereco() {
+    if (!txt('endereco').trim()) { setAviso({ tom: 'alerta', texto: 'Preencha o endereço (com o número do apartamento) primeiro.' }); return; }
+    setBuscando(true); setAviso(null);
+    try {
+      const j = await chamar({ acao: 'sql', endereco: txt('endereco'), unidade: tipo === 'sala' ? txt('conjunto') : '' });
+      if (!j.predio) {
+        setAviso({ tom: 'alerta', texto: 'Não achei vendas registradas nesse endereço. Confira rua e número, ou digite o SQL do carnê do IPTU.' });
+      } else if (!j.unidadeProcurada) {
+        setAviso({ tom: 'alerta', texto: `Achei o prédio (${j.predio.logradouro}, ${j.predio.numero}), mas falta o número da unidade no endereço (ex.: “— ap 91”).` });
+      } else if (!j.unidade) {
+        setAviso({ tom: 'alerta', texto: `Achei o prédio (${j.predio.logradouro}, ${j.predio.numero}), mas a unidade ${j.unidadeProcurada} nunca aparece nas vendas do ITBI. Digite o SQL do carnê do IPTU.` });
+      } else {
+        const u = j.unidade;
+        set('sql', fmtSql(u.sql));
+        const partes = [`${u.complemento} · SQL ${fmtSql(u.sql)}`];
+        if (u.area) {
+          const atual = soDigitos(txt('area_iptu')) ? Number(txt('area_iptu').replace(',', '.')) : null;
+          if (!atual) { set('area_iptu', String(u.area).replace('.', ',')); partes.push(`${fmtM2(u.area)} m² preenchidos na área total`); }
+          else if (Math.abs(atual - u.area) > 0.5) partes.push(`o ITBI registra ${fmtM2(u.area)} m² (você digitou ${fmtM2(atual)})`);
+          else partes.push(`${fmtM2(u.area)} m² confere`);
+        }
+        setAviso({ tom: 'ok', texto: `Achei pelo ITBI (venda de ${mesAno(u.ultimaVenda)}): ${partes.join(' · ')}.` });
+      }
+    } catch (e) {
+      setAviso({ tom: 'erro', texto: (e as Error).message });
+    } finally { setBuscando(false); }
+  }
+
+  async function emitirCertidao() {
+    if (soDigitos(sql).length !== 11) { setAviso({ tom: 'alerta', texto: 'O SQL tem 11 dígitos (ex.: 009.091.0438-7).' }); return; }
+    setEmitindo(true); setAviso(null);
+    try {
+      const j = await chamar({ acao: 'certidao', sql });
+      const c = j.certidao || {};
+      if (c.areaConstruida) set('area_iptu', String(c.areaConstruida).replace('.', ','));
+      set('cert_pdf', j.pdf || '');
+      set('cert_info', [`Certidão ${c.ano}`, c.areaConstruida && `área construída ${fmtM2(c.areaConstruida)} m²`, c.localImovel].filter(Boolean).join(' · '));
+      setAviso(c.areaConstruida ? { tom: 'ok', texto: 'Área total (IPTU) preenchida pela certidão.' } : { tom: 'alerta', texto: 'Certidão emitida, mas sem área construída — confira o PDF.' });
+    } catch (e) {
+      setAviso({ tom: 'erro', texto: (e as Error).message });
+    } finally { setEmitindo(false); }
+  }
+
+  return (
+    <div className="fe-iptu">
+      <label htmlFor="fe-sql">Nº do contribuinte (SQL) <span style={{ fontWeight: 400 }}>(no carnê do IPTU)</span></label>
+      <div className="fe-iptu-row">
+        <div className="fe-in">
+          <input id="fe-sql" value={sql} placeholder="000.000.0000-0" inputMode="numeric"
+            onChange={(e) => { set('sql', e.target.value); set('cert_pdf', ''); set('cert_info', ''); }}
+            onBlur={() => sql && set('sql', fmtSql(sql))} />
+        </div>
+        <button type="button" className="fe-mini" onClick={acharPeloEndereco} disabled={buscando}>
+          {buscando ? 'Procurando…' : 'Achar pelo endereço'}
+        </button>
+      </div>
+      <button type="button" className="fe-cert" onClick={emitirCertidao} disabled={emitindo || soDigitos(sql).length !== 11}>
+        {emitindo ? 'Emitindo na Prefeitura… (até 1 min)' : 'Emitir certidão de dados cadastrais'}
+      </button>
+      {certInfo && (
+        <div className="fe-certok">
+          <span>📄 {certInfo}</span>
+          {certPdf && <a href={certPdf} target="_blank" rel="noopener noreferrer">Abrir certidão ↗</a>}
+        </div>
+      )}
+      {aviso && <p className={`fe-iptu-aviso ${aviso.tom}`} role="status">{aviso.texto}</p>}
+    </div>
+  );
+}
+
 const CSS = `
 .fe{--navy:#10243F;--red:#E4002B;--ink:#1A2332;--muted:#5D6B7E;--ground:#F4F7FA;--card:#FFFFFF;--line:#D8E0EA;--ice:#EAF1FB;--wa:#1A9E50;--focus:#2563EB;--on:#10243F;--on-ink:#FFFFFF;--danger:#B42318;--head:'Archivo',system-ui,sans-serif;--body:'Open Sans',system-ui,sans-serif;
   background:var(--ground);color:var(--ink);font:15px/1.55 var(--body);min-height:100vh;padding-bottom:110px}
@@ -498,5 +605,17 @@ const CSS = `
 .fe-msg{background:var(--ground);border:1px solid var(--line);border-radius:10px;margin:12px 18px;padding:14px;white-space:pre-wrap;word-break:break-word;font:13px/1.55 var(--body);max-height:46vh;overflow:auto}
 .fe-dlgbar{display:flex;gap:10px;padding:0 18px 18px}
 .fe footer{color:var(--muted);font-size:11.5px;text-align:center;margin:8px 0 12px}
-@media (max-width:430px){.fe-grid .half{grid-column:1/-1}}
+.fe-iptu{background:var(--ice);border-radius:11px;padding:12px}
+.fe-iptu label{display:block;font:600 12px/1.3 var(--head);color:var(--muted);margin-bottom:5px}
+.fe-iptu .fe-in{background:var(--card)}
+.fe-iptu-row{display:flex;gap:8px}
+.fe-iptu-row .fe-in{flex:1}
+.fe-mini{border:1px solid var(--line);background:var(--card);color:var(--navy);border-radius:9px;font:600 13px/1 var(--head);padding:0 12px;cursor:pointer;white-space:nowrap}
+.fe-cert{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:8px;border:0;background:var(--navy);color:#fff;border-radius:9px;font:600 13.5px/1 var(--head);padding:11px 12px;cursor:pointer}
+.fe-cert:disabled,.fe-mini:disabled{opacity:.5;cursor:not-allowed}
+.fe-certok{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 12px;margin-top:8px;font-size:12.5px;color:var(--ink)}
+.fe-certok a{color:var(--navy);font-weight:700;white-space:nowrap}
+.fe-iptu-aviso{margin:8px 0 0;font-size:12.5px;line-height:1.45}
+.fe-iptu-aviso.ok{color:#14653A}.fe-iptu-aviso.alerta{color:#8A5A00}.fe-iptu-aviso.erro{color:var(--danger)}
+@media (max-width:430px){.fe-grid .half{grid-column:1/-1}.fe-iptu-row{flex-direction:column}.fe-mini{padding:11px 12px}}
 `;
