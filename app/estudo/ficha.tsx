@@ -467,6 +467,7 @@ function IptuBox({ tipo, get, set }: { tipo: Tipo; get: (id: string) => Valor | 
   const [buscando, setBuscando] = useState(false);
   const [emitindo, setEmitindo] = useState(false);
   const [aviso, setAviso] = useState<Aviso>(null);
+  const [candidatos, setCandidatos] = useState<{ complemento: string; sql: string }[]>([]);
   const certPdf = txt('cert_pdf');
   const certInfo = txt('cert_info');
 
@@ -482,15 +483,23 @@ function IptuBox({ tipo, get, set }: { tipo: Tipo; get: (id: string) => Valor | 
     setBuscando(true); setAviso(null);
     try {
       const j = await chamar({ acao: 'sql', endereco: txt('endereco'), unidade: tipo === 'sala' ? txt('conjunto') : '' });
+      setCandidatos([]);
       if (!j.predio) {
-        setAviso({ tom: 'alerta', texto: 'Não achei vendas registradas nesse endereço. Confira rua e número, ou digite o SQL do carnê do IPTU.' });
+        setAviso({ tom: 'alerta', texto: `Não achei esse endereço nas vendas do ITBI nem no cadastro da Prefeitura. Confira rua e número, ou digite o SQL do carnê do IPTU.${j.avisoCit ? ' ' + j.avisoCit : ''}` });
       } else if (!j.unidadeProcurada) {
         setAviso({ tom: 'alerta', texto: `Achei o prédio (${j.predio.logradouro}, ${j.predio.numero}), mas falta o número da unidade no endereço (ex.: “— ap 91”).` });
+      } else if (j.candidatos?.length) {
+        setCandidatos(j.candidatos);
+        setAviso({ tom: 'alerta', texto: `O cadastro da Prefeitura tem mais de um SQL para a unidade ${j.unidadeProcurada} (o prédio foi recadastrado e um deles está cancelado). Escolha o do carnê:` });
       } else if (!j.unidade) {
-        setAviso({ tom: 'alerta', texto: `Achei o prédio (${j.predio.logradouro}, ${j.predio.numero}), mas a unidade ${j.unidadeProcurada} nunca aparece nas vendas do ITBI. Digite o SQL do carnê do IPTU.` });
+        setAviso({ tom: 'alerta', texto: `Achei o prédio (${j.predio.logradouro}, ${j.predio.numero}), mas não a unidade ${j.unidadeProcurada}, nem nas vendas do ITBI nem no cadastro da Prefeitura.${j.avisoCit ? ' ' + j.avisoCit : ''} Confira o número ou digite o SQL do carnê do IPTU.` });
+      } else if (j.fonte === 'cit') {
+        const u = j.unidade;
+        set('sql', fmtSql(u.sql)); set('cert_pdf', ''); set('cert_info', '');
+        setAviso({ tom: 'ok', texto: `Achei no cadastro da Prefeitura: ${u.complemento} · SQL ${fmtSql(u.sql)}. Essa unidade não tem venda no ITBI, então a área não vem junto — emita a certidão para preencher a área total.` });
       } else {
         const u = j.unidade;
-        set('sql', fmtSql(u.sql));
+        set('sql', fmtSql(u.sql)); set('cert_pdf', ''); set('cert_info', '');
         const partes = [`${u.complemento} · SQL ${fmtSql(u.sql)}`];
         if (u.area) {
           const atual = soDigitos(txt('area_iptu')) ? Number(txt('area_iptu').replace(',', '.')) : null;
@@ -543,6 +552,16 @@ function IptuBox({ tipo, get, set }: { tipo: Tipo; get: (id: string) => Valor | 
         </div>
       )}
       {aviso && <p className={`fe-iptu-aviso ${aviso.tom}`} role="status">{aviso.texto}</p>}
+      {candidatos.length > 0 && (
+        <div className="fe-iptu-cands">
+          {candidatos.map((c) => (
+            <button key={c.sql} type="button" className="fe-mini"
+              onClick={() => { set('sql', fmtSql(c.sql)); set('cert_pdf', ''); set('cert_info', ''); setCandidatos([]); setAviso({ tom: 'ok', texto: `SQL ${fmtSql(c.sql)} (${c.complemento}). Emita a certidão para conferir e preencher a área total.` }); }}>
+              {c.complemento} · {fmtSql(c.sql)}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -615,6 +634,8 @@ const CSS = `
 .fe-cert:disabled,.fe-mini:disabled{opacity:.5;cursor:not-allowed}
 .fe-certok{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 12px;margin-top:8px;font-size:12.5px;color:var(--ink)}
 .fe-certok a{color:var(--navy);font-weight:700;white-space:nowrap}
+.fe-iptu-cands{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.fe-iptu-cands .fe-mini{padding:9px 12px}
 .fe-iptu-aviso{margin:8px 0 0;font-size:12.5px;line-height:1.45}
 .fe-iptu-aviso.ok{color:#14653A}.fe-iptu-aviso.alerta{color:#8A5A00}.fe-iptu-aviso.erro{color:var(--danger)}
 @media (max-width:430px){.fe-grid .half{grid-column:1/-1}.fe-iptu-row{flex-direction:column}.fe-mini{padding:11px 12px}}
