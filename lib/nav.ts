@@ -14,7 +14,7 @@ export type ItemNav = {
 };
 
 const EMOJI: Record<string, string> = {
-  sdr: '🔻', captacao: '🔎', estudo: '📝', representacao: '✍️', diligencias: '📄', postagens: '🖼️', vitrine: '📣',
+  sdr: '🔻', captacao: '🔎', estudo: '📝', representacao: '✍️', posicionamento: '🗺️', diligencias: '📄', postagens: '🖼️', vitrine: '📣',
   'cobranca-avulsa': '💳', 'notas-comissao': '🧾',
   cobrancas: '💳', contratos: '📑', repasse: '🔁', pagamentos: '🏦', locador: '🏢', notas: '🧾',
   usuarios: '👥', treinamento: '🎓',
@@ -41,6 +41,7 @@ export function getNav(): ItemNav[] {
     item('captacao', 'Captação', 'Quem consta ligado a uma unidade, e como falar com a pessoa.', 'PAINEL_URL_CAPTACAO', '/captacao', 'captacao', 'blue', 'captacao'),
     item('estudo', 'Estudo de mercado', 'Ficha de captação: preencha na visita e mande para a Eva fazer o estudo.', 'PAINEL_URL_ESTUDO', '/estudo', 'captacao', 'blue', 'estudo'),
     item('representacao', 'Contrato de representação', 'Preencher o contrato do proprietário, conferir o PDF e enviar para assinatura.', 'PAINEL_URL_REPRESENTACAO', '/representacao', 'captacao', 'blue', 'representacao'),
+    item('posicionamento', 'Posicionamento', 'Mapear os condomínios da sua região e ver o quanto você já domina dela.', 'PAINEL_URL_POSICIONAMENTO', '/posicionamento', 'captacao', 'blue', 'posicionamento'),
     item('diligencias', 'Diligências', 'Auditoria de certidões e acompanhamento das diligências.', 'PAINEL_URL_DILIGENCIAS', '/admin', 'diligencias', 'blue', 'diligencias'),
     item('postagens', 'Postagens', 'Montar o carrossel de um imóvel para o Instagram escolhendo as fotos do anúncio.', 'PAINEL_URL_POSTAGENS', '/postagens', 'vitrine', 'violet', 'postagens'),
     item('vitrine', 'Vitrine Google Ads', 'Escolher os imóveis que aparecem nos anúncios por região do Google Ads.', 'PAINEL_URL_VITRINE', '/vitrine', 'vitrine', 'violet', 'vitrine'),
