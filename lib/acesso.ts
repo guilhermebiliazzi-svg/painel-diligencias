@@ -21,6 +21,7 @@ export type Tela =
   | 'sdr'
   | 'estudo'
   | 'representacao'
+  | 'posicionamento'
   | 'postagens'
   | 'vitrine'
   | 'locador'
@@ -59,6 +60,7 @@ export const TELAS: DefTela[] = [
   { chave: 'captacao', titulo: 'Captação', area: 'venda', flag: 'pode_captacao' },
   { chave: 'estudo', titulo: 'Estudo de mercado', area: 'venda', flag: 'pode_postagens' },
   { chave: 'representacao', titulo: 'Contrato de representação', area: 'venda', flag: null },
+  { chave: 'posicionamento', titulo: 'Posicionamento (mapa de condomínios)', area: 'venda', flag: null },
   { chave: 'diligencias', titulo: 'Diligências', area: 'venda', flag: 'pode_diligencias' },
   { chave: 'postagens', titulo: 'Postagens', area: 'venda', flag: 'pode_postagens' },
   { chave: 'vitrine', titulo: 'Vitrine Google Ads', area: 'venda', flag: null },
