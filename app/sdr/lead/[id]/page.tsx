@@ -180,7 +180,7 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
             <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${st.c}`}>{st.t}</span>
           </div>
           <dl className="mt-3 divide-y divide-slate-100">
-            <Linha k="Telefone" v={<a href={wa} target="_blank" className="text-blue-700 underline">{telFmt(l.telefone)}</a>} />
+            <Linha k="Telefone" v={<><a href={wa} target="_blank" className="text-blue-700 underline">{telFmt(l.telefone)}</a> · <Link href={'/sdr/conversa/' + l.telefone.replace(/\D/g, '')} className="text-blue-700 underline">conversa completa</Link></>} />
             <Linha k="Quer" v={[l.intencao ? INTENCAO[l.intencao] ?? l.intencao : null, l.tipologia, (l.bairros ?? []).join(', ')].filter(Boolean).join(' · ')} />
             <Linha k="Imóvel" v={l.imovel_anuncio_endereco ? (
               <>
@@ -192,7 +192,7 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
             <Linha k="Até" v={brl(l.valor_max)} />
             <Linha k="Origem" v={[l.fonte, l.temperatura].filter(Boolean).join(' · ')} />
             <Linha k="Resumo" v={l.resumo} />
-            <Linha k="Corretor" v={l.corretor_phone ? nomeCor(l.corretor_phone) : null} />
+            <Linha k="Corretor" v={l.corretor_phone ? <>{nomeCor(l.corretor_phone)} · <Link href={'/sdr/conversa/' + l.corretor_phone.replace(/\D/g, '')} className="text-blue-700 underline">conversa</Link></> : null} />
             <Linha k="Fila" v={fila.length ? fila.map(nomeCor).join(' → ') : null} />
             <Linha k="Captação" v={(etapasCap ?? []).length ? (etapasCap as { etapa: string; quando: string | null; created_at: string }[]).map((e) =>
               (ETAPA_CAP[e.etapa] ?? e.etapa) + (e.quando ? ' ' + fmt.format(new Date(e.quando)) : '') + ' (' + fmt.format(new Date(e.created_at)).slice(0, 5) + ')').join(' → ') : null} />
@@ -244,6 +244,14 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
         )}
 
         <MensagemEva leadId={l.id} destinos={destinosMsg} />
+        {destinosMsg.some((d) => d.destino === 'parceiro') && (
+          <p className="-mt-2 px-1 text-xs text-slate-500">
+            Conversa com parceiro:{' '}
+            {destinosMsg.filter((d) => d.destino === 'parceiro').map((d, i) => (
+              <span key={d.chave}>{i ? ' · ' : ''}<Link href={'/sdr/conversa/' + d.detalhe.replace(/\D/g, '').slice(-11)} className="text-blue-700 underline">{d.detalhe.split(' · ')[0]}</Link></span>
+            ))}
+          </p>
+        )}
 
         <section style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
           <h2 className="text-sm font-semibold text-slate-900">Últimos acontecimentos</h2>
