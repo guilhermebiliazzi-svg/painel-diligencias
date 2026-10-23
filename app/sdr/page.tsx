@@ -39,6 +39,8 @@ type Lead = {
   min_ate_cartao: number | null;
   min_ate_atribuicao: number | null;
   feito: boolean;
+  // a Eva mandou a abertura (lead direto ao gestor também recebe desde 23/10)
+  abriu: boolean;
   referenciado: boolean;
   // situação do referenciamento (13/10): aguardando_aceite, recusado, email_enviado…
   ref_status: string | null;
@@ -116,11 +118,11 @@ async function carregarClientes(dias: number | null): Promise<Lead[]> {
     [dias]
   );
   const ids = rows.map((r) => r.id);
-  const extra = new Map<string, { feito_em: string | null; origem: string | null; motivo: string | null; corretor_phone: string | null; telefone: string | null }>();
+  const extra = new Map<string, { feito_em: string | null; origem: string | null; motivo: string | null; corretor_phone: string | null; telefone: string | null; abertura: string | null }>();
   for (let i = 0; i < ids.length; i += 300) {
-    const { data } = await supabaseAdmin().from('sdr_leads').select('id,feito_em,origem,motivo_arquivamento,corretor_phone,telefone').in('id', ids.slice(i, i + 300));
-    for (const d of (data ?? []) as { id: string; feito_em: string | null; origem: string | null; motivo_arquivamento: string | null; corretor_phone: string | null; telefone: string | null }[])
-      extra.set(d.id, { feito_em: d.feito_em, origem: d.origem, motivo: d.motivo_arquivamento, corretor_phone: d.corretor_phone, telefone: d.telefone });
+    const { data } = await supabaseAdmin().from('sdr_leads').select('id,feito_em,origem,motivo_arquivamento,corretor_phone,telefone,template_abertura_em').in('id', ids.slice(i, i + 300));
+    for (const d of (data ?? []) as { id: string; feito_em: string | null; origem: string | null; motivo_arquivamento: string | null; corretor_phone: string | null; telefone: string | null; template_abertura_em: string | null }[])
+      extra.set(d.id, { feito_em: d.feito_em, origem: d.origem, motivo: d.motivo_arquivamento, corretor_phone: d.corretor_phone, telefone: d.telefone, abertura: d.template_abertura_em });
   }
   // Situação do referenciamento de cada cliente (o mais recente pelo telefone).
   const refStatus = new Map<string, string>();
@@ -138,6 +140,7 @@ async function carregarClientes(dias: number | null): Promise<Lead[]> {
       ...r,
       valor: r.valor == null ? null : Number(r.valor),
       feito: !!extra.get(r.id)?.feito_em,
+      abriu: !!extra.get(r.id)?.abertura,
       corretor_phone: extra.get(r.id)?.corretor_phone ?? null,
       referenciado: /referenciad/i.test(extra.get(r.id)?.motivo ?? r.motivo_arquivamento ?? ''),
       ref_status: refStatus.get(String(extra.get(r.id)?.telefone ?? '').replace(/\D/g, '').slice(-8)) ?? null,
@@ -297,6 +300,28 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
     etapa('Proposta', (l) => assumiu(l) && l.proposta),
   ];
   const responderam = sdr.filter((l) => l.respondeu).length;
+  // Funil dos leads que foram direto ao gestor (imóvel da carteira Ville) — 23/10.
+  const dContato = (l: Lead) => l.feito || l.visita_agendada || l.proposta;
+  const dVisita = (l: Lead) => l.visita_agendada || l.proposta;
+  const itensDir = (xs: Lead[]): ItemEtapa[] => xs.map((l) => ({ id: l.id, href: '/sdr/lead/' + l.id, nome: l.nome || 'Cliente',
+    sub: [l.corretor, l.endereco, fmtData.format(new Date(l.created_at))].filter(Boolean).join(' · ') }));
+  const etapaDir = (rotulo: string, f: (l: Lead) => boolean): Etapa => { const xs = diretos.filter(f); return { rotulo, n: xs.length, itens: itensDir(xs) }; };
+  const etapasDir: Etapa[] = [
+    etapaDir('Chegaram (direto ao gestor)', () => true),
+    etapaDir('Eva abriu a conversa', (l) => l.abriu),
+    etapaDir('Cliente respondeu à Eva', (l) => l.respondeu),
+    etapaDir('Gestor fez contato', dContato),
+    etapaDir('Visita agendada', dVisita),
+    etapaDir('Proposta', (l) => l.proposta),
+  ];
+  const porGestor = new Map<string, { recebidos: number; contato: number; visita: number; proposta: number }>();
+  for (const l of diretos) {
+    const g = l.corretor || 'sem gestor cadastrado';
+    const r = porGestor.get(g) ?? { recebidos: 0, contato: 0, visita: 0, proposta: 0 };
+    r.recebidos++; if (dContato(l)) r.contato++; if (dVisita(l)) r.visita++; if (l.proposta) r.proposta++;
+    porGestor.set(g, r);
+  }
+  const tabGestor = [...porGestor.entries()].sort((a, b) => b[1].recebidos - a[1].recebidos);
   const qualificados = sdr.filter((l) => l.qualificado).length;
 
   // Aceite por corretor: uma linha por lead oferecido a cada corretor (reoferta ao mesmo corretor conta uma vez).
@@ -370,6 +395,44 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
           <Lista titulo="Arquivados por motivo" itens={motivos} />
         </div>
       </div>
+
+      {diretos.length > 0 && (
+        <div className="mt-4 grid gap-4 lg:grid-cols-5">
+          <div className="lg:col-span-3">
+            <Secao titulo={`Funil — ${intencao === 'compra' ? 'compradores' : 'locatários'} direto ao gestor (carteira Ville)`}>
+              <Funil etapas={etapasDir} nota={'Leads de imóvel da carteira Ville: vão direto ao gestor do imóvel, sem fila. Desde 23/10 a Eva abre a conversa na hora com o contato do gestor. "Gestor fez contato" conta o "feito", visita ou proposta registrados.'} />
+            </Secao>
+          </div>
+          <div className="lg:col-span-2">
+            <Secao titulo="Por gestor">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+                      <th className="py-1 pr-2 font-medium">Gestor</th>
+                      <th className="py-1 pr-2 text-right font-medium">Leads</th>
+                      <th className="py-1 pr-2 text-right font-medium">Contato</th>
+                      <th className="py-1 pr-2 text-right font-medium">Visita</th>
+                      <th className="py-1 text-right font-medium">Proposta</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {tabGestor.map(([g, r]) => (
+                      <tr key={g}>
+                        <td className="py-1.5 pr-2 text-slate-700">{g}</td>
+                        <td className="py-1.5 pr-2 text-right tabular-nums">{r.recebidos}</td>
+                        <td className="py-1.5 pr-2 text-right tabular-nums text-emerald-700">{r.contato}</td>
+                        <td className="py-1.5 pr-2 text-right tabular-nums">{r.visita}</td>
+                        <td className="py-1.5 text-right tabular-nums">{r.proposta}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Secao>
+          </div>
+        </div>
+      )}
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Lista titulo="Por fonte" itens={contar(leads, (l) => l.fonte)} />
