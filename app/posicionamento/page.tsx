@@ -10,6 +10,7 @@ import {
   STATUS_REL, COR_PRIORIDADE, type Condominio, type Prioridade,
 } from '@/lib/posicionamento';
 import Ficha from './ficha';
+import VisaoGeral from './visao-geral';
 
 export const metadata = { title: 'Posicionamento — Painel REMAX Ville' };
 export const dynamic = 'force-dynamic';
@@ -40,6 +41,20 @@ export default async function Posicionamento({ searchParams }: { searchParams: P
       .filter((c) => (c.status ?? 'ativo') === 'ativo' || Number(c.id) === Number(sp.cor))
       .map((c) => ({ id: Number(c.id), nome: String(c.nome ?? '').split(' - ')[0] }));
   }
+  // Administrador abre na visão geral da equipe; o mapa de um corretor fica a um clique.
+  if (admin && (sp.aba === 'geral' || (!sp.aba && !sp.cor))) {
+    const link = 'border-transparent text-slate-600 hover:text-slate-900';
+    return (
+      <Casca>
+        <nav className="mb-5 flex gap-1 border-b border-slate-200">
+          <span className="-mb-px border-b-2 border-blue-700 px-4 py-2.5 text-sm font-semibold text-blue-700">Visão geral</span>
+          <Link href={`/posicionamento?aba=painel${eu?.id ? `&cor=${eu.id}` : ''}`} className={`-mb-px border-b-2 px-4 py-2.5 text-sm ${link}`}>Mapa por corretor</Link>
+        </nav>
+        <VisaoGeral hoje={hojeSP()} />
+      </Casca>
+    );
+  }
+
   const corId = admin ? Number(sp.cor) || eu?.id || corretores?.[0]?.id || null : eu?.id ?? null;
 
   if (!corId) {
@@ -118,7 +133,8 @@ export default async function Posicionamento({ searchParams }: { searchParams: P
       )}
 
       <nav className="mb-5 flex gap-1 border-b border-slate-200">
-        {tab('painel', 'Meu posicionamento')}
+        {admin && tab('geral', 'Visão geral')}
+        {tab('painel', admin ? 'Posicionamento' : 'Meu posicionamento')}
         {tab('lista', `Condomínios${lista.length ? ` (${lista.length})` : ''}`)}
         {tab('novo', '+ Adicionar condomínio')}
       </nav>
