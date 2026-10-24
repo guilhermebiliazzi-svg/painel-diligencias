@@ -8,6 +8,7 @@ import { leadDaCaptacao } from '@/app/sdr/lead-captacao';
 import Decisao, { type CorretorOpc } from '../../decisao';
 import ReferenciarCaptacao from './referenciar';
 import { lojasProximas } from '@/lib/lojas-remax';
+import MensagemEva from '@/app/sdr/lead/[id]/mensagem';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Captação — SDR REMAX Ville' };
@@ -68,6 +69,13 @@ export default async function CaptacaoSdr({ params }: { params: Promise<{ id: st
     for (const m of msgs) eventos.push({ k: 'm' + m.id, t: new Date(m.created_at).getTime(), rotulo: (m.direcao === 'in' ? 'de ' : 'para ') + m.interlocutor, texto: String(m.conteudo ?? '') });
     eventos.sort((x, y) => y.t - x.t);
   }
+  // 24/10: enviar mensagem pela Eva também na captação (só para o proprietário).
+  let janela = false;
+  if (fim8.length === 8) {
+    const desde23 = new Date(Date.now() - 23 * 3600e3).toISOString();
+    const { count } = await sb.from('mensagens_buffer').select('id', { count: 'exact', head: true }).like('phone', '%' + fim8).gte('created_at', desde23);
+    janela = (count ?? 0) > 0;
+  }
   const resumo = String((c.payload as { resumo?: string } | null)?.resumo ?? '').trim();
   // Lojas REMAX mais próximas do imóvel (só fora da capital).
   // Endereço: o desta captação ou, se vazio, o que a Eva registrou depois (resumo do WhatsApp) para o mesmo telefone.
@@ -117,6 +125,10 @@ export default async function CaptacaoSdr({ params }: { params: Promise<{ id: st
             {!eventos.length && <li className="py-2 text-sm text-slate-400">Sem conversa registrada.</li>}
           </ul>
         </section>
+        {tel && (
+          <MensagemEva leadId="" captacaoId={c.id}
+            destinos={[{ chave: 'cliente', destino: 'cliente', rotulo: 'Proprietário', detalhe: (c.nome ? String(c.nome).split(' ')[0] + ' · ' : '') + telFmt(tel55), janela }]} />
+        )}
         {c.referenciado_em ? (
           <p className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-800">Referenciada em {fmt.format(new Date(c.referenciado_em))}. O aceite e o e-mail seguem pela Eva; acompanhe em Referenciamentos.</p>
         ) : c.descartado_em ? (
