@@ -13,7 +13,7 @@ const COMO: Record<DestinoTipo, [string, string]> = {
   parceiro: ['Sai como texto livre da Eva.', 'Fora da janela de 24h: sai como "Aviso da Eva: …" (modelo interno).'],
 };
 
-export default function MensagemEva({ leadId, destinos }: { leadId: string; destinos: DestinoMsg[] }) {
+export default function MensagemEva({ leadId, destinos, captacaoId }: { leadId: string; destinos: DestinoMsg[]; captacaoId?: string }) {
   const router = useRouter();
   const [sel, setSel] = useState<string>(destinos[0]?.chave ?? '');
   const [texto, setTexto] = useState('');
@@ -53,7 +53,7 @@ export default function MensagemEva({ leadId, destinos }: { leadId: string; dest
           <p>Enviar para <b>{d?.rotulo}</b> ({d?.detalhe})?</p>
           <div className="mt-2 flex flex-wrap gap-2">
             <button type="button" disabled={pend}
-              onClick={() => d && start(async () => { const r = await enviarMensagemEva(leadId, d.destino, t, d.imovelId); setRes(r); setConfirmar(false); if (r.ok) { setTexto(''); router.refresh(); } })}
+              onClick={() => d && start(async () => { const r = await enviarMensagemEva(leadId, d.destino, t, d.imovelId, captacaoId); setRes(r); setConfirmar(false); if (r.ok) { setTexto(''); router.refresh(); } })}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
               {pend ? 'Enviando…' : 'Confirmar envio'}
             </button>

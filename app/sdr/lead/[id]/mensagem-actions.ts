@@ -12,8 +12,10 @@ export type DestinoTipo = 'cliente' | 'corretor' | 'parceiro';
 const WEBHOOK_ACAO = 'https://villejds.app.n8n.cloud/webhook/sdr-painel-acao';
 const CHAVE_ACAO = 'ville-sdr-painel-7c2e9a41f0b84d6e';
 
-export async function enviarMensagemEva(leadId: string, destino: DestinoTipo, texto: string, imovelId?: string): Promise<ResultadoMsg> {
+// 24/10: captação ainda sem lead (tela /sdr/captacao/[id]) — só para o proprietário; o telefone sai de captacao_leads no n8n.
+export async function enviarMensagemEva(leadId: string, destino: DestinoTipo, texto: string, imovelId?: string, captacaoId?: string): Promise<ResultadoMsg> {
   const eu = await exigirSdrGestao();
+  if (captacaoId) return enviarCaptacao(captacaoId, texto, eu.email);
   if (!/^[0-9a-f-]{36}$/i.test(leadId)) return { ok: false, erro: 'Lead inválido.' };
   if (!['cliente', 'corretor', 'parceiro'].includes(destino)) return { ok: false, erro: 'Escolha o destinatário.' };
   const t = String(texto ?? '').replace(/\r/g, '').trim();
@@ -29,6 +31,29 @@ export async function enviarMensagemEva(leadId: string, destino: DestinoTipo, te
       cache: 'no-store',
     });
     const j = (await r.json().catch(() => ({}))) as { ok?: boolean; resposta?: string; message?: string };
+    if (!r.ok) return { ok: false, erro: 'A Eva não respondeu (' + r.status + '). Nada foi enviado.' };
+    const resposta = String(j.resposta ?? '').trim();
+    return j.ok ? { ok: true, msg: resposta || 'Enviada.' } : { ok: false, erro: resposta || 'Não saiu. Nada foi enviado.' };
+  } catch {
+    return { ok: false, erro: 'A Eva não respondeu. Nada foi enviado — tente de novo em instantes.' };
+  }
+}
+
+async function enviarCaptacao(captacaoId: string, texto: string, por: string): Promise<ResultadoMsg> {
+  if (!/^[0-9a-f-]{36}$/i.test(captacaoId)) return { ok: false, erro: 'Captação inválida.' };
+  const t = String(texto ?? '').replace(/\r/g, '').trim();
+  if (!t) return { ok: false, erro: 'Escreva a mensagem.' };
+  if (t.length > 900) return { ok: false, erro: 'Mensagem longa demais (máx. 900 caracteres).' };
+  const { data: c } = await supabaseAdmin().from('captacao_leads').select('id').eq('id', captacaoId).maybeSingle();
+  if (!c) return { ok: false, erro: 'Captação não encontrada.' };
+  try {
+    const r = await fetch(WEBHOOK_ACAO, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-chave': CHAVE_ACAO },
+      body: JSON.stringify({ acao: 'enviar_mensagem_captacao', captacao_id: captacaoId, texto: t, por }),
+      cache: 'no-store',
+    });
+    const j = (await r.json().catch(() => ({}))) as { ok?: boolean; resposta?: string };
     if (!r.ok) return { ok: false, erro: 'A Eva não respondeu (' + r.status + '). Nada foi enviado.' };
     const resposta = String(j.resposta ?? '').trim();
     return j.ok ? { ok: true, msg: resposta || 'Enviada.' } : { ok: false, erro: resposta || 'Não saiu. Nada foi enviado.' };
