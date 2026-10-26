@@ -279,7 +279,8 @@ const contar = <T,>(xs: T[], f: (x: T) => string) =>
 async function FunilCliente({ dias, intencao }: { dias: number | null; intencao: 'compra' | 'aluguel' }) {
   const todos = await carregarClientes(dias);
   // 26/10: lead sem intenção (cliente não respondeu e o anúncio não informou) entra em compradores, marcado — nunca some do painel.
-  const leads = todos.filter((l) => l.intencao === intencao || (intencao === 'compra' && !l.intencao));
+  const semIntencao = (l: Lead) => !l.intencao && !/ignorado|corretor|recrutamento/i.test(l.motivo_arquivamento ?? ''); // fora do SDR (parceiro, recrutamento, criado pela Eva) não entra
+  const leads = todos.filter((l) => l.intencao === intencao || (intencao === 'compra' && semIntencao(l)));
   const diretos = leads.filter((l) => l.direto);
   const sdr = leads.filter((l) => !l.direto);
   const referenciados = sdr.filter((l) => l.referenciado);
