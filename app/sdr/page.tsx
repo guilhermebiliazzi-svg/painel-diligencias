@@ -278,7 +278,8 @@ const contar = <T,>(xs: T[], f: (x: T) => string) =>
 // ---------- funis de cliente (comprador / locatário) ----------
 async function FunilCliente({ dias, intencao }: { dias: number | null; intencao: 'compra' | 'aluguel' }) {
   const todos = await carregarClientes(dias);
-  const leads = todos.filter((l) => l.intencao === intencao);
+  // 26/10: lead sem intenção (cliente não respondeu e o anúncio não informou) entra em compradores, marcado — nunca some do painel.
+  const leads = todos.filter((l) => l.intencao === intencao || (intencao === 'compra' && !l.intencao));
   const diretos = leads.filter((l) => l.direto);
   const sdr = leads.filter((l) => !l.direto);
   const referenciados = sdr.filter((l) => l.referenciado);
@@ -288,7 +289,7 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
   const cartao = (l: Lead) => !!l.cartao_enviado_em || assumiu(l);
   const contato = (l: Lead) => assumiu(l) && (l.feito || l.visita_agendada || l.proposta);
   const visita = (l: Lead) => assumiu(l) && (l.visita_agendada || l.proposta);
-  const itensDe = (xs: Lead[]): ItemEtapa[] => xs.map((l) => ({ id: l.id, href: '/sdr/lead/' + l.id, nome: l.nome || 'Cliente',
+  const itensDe = (xs: Lead[]): ItemEtapa[] => xs.map((l) => ({ id: l.id, href: '/sdr/lead/' + l.id, nome: (l.nome || 'Cliente') + (l.intencao ? '' : ' (intenção não informada)'),
     sub: [l.corretor, l.endereco, fmtData.format(new Date(l.created_at))].filter(Boolean).join(' · ') }));
   const etapa = (rotulo: string, f: (l: Lead) => boolean): Etapa => { const xs = sdr.filter(f); return { rotulo, n: xs.length, itens: itensDe(xs) }; };
   const etapas: Etapa[] = [
@@ -303,7 +304,7 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
   // Funil dos leads que foram direto ao gestor (imóvel da carteira Ville) — 23/10.
   const dContato = (l: Lead) => l.feito || l.visita_agendada || l.proposta;
   const dVisita = (l: Lead) => l.visita_agendada || l.proposta;
-  const itensDir = (xs: Lead[]): ItemEtapa[] => xs.map((l) => ({ id: l.id, href: '/sdr/lead/' + l.id, nome: l.nome || 'Cliente',
+  const itensDir = (xs: Lead[]): ItemEtapa[] => xs.map((l) => ({ id: l.id, href: '/sdr/lead/' + l.id, nome: (l.nome || 'Cliente') + (l.intencao ? '' : ' (intenção não informada)'),
     sub: [l.corretor, l.endereco, fmtData.format(new Date(l.created_at))].filter(Boolean).join(' · ') }));
   const etapaDir = (rotulo: string, f: (l: Lead) => boolean): Etapa => { const xs = diretos.filter(f); return { rotulo, n: xs.length, itens: itensDir(xs) }; };
   const etapasDir: Etapa[] = [
@@ -488,7 +489,7 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
                   <tr key={l.id} className="align-top">
                     <td className="whitespace-nowrap py-2 tabular-nums text-slate-600">{fmtData.format(new Date(l.created_at))}</td>
                     <td className="py-2">
-                      <Link href={`/sdr/lead/${l.id}`} className="text-blue-700 underline">{l.nome || '—'}</Link>
+                      <Link href={`/sdr/lead/${l.id}`} className="text-blue-700 underline">{l.nome || '—'}</Link>{!l.intencao && <span className="text-xs text-amber-700"> · intenção não informada</span>}
                       {l.temperatura && <span className="ml-1 text-xs text-slate-500">· {l.temperatura}</span>}
                     </td>
                     <td className="py-2 text-slate-600">{l.fonte}</td>
