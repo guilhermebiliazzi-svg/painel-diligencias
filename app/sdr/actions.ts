@@ -291,3 +291,15 @@ export async function referenciarCaptacao(captacaoId: string, d: DadosRefCaptaca
   if (f8.length === 8) await q.like('telefone', '%' + f8); else await q.eq('id', c.id);
   return { ok: true, msg: 'Convite enviado a ' + nome + '. Quando ele aceitar, a Eva pede o e-mail e manda os dados do proprietário.' };
 }
+
+// 26/10: contato da Eva fora do perfil (corretor de fora, parceria...) chega "esperando você" no painel.
+// Arquivar aqui só confirma o arquivamento (o lead já está arquivado e nenhuma mensagem sai).
+export async function arquivarForaPerfil(leadId: string): Promise<Resultado> {
+  await exigirSdrGestao();
+  if (!/^[0-9a-f-]{36}$/i.test(leadId)) return { ok: false, erro: 'Lead inválido.' };
+  const agora = new Date().toISOString();
+  const { error } = await supabaseAdmin().from('sdr_leads').update({ fora_perfil_revisado_em: agora, updated_at: agora })
+    .eq('id', leadId).not('fora_perfil_em', 'is', null);
+  if (error) return { ok: false, erro: 'Não foi possível gravar: ' + error.message };
+  return { ok: true, msg: 'Arquivado.' };
+}

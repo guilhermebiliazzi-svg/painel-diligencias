@@ -12,6 +12,7 @@ import VerComoCorretor from '@/app/_components/VerComoCorretor';
 import { pool } from '@/lib/db';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import FunilSelect from './funil-select';
+import ArquivarForaPerfil from './fora-perfil';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Funil do SDR — REMAX Ville' };
@@ -775,6 +776,36 @@ async function FunilRecrutamento({ dias }: { dias: number | null }) {
   );
 }
 
+// 26/10: contatos que a Eva marcou como fora do perfil de cliente (corretor de fora, parceria...).
+// Ficam esperando o Guilherme: arquivar, ou abrir o lead e montar a fila (o lead é reaberto).
+async function ForaDoPerfil() {
+  const { data } = await supabaseAdmin().from('sdr_leads')
+    .select('id,nome,telefone,created_at,fora_perfil_motivo')
+    .not('fora_perfil_em', 'is', null).is('fora_perfil_revisado_em', null).eq('status', 'arquivado')
+    .gte('created_at', new Date(Date.now() - 30 * 864e5).toISOString()).order('created_at', { ascending: false }).limit(50);
+  const xs = (data ?? []) as { id: string; nome: string | null; telefone: string | null; created_at: string; fora_perfil_motivo: string | null }[];
+  if (!xs.length) return null;
+  const tel = (t: string | null) => { const d = String(t || '').replace(/\D/g, '').replace(/^55/, ''); return d.length >= 10 ? `(${d.slice(0, 2)}) ${d.slice(2, -4)}-${d.slice(-4)}` : (t || ''); };
+  return (
+    <section style={{ backgroundColor: '#fffbeb' }} className="mt-6 rounded-2xl border border-amber-200 p-5 shadow-sm">
+      <h2 className="text-sm font-semibold text-amber-900">Esperando você · fora do perfil ({xs.length})</h2>
+      <p className="mt-1 text-xs text-amber-800">Contatos que a Eva não tratou como cliente. Nenhuma mensagem foi enviada a eles. Arquive, ou abra e monte a fila.</p>
+      <ul className="mt-3 divide-y divide-amber-100">
+        {xs.map((x) => (
+          <li key={x.id} className="flex flex-wrap items-start justify-between gap-2 py-2 text-sm">
+            <div className="min-w-0">
+              <Link href={'/sdr/lead/' + x.id} className="font-medium text-blue-700 underline">{x.nome || 'Contato'}</Link>
+              <span className="text-slate-600"> · {tel(x.telefone)} · {fmtData.format(new Date(x.created_at))}</span>
+              {x.fora_perfil_motivo && <p className="break-words text-xs text-slate-600">{x.fora_perfil_motivo}</p>}
+            </div>
+            <ArquivarForaPerfil id={x.id} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export default async function FunilSdr({ searchParams }: { searchParams: Promise<{ d?: string; f?: string; c?: string }> }) {
   const perfil = await exigirTela('sdr');
   const { d, f, c } = await searchParams;
@@ -842,6 +873,8 @@ export default async function FunilSdr({ searchParams }: { searchParams: Promise
             <VerComoCorretor corretores={corretores.map((x) => ({ id: x.id, nome: x.nome.split(' - ')[0] }))} base={`/sdr?d=${periodo}&f=${funil}&c=`} />
           </div>
         </div>
+
+        <ForaDoPerfil />
 
         {erro ? (
           <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">Não consegui ler os dados: {erro}</div>
