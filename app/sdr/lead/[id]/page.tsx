@@ -7,6 +7,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import Decisao, { type CorretorOpc, type ImovelRef } from '../../decisao';
 import Resgatar from './resgatar';
 import MensagemEva, { type DestinoMsg } from './mensagem';
+import ArquivarForaPerfil from '../../fora-perfil';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Lead — SDR REMAX Ville' };
@@ -200,6 +201,12 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
             <Linha k="Entrou" v={fmt.format(new Date(l.created_at))} />
           </dl>
         </header>
+        {(l as { fora_perfil_em?: string | null }).fora_perfil_em && !(l as { fora_perfil_revisado_em?: string | null }).fora_perfil_revisado_em && l.status === 'arquivado' && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <span className="min-w-0 break-words"><b>Esperando você · fora do perfil.</b> {(l as { fora_perfil_motivo?: string | null }).fora_perfil_motivo || 'A Eva não tratou como cliente.'} Arquive, ou monte a fila abaixo (o lead é reaberto).</span>
+            <ArquivarForaPerfil id={l.id} />
+          </div>
+        )}
 
         {indicacoes.map((r) => {
           const si = STATUS_IND[r.status] ?? { t: r.status, c: 'bg-slate-100 text-slate-700' };
