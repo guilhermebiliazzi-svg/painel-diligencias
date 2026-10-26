@@ -759,7 +759,7 @@ async function FunilRecrutamento({ dias }: { dias: number | null }) {
                 {lista.map((c) => (
                   <tr key={c.tel} className="align-top">
                     <td className="whitespace-nowrap py-2 tabular-nums text-slate-600">{fmtData.format(new Date(c.criado_em))}</td>
-                    <td className="py-2 text-slate-900">{cor(c.indicador)} {c.nome || '—'}</td>
+                    <td className="py-2 text-slate-900">{cor(c.indicador)} {c.nome || '—'}{' '}<Link href={'/sdr/conversa/' + String(c.tel).replace(/\D/g, '')} className="text-xs text-blue-700 underline">conversa</Link></td>
                     <td className="py-2 text-slate-600">{c.formulario ? 'Formulário' : 'WhatsApp'}</td>
                     <td className="py-2 text-slate-600">{c.momento || '—'}</td>
                     <td className="py-2">
