@@ -32,7 +32,7 @@ async function dono(id: number): Promise<number | null> {
 }
 
 const voltar = (cor: number, regiao: string, extra = '') => {
-  const p = new URLSearchParams({ aba: 'lista', reg: regiao });
+  const p = new URLSearchParams({ aba: 'mapa', reg: regiao });
   p.set('cor', String(cor));
   return `/posicionamento?${p.toString()}${extra}`;
 };
@@ -54,7 +54,7 @@ export async function salvarCondominio(fd: FormData) {
   const regiao = txt(fd.get('regiao_nova')) || txt(fd.get('regiao'));
   const nome = txt(fd.get('nome'));
   if (!regiao || !nome) {
-    redirect(`/posicionamento?aba=novo&erro=obrigatorio${id ? `&id=${id}` : ''}`);
+    redirect(id ? `/posicionamento/${id}?erro=obrigatorio` : '/posicionamento?aba=novo&erro=obrigatorio');
   }
 
   const linha: Partial<Record<keyof Condominio, unknown>> = { corretor_id: corretorId, regiao };
