@@ -38,7 +38,7 @@ export default async function EditarCondominio({
     corretores = ((cors ?? []) as { id: number; nome: string }[]).map((o) => ({ id: Number(o.id), nome: String(o.nome ?? '').split(' - ')[0] }));
   }
 
-  const voltar = `/posicionamento?aba=lista&reg=${encodeURIComponent(c.regiao)}${admin ? `&cor=${c.corretor_id}` : ''}`;
+  const voltar = `/posicionamento?aba=mapa&reg=${encodeURIComponent(c.regiao)}${admin ? `&cor=${c.corretor_id}` : ''}`;
 
   return (
     <div style={{ backgroundColor: '#f8fafc' }} className="min-h-screen">
@@ -46,6 +46,7 @@ export default async function EditarCondominio({
         <Link href={voltar} className="text-sm text-slate-500 hover:text-slate-800">← Voltar ao mapa</Link>
         <h1 className="mt-3 text-2xl font-semibold text-slate-900">{c.nome}</h1>
         <p className="mt-1 mb-6 text-sm text-slate-600">{c.regiao}</p>
+        {erro === 'obrigatorio' && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">Preencha a região e o nome do condomínio.</p>}
 
         <Ficha c={c} regioes={regioes} regiaoPadrao={c.regiao} corretores={corretores} corretorPadrao={c.corretor_id} />
 
