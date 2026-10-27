@@ -53,16 +53,19 @@ export default function Ficha({
   regiaoPadrao,
   corretores,
   corretorPadrao,
+  corretorFixo,
 }: {
   c: Condominio | null;
   regioes: string[];
   regiaoPadrao: string;
-  corretores: { id: number; nome: string }[] | null; // só admin escolhe o corretor
+  corretores: { id: number; nome: string }[] | null; // só admin escolhe o corretor (edição)
   corretorPadrao: number | null;
+  corretorFixo?: number | null; // admin cadastrando para o corretor escolhido na tela
 }) {
   return (
     <form action={salvarCondominio} className="space-y-6">
       {c && <input type="hidden" name="id" value={c.id} />}
+      {corretorFixo ? <input type="hidden" name="corretor_id" value={corretorFixo} /> : null}
 
       <section style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-5 shadow-sm">
         <h2 className="text-base font-semibold text-slate-900">Região</h2>
