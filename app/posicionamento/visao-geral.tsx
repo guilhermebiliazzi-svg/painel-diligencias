@@ -54,7 +54,7 @@ export default async function VisaoGeral({ hoje }: { hoje: string }) {
   }
   const nomeDe = (id: number) => nomes.get(Number(id))?.nome ?? `Corretor ${id}`;
   const mapa = (id: number, reg?: string) =>
-    `/posicionamento?aba=painel&cor=${id}${reg ? `&reg=${encodeURIComponent(reg)}` : ''}`;
+    `/posicionamento?aba=mapa&cor=${id}${reg ? `&reg=${encodeURIComponent(reg)}` : ''}`;
 
   if (!rows.length) {
     return (
