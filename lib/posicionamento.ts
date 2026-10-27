@@ -199,7 +199,10 @@ export type Resumo = {
   completudeMedia: number;
   comRelacao: number; // em relacionamento ou referência
   referencia: number;
-  dominio: number; // % das unidades mapeadas em prédios onde há relacionamento
+  // % das unidades mapeadas em prédios onde há relacionamento; quando algum prédio
+  // está sem o total de unidades, conta prédios (senão o indicador ficaria zerado)
+  dominio: number;
+  dominioBase: 'unidades' | 'predios';
   sindicos: number;
   zeladores: number;
   proprietarios: number;
@@ -222,6 +225,7 @@ export function resumir(lista: Condominio[], hoje: string): Resumo {
   const comRel = lista.filter((c) => c.status_relacionamento === 'em_relacionamento' || c.status_relacionamento === 'referencia');
   const unidades = lista.reduce((a, c) => a + (c.unidades ?? 0), 0);
   const unidRel = comRel.reduce((a, c) => a + (c.unidades ?? 0), 0);
+  const porUnidade = lista.length > 0 && lista.every((c) => (c.unidades ?? 0) > 0);
   const conc = new Map<string, number>();
   for (const c of lista) {
     const vistos = new Set<string>();
@@ -253,7 +257,10 @@ export function resumir(lista: Condominio[], hoje: string): Resumo {
     completudeMedia: Math.round(media(lista.map(completude)) ?? 0),
     comRelacao: comRel.length,
     referencia: lista.filter((c) => c.status_relacionamento === 'referencia').length,
-    dominio: unidades ? Math.round((unidRel / unidades) * 100) : 0,
+    dominio: porUnidade
+      ? Math.round((unidRel / unidades) * 100)
+      : lista.length ? Math.round((comRel.length / lista.length) * 100) : 0,
+    dominioBase: porUnidade ? 'unidades' : 'predios',
     sindicos: lista.filter((c) => !vazio(c.sindico_nome)).length,
     zeladores: lista.filter((c) => !vazio(c.zelador_nome)).length,
     proprietarios: soma('proprietarios_conhecidos'),
