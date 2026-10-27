@@ -6,7 +6,8 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { exigirTela, corretorDaPessoa } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { CAMPOS, type Condominio } from '@/lib/posicionamento';
+import { CAMPOS, lerContatos, zeladorDosContatos, type Condominio } from '@/lib/posicionamento';
+import { mercadoPorEndereco, type MercadoItbi } from '@/lib/posicionamento-itbi';
 
 const txt = (v: FormDataEntryValue | null) => String(v ?? '').trim();
 
@@ -51,7 +52,8 @@ export async function salvarCondominio(fd: FormData) {
     if (!admin) corretorId = d;
   }
 
-  const regiao = txt(fd.get('regiao_nova')) || txt(fd.get('regiao'));
+  const regSel = txt(fd.get('regiao'));
+  const regiao = txt(fd.get('regiao_nova')) || (regSel === '__nova__' ? '' : regSel);
   const nome = txt(fd.get('nome'));
   if (!regiao || !nome) {
     redirect(id ? `/posicionamento/${id}?erro=obrigatorio` : '/posicionamento?aba=novo&erro=obrigatorio');
@@ -65,6 +67,10 @@ export async function salvarCondominio(fd: FormData) {
     else linha[c.k] = v || null;
   }
   if (!linha.status_relacionamento) linha.status_relacionamento = 'nao_iniciado';
+  // Contatos do prédio (lista); o zelador/gerente da lista alimenta os indicadores
+  const contatos = lerContatos(txt(fd.get('contatos')));
+  linha.contatos = contatos;
+  linha.zelador_nome = zeladorDosContatos(contatos);
   const pm = txt(fd.get('prioridade_manual'));
   linha.prioridade_manual = ['A', 'B', 'C'].includes(pm) ? pm : null;
   linha.observacoes = txt(fd.get('observacoes')) || null;
@@ -95,4 +101,14 @@ export async function excluirCondominio(fd: FormData) {
   await supabaseAdmin().from('posicionamento_condominios').delete().eq('id', id);
   revalidatePath('/posicionamento');
   redirect(voltar(Number(row.corretor_id), row.regiao));
+}
+
+// Botão "Puxar do ITBI" da ficha: números de mercado do prédio pelo endereço.
+export async function buscarItbi(endereco: string): Promise<MercadoItbi | { erro: string }> {
+  await exigirTela('posicionamento');
+  try {
+    return await mercadoPorEndereco(String(endereco ?? '').slice(0, 200));
+  } catch {
+    return { erro: 'Não consegui consultar o ITBI agora. Tente de novo em instantes.' };
+  }
 }
