@@ -870,6 +870,7 @@ export default async function FunilSdr({ searchParams }: { searchParams: Promise
         <div className="mt-6">
           <div className="flex flex-wrap items-center gap-4">
             <FunilSelect funis={FUNIS.map((x) => ({ k: x.k, rotulo: x.rotulo }))} atual={funil} periodo={periodo} />
+            <Link href="/sdr/parceiros" className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Corretores de fora</Link>
             <VerComoCorretor corretores={corretores.map((x) => ({ id: x.id, nome: x.nome.split(' - ')[0] }))} base={`/sdr?d=${periodo}&f=${funil}&c=`} />
           </div>
         </div>
