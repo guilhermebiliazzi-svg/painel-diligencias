@@ -48,6 +48,13 @@ export type Condominio = {
   proxima_acao_data: string | null;
   prioridade_manual: Prioridade | null;
   observacoes: string | null;
+  perfil_moradores: string | null;
+  ocupacao: string | null;
+  movimentacao_recente: string | null;
+  obras_previstas: string | null;
+  elogios_reclamacoes: string | null;
+  chave_imobiliaria: string | null;
+  contatos: unknown;
   criado_em: string;
   atualizado_em: string;
 };
@@ -74,17 +81,27 @@ export const PADRAO: [string, string][] = [
   ['', '—'], ['economico', 'Econômico'], ['medio', 'Médio'], ['alto', 'Alto'], ['luxo', 'Luxo'],
 ];
 
-export const BLOCOS: { titulo: string; descricao: string; campos: DefCampo[] }[] = [
+export const OCUPACAO: [string, string][] = [
+  ['', '—'], ['proprietarios', 'Mais proprietários morando'], ['locatarios', 'Mais inquilinos'], ['misto', 'Meio a meio'],
+];
+
+export type Etapa = 'mesa' | 'visita';
+export type Bloco = { chave: string; etapa: Etapa; titulo: string; descricao: string; campos: DefCampo[] };
+
+// A ficha segue o treinamento: o que se preenche da mesa, antes de ir, e o que
+// sai da pesquisa no prédio (na mesma ordem das perguntas do slide).
+export const BLOCOS: Bloco[] = [
   {
+    chave: 'dados', etapa: 'mesa',
     titulo: 'Dados do condomínio',
-    descricao: 'O que todo corretor da região deveria saber de cor sobre o prédio.',
+    descricao: 'Endereço completo (rua e número) primeiro: é por ele que o botão do ITBI acha o prédio.',
     campos: [
       { k: 'nome', label: 'Nome do condomínio', tipo: 'texto', obrigatorio: true },
-      { k: 'endereco', label: 'Endereço (rua e número)', tipo: 'texto', largo: true },
+      { k: 'endereco', label: 'Endereço (rua e número)', tipo: 'texto', largo: true, dica: 'Ex.: Al. Lorena, 1500' },
       { k: 'bairro', label: 'Bairro', tipo: 'texto' },
       { k: 'cep', label: 'CEP', tipo: 'texto' },
       { k: 'construtora', label: 'Construtora', tipo: 'texto' },
-      { k: 'ano_entrega', label: 'Ano de entrega', tipo: 'int' },
+      { k: 'ano_entrega', label: 'Ano de construção', tipo: 'int' },
       { k: 'torres', label: 'Torres', tipo: 'int' },
       { k: 'andares', label: 'Andares', tipo: 'int' },
       { k: 'unidades', label: 'Total de unidades', tipo: 'int', dica: 'Soma de todas as torres.' },
@@ -98,28 +115,66 @@ export const BLOCOS: { titulo: string; descricao: string; campos: DefCampo[] }[]
     ],
   },
   {
+    chave: 'mercado', etapa: 'mesa',
     titulo: 'Mercado',
-    descricao: 'Preço e liquidez. Use a ACM da Eva, os portais e o histórico de ITBI.',
+    descricao: 'Vendas e valor do m² vêm do ITBI pelo botão abaixo. Anúncios: portais.',
     campos: [
+      { k: 'vendas_12m', label: 'Vendas nos últimos 12 meses', tipo: 'int', dica: 'ITBI.' },
       { k: 'valor_m2_min', label: 'Valor do m² — mínimo (R$)', tipo: 'num' },
       { k: 'valor_m2_max', label: 'Valor do m² — máximo (R$)', tipo: 'num' },
       { k: 'anuncios_ativos', label: 'Anúncios de venda ativos', tipo: 'int', dica: 'Unidades diferentes, não anúncios repetidos.' },
-      { k: 'vendas_12m', label: 'Vendas nos últimos 12 meses', tipo: 'int', dica: 'ITBI / informações da portaria.' },
-      { k: 'tempo_medio_venda', label: 'Tempo médio de venda (dias)', tipo: 'int' },
       { k: 'locacoes_ativas', label: 'Anúncios de locação ativos', tipo: 'int' },
+      { k: 'tempo_medio_venda', label: 'Tempo médio de venda (dias)', tipo: 'int' },
     ],
   },
   {
-    titulo: 'Concorrência',
-    descricao: 'Quem já atua no prédio e quão fechado ele está.',
+    chave: 'concorrencia', etapa: 'mesa',
+    titulo: 'Concorrência (o que se vê da rua e nos portais)',
+    descricao: 'Quem anuncia o prédio e quantas placas há na fachada.',
     campos: [
       { k: 'imobiliarias', label: 'Imobiliárias atuando', tipo: 'texto', largo: true, dica: 'Separe por vírgula. Ex.: Lopes, Coelho da Fonseca, corretor autônomo' },
       { k: 'placas', label: 'Placas na fachada/janelas', tipo: 'int' },
-      { k: 'exclusividades_conc', label: 'Exclusividades de concorrentes', tipo: 'int' },
-      { k: 'corretor_referencia', label: 'Quem é a referência do prédio hoje', tipo: 'texto', dica: 'Corretor ou imobiliária que o zelador indica.' },
     ],
   },
   {
+    chave: 'pesquisa-predio', etapa: 'visita',
+    titulo: 'Pesquisa · Prédio',
+    descricao: 'Unidades, torres, ano e lazer: complete acima o que faltou.',
+    campos: [
+      { k: 'administradora', label: 'Administradora', tipo: 'texto' },
+      { k: 'ocupacao', label: 'Moram mais proprietários ou inquilinos?', tipo: 'select', opcoes: OCUPACAO },
+      { k: 'perfil_moradores', label: 'Perfil majoritário dos moradores', tipo: 'texto', largo: true, dica: 'Ex.: famílias com filhos pequenos, casais mais velhos, executivos' },
+    ],
+  },
+  {
+    chave: 'pesquisa-movimento', etapa: 'visita',
+    titulo: 'Pesquisa · Movimento',
+    descricao: 'O que o funcionário vê acontecer no prédio.',
+    campos: [
+      { k: 'movimentacao_recente', label: 'Mudanças e reformas recentes. Vende rápido aqui?', tipo: 'longo', largo: true },
+    ],
+  },
+  {
+    chave: 'pesquisa-concorrencia', etapa: 'visita',
+    titulo: 'Pesquisa · Concorrência',
+    descricao: 'Quem já tem espaço dentro do prédio.',
+    campos: [
+      { k: 'chave_imobiliaria', label: 'Alguma imobiliária deixa chave ou tem exclusividade? Qual?', tipo: 'texto', largo: true },
+      { k: 'exclusividades_conc', label: 'Quantas exclusividades de concorrentes', tipo: 'int' },
+      { k: 'corretor_referencia', label: 'Quem é a referência do prédio hoje', tipo: 'texto', dica: 'Corretor ou imobiliária que o funcionário indica.' },
+    ],
+  },
+  {
+    chave: 'pesquisa-hoje', etapa: 'visita',
+    titulo: 'Pesquisa · Prédio hoje',
+    descricao: '',
+    campos: [
+      { k: 'obras_previstas', label: 'Tem obra prevista?', tipo: 'texto', largo: true },
+      { k: 'elogios_reclamacoes', label: 'O que os moradores mais elogiam ou reclamam?', tipo: 'longo', largo: true },
+    ],
+  },
+  {
+    chave: 'relacionamento', etapa: 'visita',
     titulo: 'Relacionamento',
     descricao: 'Sua presença no prédio. É isso que transforma o mapa em posicionamento.',
     campos: [
@@ -127,21 +182,47 @@ export const BLOCOS: { titulo: string; descricao: string; campos: DefCampo[] }[]
         k: 'status_relacionamento', label: 'Status do relacionamento', tipo: 'select',
         opcoes: (Object.keys(STATUS_REL) as StatusRel[]).map((s) => [s, STATUS_REL[s][0]]),
       },
-      { k: 'administradora', label: 'Administradora', tipo: 'texto' },
+      { k: 'portaria_contato', label: 'Telefone da portaria', tipo: 'texto' },
       { k: 'sindico_nome', label: 'Síndico(a)', tipo: 'texto' },
       { k: 'sindico_contato', label: 'Contato do síndico', tipo: 'texto' },
-      { k: 'zelador_nome', label: 'Zelador / gerente predial', tipo: 'texto' },
-      { k: 'portaria_contato', label: 'Telefone da portaria', tipo: 'texto' },
       { k: 'proprietarios_conhecidos', label: 'Proprietários que você conhece', tipo: 'int' },
       { k: 'negocios_ville', label: 'Negócios da Ville no prédio', tipo: 'int', dica: 'Captações, vendas e locações já feitas.' },
       { k: 'ultimo_contato', label: 'Último contato no prédio', tipo: 'data' },
-      { k: 'proxima_acao', label: 'Próxima ação', tipo: 'texto', largo: true, dica: 'Ex.: levar o estudo de mercado ao zelador' },
+      { k: 'proxima_acao', label: 'Próxima ação', tipo: 'texto', largo: true, dica: 'Ex.: pesquisa agendada com o zelador' },
       { k: 'proxima_acao_data', label: 'Data da próxima ação', tipo: 'data' },
     ],
   },
 ];
 
 export const CAMPOS: DefCampo[] = BLOCOS.flatMap((b) => b.campos);
+
+// Funcionários do prédio que deram o contato (com autorização).
+export type Contato = { nome: string; funcao: string; turno: string; whatsapp: string; autorizou: boolean };
+export const FUNCOES = ['Zelador', 'Gerente predial', 'Porteiro', 'Folguista', 'Faxineiro', 'Síndico', 'Outro'];
+export const TURNOS = ['', 'Manhã', 'Tarde', 'Noite', 'Dia (12x36)', 'Noite (12x36)', 'Horário comercial'];
+const FUNCOES_ZELADOR = ['zelador', 'gerente predial'];
+
+export function lerContatos(v: unknown): Contato[] {
+  let a: unknown = v;
+  if (typeof v === 'string') {
+    try { a = JSON.parse(v); } catch { a = []; }
+  }
+  if (!Array.isArray(a)) return [];
+  return a
+    .map((x) => {
+      const o = (x ?? {}) as Record<string, unknown>;
+      const s = (k: string, max: number) => String(o[k] ?? '').trim().slice(0, max);
+      return { nome: s('nome', 80), funcao: s('funcao', 40), turno: s('turno', 40), whatsapp: s('whatsapp', 30), autorizou: !!o.autorizou };
+    })
+    .filter((c) => c.nome || c.whatsapp)
+    .slice(0, 30);
+}
+
+/** nome do zelador/gerente para os indicadores (vem da lista de contatos) */
+export function zeladorDosContatos(cs: Contato[]): string | null {
+  const z = cs.find((c) => FUNCOES_ZELADOR.includes(c.funcao.toLowerCase()) && c.nome);
+  return z ? z.nome : null;
+}
 
 // Campos que fazem a ficha contar como "completa" no painel.
 const ESSENCIAIS: (keyof Condominio)[] = [
