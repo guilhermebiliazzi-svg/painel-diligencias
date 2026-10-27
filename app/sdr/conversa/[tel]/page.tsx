@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { exigirSdrGestao } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import MensagemEva from '@/app/sdr/lead/[id]/mensagem';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Conversa — SDR REMAX Ville' };
@@ -43,6 +44,14 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
     sb.from('sdr_imoveis_lead').select('lead_id,parceiro_nome,ref').in('parceiro_telefone', vs).order('created_at', { ascending: false }).limit(10),
     sb.from('orulo_sessoes').select('nome_parceiro').in('phone', vs).limit(1),
   ]);
+  // 27/10: corretor de fora que escreveu para a Eva (sdr_contatos_profissionais) e janela de 24h, para o quadro de resposta.
+  const desde23 = new Date(Date.now() - 23 * 3600e3).toISOString();
+  const [{ data: prof }, { count: recentes }] = await Promise.all([
+    sb.from('sdr_contatos_profissionais').select('nome').in('telefone', vs).limit(1),
+    sb.from('mensagens_buffer').select('id', { count: 'exact', head: true }).in('phone', vs).gte('created_at', desde23),
+  ]);
+  const nomeProf = ((prof ?? []) as { nome: string | null }[])[0]?.nome;
+  const ehProf = ((prof ?? []) as unknown[]).length > 0;
 
   // status de entrega das mensagens do sistema
   const wids = ((msgs ?? []) as { wa_message_id: string | null }[]).map((m) => m.wa_message_id).filter((x): x is string => !!x);
@@ -60,7 +69,8 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
   const nomeOrulo = ((orulo ?? []) as { nome_parceiro: string | null }[])[0]?.nome_parceiro;
   const lc = (leadsCli ?? []) as { id: string; nome: string | null; status: string; created_at: string; imovel_anuncio_endereco: string | null }[];
   const lr = (leadsCor ?? []) as typeof lc;
-  const quem = cor ? `${cor.nome} · corretor(a) da REMAX Ville` : parc.length ? `${parc[0].parceiro_nome || 'Corretor(a) parceiro(a)'} · corretor(a) parceiro(a)` : nomeOrulo ? `${nomeOrulo} · corretor(a) parceiro(a) (Órulo)` : lc.length ? `${lc[0].nome || 'Cliente'} · cliente` : 'Contato';
+  const externo = !cor && (parc.length > 0 || !!nomeOrulo || ehProf);
+  const quem = cor ? `${cor.nome} · corretor(a) da REMAX Ville` : ehProf && !parc.length ? `${nomeProf || 'Corretor(a) de fora'} · corretor(a) de fora` : parc.length ? `${parc[0].parceiro_nome || 'Corretor(a) parceiro(a)'} · corretor(a) parceiro(a)` : nomeOrulo ? `${nomeOrulo} · corretor(a) parceiro(a) (Órulo)` : lc.length ? `${lc[0].nome || 'Cliente'} · cliente` : 'Contato';
 
   const eventos: Ev[] = [];
   const bufs = (buf ?? []) as { id: number; mensagem_texto: string | null; tipo_msg: string | null; created_at: string; processado_em: string | null }[];
@@ -122,6 +132,12 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
         ))}
         {!eventos.length && <li className="text-sm text-slate-500">Nenhuma mensagem com este número.</li>}
       </ol>
+      {externo && (
+        <div className="mt-4">
+          <MensagemEva leadId="" parceiroTel={vs[0]}
+            destinos={[{ chave: 'parceiro', destino: 'parceiro', rotulo: 'Corretor(a) de fora', detalhe: (nomeProf || nomeOrulo || parc[0]?.parceiro_nome || 'Corretor') + ' · ' + telFmt(vs[0]), janela: (recentes ?? 0) > 0 }]} />
+        </div>
+      )}
     </main>
   );
 }
