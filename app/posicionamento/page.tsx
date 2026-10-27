@@ -11,11 +11,13 @@ import {
 } from '@/lib/posicionamento';
 import Ficha from './ficha';
 import VisaoGeral from './visao-geral';
+import Seletor from './seletor';
 
 export const metadata = { title: 'Posicionamento — Painel REMAX Ville' };
 export const dynamic = 'force-dynamic';
 
 type SP = { aba?: string; cor?: string; reg?: string; ord?: string; ok?: string; erro?: string };
+type Aba = 'equipe' | 'mapa' | 'novo';
 
 const hojeSP = () =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -27,40 +29,65 @@ const ERROS: Record<string, string> = {
   'nao-encontrado': 'Condomínio não encontrado.',
 };
 
+// Abas: o corretor tem "Meu mapa" e "+ Adicionar prédio"; o administrador tem
+// "Equipe" (visão geral) e "Por corretor" (o mapa de um corretor escolhido).
+// Links antigos (geral, painel, lista) continuam funcionando.
+function lerAba(v: string | undefined, admin: boolean): Aba {
+  if (v === 'novo') return 'novo';
+  if (v === 'mapa' || v === 'painel' || v === 'lista') return 'mapa';
+  if (admin && (v === 'equipe' || v === 'geral')) return 'equipe';
+  return admin ? 'equipe' : 'mapa';
+}
+
+const TAB_ON = '-mb-px border-b-2 border-blue-700 px-4 py-2.5 text-sm font-semibold text-blue-700';
+const TAB_OFF = '-mb-px border-b-2 border-transparent px-4 py-2.5 text-sm text-slate-600 hover:text-slate-900';
+
 export default async function Posicionamento({ searchParams }: { searchParams: Promise<SP> }) {
   const perfil = await exigirTela('posicionamento');
   const sp = await searchParams;
   const admin = !!perfil.is_admin;
   const sb = supabaseAdmin();
   const eu = await corretorDaPessoa(perfil.email);
+  // admin sem ?aba nem ?cor abre na Equipe; com ?cor (link do ranking) abre o mapa
+  const aba: Aba = admin && !sp.aba && sp.cor ? 'mapa' : lerAba(sp.aba, admin);
 
-  let corretores: { id: number; nome: string }[] | null = null;
-  if (admin) {
-    const { data } = await sb.from('corretores_associados').select('id,nome,status').order('nome');
-    corretores = ((data ?? []) as { id: number; nome: string; status: string | null }[])
-      .filter((c) => (c.status ?? 'ativo') === 'ativo' || Number(c.id) === Number(sp.cor))
-      .map((c) => ({ id: Number(c.id), nome: String(c.nome ?? '').split(' - ')[0] }));
-  }
-  // Administrador abre na visão geral da equipe; o mapa de um corretor fica a um clique.
-  if (admin && (sp.aba === 'geral' || (!sp.aba && !sp.cor))) {
-    const link = 'border-transparent text-slate-600 hover:text-slate-900';
+  if (admin && aba === 'equipe') {
     return (
       <Casca>
         <nav className="mb-5 flex gap-1 border-b border-slate-200">
-          <span className="-mb-px border-b-2 border-blue-700 px-4 py-2.5 text-sm font-semibold text-blue-700">Visão geral</span>
-          <Link href={`/posicionamento?aba=painel${eu?.id ? `&cor=${eu.id}` : ''}`} className={`-mb-px border-b-2 px-4 py-2.5 text-sm ${link}`}>Mapa por corretor</Link>
+          <span className={TAB_ON}>Equipe</span>
+          <Link href="/posicionamento?aba=mapa" className={TAB_OFF}>Por corretor</Link>
         </nav>
         <VisaoGeral hoje={hojeSP()} />
       </Casca>
     );
   }
 
-  const corId = admin ? Number(sp.cor) || eu?.id || corretores?.[0]?.id || null : eu?.id ?? null;
+  // Quem é o dono do mapa mostrado
+  let corId: number | null = eu?.id ?? null;
+  let opcoesCorretor: { id: number; nome: string; n: number }[] = [];
+  if (admin) {
+    const [{ data: cors }, { data: donos }] = await Promise.all([
+      sb.from('corretores_associados').select('id,nome,status').order('nome'),
+      sb.from('posicionamento_condominios').select('corretor_id').limit(20000),
+    ]);
+    const n = new Map<number, number>();
+    for (const d of (donos ?? []) as { corretor_id: number }[]) n.set(Number(d.corretor_id), (n.get(Number(d.corretor_id)) ?? 0) + 1);
+    opcoesCorretor = ((cors ?? []) as { id: number; nome: string | null; status: string | null }[])
+      .map((c) => ({ id: Number(c.id), nome: String(c.nome ?? '').split(' - ')[0], n: n.get(Number(c.id)) ?? 0, ativo: (c.status ?? 'ativo') === 'ativo' }))
+      .filter((c) => c.ativo || c.n > 0)
+      // quem tem mapa primeiro, depois por nome
+      .sort((a, b) => (b.n > 0 ? 1 : 0) - (a.n > 0 ? 1 : 0) || a.nome.localeCompare(b.nome, 'pt-BR'));
+    const pedido = Number(sp.cor);
+    corId = opcoesCorretor.some((c) => c.id === pedido) ? pedido : (opcoesCorretor.find((c) => c.n > 0) ?? opcoesCorretor[0])?.id ?? null;
+  }
 
   if (!corId) {
     return (
       <Casca>
-        <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{ERROS['sem-corretor']}</p>
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {admin ? 'Nenhum corretor ativo encontrado.' : ERROS['sem-corretor']}
+        </p>
       </Casca>
     );
   }
@@ -82,71 +109,114 @@ export default async function Posicionamento({ searchParams }: { searchParams: P
   const regioes = [...new Set(todos.map((c) => c.regiao))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   const reg = sp.reg && regioes.includes(sp.reg) ? sp.reg : regioes[0] ?? '';
   const lista = todos.filter((c) => c.regiao === reg);
-  const aba = sp.aba === 'lista' || sp.aba === 'novo' ? sp.aba : regioes.length ? 'painel' : 'novo';
+  const nomeCorretor = opcoesCorretor.find((c) => c.id === corId)?.nome ?? '';
 
   const url = (m: Partial<SP>) => {
-    const v = { aba, cor: admin ? String(corId) : '', reg, ...m };
+    const v = { aba: aba as string, cor: admin ? String(corId) : '', reg, ...m };
     const p = new URLSearchParams();
-    if (v.aba && v.aba !== 'painel') p.set('aba', v.aba);
+    if (admin || v.aba !== 'mapa') p.set('aba', v.aba);
     if (v.cor) p.set('cor', v.cor);
     if (v.reg) p.set('reg', v.reg);
     if (v.ord) p.set('ord', v.ord);
     const s = p.toString();
     return '/posicionamento' + (s ? '?' + s : '');
   };
-  const tab = (chave: string, rotulo: string) => (
-    <Link
-      href={url({ aba: chave })}
-      className={`-mb-px border-b-2 px-4 py-2.5 text-sm ${aba === chave ? 'border-blue-700 font-semibold text-blue-700' : 'border-transparent text-slate-600 hover:text-slate-900'}`}
-    >
-      {rotulo}
-    </Link>
-  );
-  const sel = 'rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900';
 
   return (
     <Casca>
       {sp.ok && <p className="mb-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">Condomínio salvo no mapa.</p>}
       {sp.erro && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{ERROS[sp.erro] ?? sp.erro}</p>}
 
-      {(admin || regioes.length > 1) && (
-        <form method="get" className="mb-4 flex flex-wrap items-end gap-3">
-          {aba !== 'painel' && <input type="hidden" name="aba" value={aba} />}
-          {admin && corretores && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Corretor</label>
-              <select name="cor" defaultValue={String(corId)} className={sel}>
-                {corretores.map((c) => (<option key={c.id} value={c.id}>{c.nome}</option>))}
-              </select>
+      {admin ? (
+        <>
+          <nav className="mb-5 flex gap-1 border-b border-slate-200">
+            <Link href="/posicionamento" className={TAB_OFF}>Equipe</Link>
+            <span className={TAB_ON}>Por corretor</span>
+          </nav>
+          <div className="mb-5 flex flex-wrap items-end gap-3">
+            <Seletor
+              rotulo="Corretor"
+              valor={String(corId)}
+              opcoes={opcoesCorretor.map((c) => ({
+                valor: String(c.id),
+                texto: c.n ? `${c.nome} (${c.n} prédio${c.n > 1 ? 's' : ''})` : `${c.nome} — sem prédios`,
+                href: `/posicionamento?aba=mapa&cor=${c.id}`,
+              }))}
+            />
+            {regioes.length > 1 && aba === 'mapa' && (
+              <Seletor rotulo="Região" valor={reg} opcoes={regioes.map((r) => ({ valor: r, texto: r, href: url({ reg: r, ord: '' }) }))} />
+            )}
+            <div className="flex-1" />
+            {aba === 'mapa' ? (
+              <Link href={url({ aba: 'novo' })} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">+ Adicionar prédio para {nomeCorretor.split(' ')[0]}</Link>
+            ) : (
+              <Link href={url({ aba: 'mapa' })} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">← Voltar ao mapa</Link>
+            )}
+          </div>
+        </>
+      ) : (
+        <>
+          <nav className="mb-5 flex gap-1 border-b border-slate-200">
+            <Link href="/posicionamento" className={aba === 'mapa' ? TAB_ON : TAB_OFF}>Meu mapa{todos.length ? ` (${todos.length})` : ''}</Link>
+            <Link href="/posicionamento?aba=novo" className={aba === 'novo' ? TAB_ON : TAB_OFF}>+ Adicionar prédio</Link>
+          </nav>
+          {regioes.length > 1 && aba === 'mapa' && (
+            <div className="mb-5">
+              <Seletor rotulo="Região" valor={reg} opcoes={regioes.map((r) => ({ valor: r, texto: r, href: url({ reg: r, ord: '' }) }))} />
             </div>
           )}
-          {regioes.length > 1 && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Região</label>
-              <select name="reg" defaultValue={reg} className={sel}>
-                {regioes.map((r) => (<option key={r} value={r}>{r}</option>))}
-              </select>
-            </div>
-          )}
-          <button type="submit" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Ver</button>
-        </form>
+        </>
       )}
-
-      <nav className="mb-5 flex gap-1 border-b border-slate-200">
-        {admin && tab('geral', 'Visão geral')}
-        {tab('painel', admin ? 'Posicionamento' : 'Meu posicionamento')}
-        {tab('lista', `Condomínios${lista.length ? ` (${lista.length})` : ''}`)}
-        {tab('novo', '+ Adicionar condomínio')}
-      </nav>
 
       {aba === 'novo' ? (
-        <Ficha c={null} regioes={regioes} regiaoPadrao={reg} corretores={corretores} corretorPadrao={corId} />
-      ) : !regioes.length ? null : aba === 'lista' ? (
-        <Lista lista={lista} ord={sp.ord || 'prioridade'} url={url} />
+        <Ficha c={null} regioes={regioes} regiaoPadrao={reg} corretores={null} corretorPadrao={corId} corretorFixo={admin ? corId : null} />
+      ) : !todos.length ? (
+        admin ? (
+          <p style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+            {nomeCorretor || 'Este corretor'} ainda não mapeou nenhum condomínio.
+          </p>
+        ) : (
+          <BoasVindas />
+        )
       ) : (
-        <Painel lista={lista} regiao={reg} url={url} />
+        <div className="space-y-8">
+          <Painel lista={lista} regiao={reg} url={url} />
+          <div id="predios" className="scroll-mt-4">
+            <h2 className="mb-3 text-base font-semibold text-slate-900">Prédios de {reg} ({lista.length})</h2>
+            <Lista lista={lista} ord={sp.ord || 'prioridade'} url={url} />
+          </div>
+        </div>
       )}
     </Casca>
+  );
+}
+
+function BoasVindas() {
+  const passos: [string, string][] = [
+    ['Mapear', 'Escolha uma região de poucos quarteirões e cadastre aqui os prédios, ainda da mesa: endereço, m², vendas, anúncios.'],
+    ['Abordar', 'Na portaria, peça para falar com o zelador. Se ele não puder na hora, agende 15 minutos.'],
+    ['Pesquisar', 'Faça a pesquisa sobre o prédio, anote na ficha e saia com o contato salvo dos dois lados.'],
+    ['Manter', 'Visitas curtas e frequentes. Cada contato registrado aqui, com a próxima ação e a data.'],
+  ];
+  return (
+    <section style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-6 shadow-sm">
+      <h2 className="text-lg font-semibold text-slate-900">Comece o seu mapa</h2>
+      <p className="mt-1 text-sm text-slate-600">Seu posicionamento é construído prédio a prédio, em quatro passos:</p>
+      <ol className="mt-5 grid gap-4 sm:grid-cols-2">
+        {passos.map(([t, d], i) => (
+          <li key={t} className="flex gap-3">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-700">{i + 1}</span>
+            <div>
+              <p className="text-sm font-semibold text-slate-900">{t}</p>
+              <p className="text-sm text-slate-600">{d}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <Link href="/posicionamento?aba=novo" className="mt-6 inline-block rounded-lg bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-800">
+        Adicionar o primeiro prédio
+      </Link>
+    </section>
   );
 }
 
@@ -202,7 +272,7 @@ function Painel({ lista, regiao, url }: { lista: Condominio[]; regiao: string; u
   return (
     <div className="space-y-5">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card titulo="Domínio da região" valor={`${r.dominio}%`} sub="das unidades mapeadas estão em prédios onde você tem relacionamento" destaque />
+        <Card titulo="Domínio da região" valor={`${r.dominio}%`} sub={r.dominioBase === 'unidades' ? 'das unidades mapeadas estão em prédios onde você tem relacionamento' : 'dos prédios mapeados têm relacionamento (preencha o total de unidades para medir por unidades)'} destaque />
         <Card titulo="Condomínios mapeados" valor={int(r.total)} sub={`${int(r.unidades)} unidades`} />
         <Card titulo="Fichas completas" valor={`${r.completos}/${r.total}`} sub={`completude média de ${r.completudeMedia}%`} />
         <Card titulo="Proprietários que você conhece" valor={int(r.proprietarios)} sub={`${int(r.negociosVille)} negócios da Ville nesses prédios`} />
@@ -297,7 +367,7 @@ function Painel({ lista, regiao, url }: { lista: Condominio[]; regiao: string; u
           )}
           {r.semAcao > 0 && (
             <p className="mt-3 text-xs text-amber-700">
-              {r.semAcao} prédio{r.semAcao > 1 ? 's' : ''} sem próxima ação marcada. <Link href={url({ aba: 'lista', ord: 'acao' })} className="underline">Ver</Link>
+              {r.semAcao} prédio{r.semAcao > 1 ? 's' : ''} sem próxima ação marcada. <Link href={url({ ord: 'acao' }) + '#predios'} className="underline">Ver</Link>
             </p>
           )}
         </Secao>
@@ -330,7 +400,7 @@ function Lista({ lista, ord, url }: { lista: Condominio[]; ord: string; url: (m:
   );
   const th = (k: string, t: string) => (
     <th className="px-3 py-2 text-left font-medium">
-      <Link href={url({ aba: 'lista', ord: k })} className={ord === k ? 'text-blue-700' : 'hover:text-slate-900'}>{t}</Link>
+      <Link href={url({ ord: k }) + '#predios'} className={ord === k ? 'text-blue-700' : 'hover:text-slate-900'}>{t}</Link>
     </th>
   );
   return (
