@@ -107,12 +107,18 @@ export default async function Posicionamento({ searchParams }: { searchParams: P
   }
   const todos = (data ?? []) as Condominio[];
   const regioes = [...new Set(todos.map((c) => c.regiao))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  const reg = sp.reg && regioes.includes(sp.reg) ? sp.reg : regioes[0] ?? '';
-  const lista = todos.filter((c) => c.regiao === reg);
+  // sem região escolhida = visão geral do corretor (todas as regiões juntas)
+  const reg = sp.reg && regioes.includes(sp.reg) ? sp.reg : regioes.length === 1 ? regioes[0] : '';
+  const lista = reg ? todos.filter((c) => c.regiao === reg) : todos;
+  const opcoesRegiao = [
+    { valor: '', texto: `Todas as regiões (${regioes.length})`, href: url0({ reg: '', ord: '' }) },
+    ...regioes.map((r) => ({ valor: r, texto: `${r} (${todos.filter((c) => c.regiao === r).length})`, href: url0({ reg: r, ord: '' }) })),
+  ];
   const nomeCorretor = opcoesCorretor.find((c) => c.id === corId)?.nome ?? '';
 
-  const url = (m: Partial<SP>) => {
-    const v = { aba: aba as string, cor: admin ? String(corId) : '', reg, ...m };
+  const url = (m: Partial<SP>) => url0({ reg, ...m });
+  function url0(m: Partial<SP>) {
+    const v = { aba: aba as string, cor: admin ? String(corId) : '', reg: '', ...m };
     const p = new URLSearchParams();
     if (admin || v.aba !== 'mapa') p.set('aba', v.aba);
     if (v.cor) p.set('cor', v.cor);
@@ -120,7 +126,7 @@ export default async function Posicionamento({ searchParams }: { searchParams: P
     if (v.ord) p.set('ord', v.ord);
     const s = p.toString();
     return '/posicionamento' + (s ? '?' + s : '');
-  };
+  }
 
   return (
     <Casca>
@@ -144,7 +150,7 @@ export default async function Posicionamento({ searchParams }: { searchParams: P
               }))}
             />
             {regioes.length > 1 && aba === 'mapa' && (
-              <Seletor rotulo="Região" valor={reg} opcoes={regioes.map((r) => ({ valor: r, texto: r, href: url({ reg: r, ord: '' }) }))} />
+              <Seletor rotulo="Região" valor={reg} opcoes={opcoesRegiao} />
             )}
             <div className="flex-1" />
             {aba === 'mapa' ? (
@@ -162,14 +168,14 @@ export default async function Posicionamento({ searchParams }: { searchParams: P
           </nav>
           {regioes.length > 1 && aba === 'mapa' && (
             <div className="mb-5">
-              <Seletor rotulo="Região" valor={reg} opcoes={regioes.map((r) => ({ valor: r, texto: r, href: url({ reg: r, ord: '' }) }))} />
+              <Seletor rotulo="Região" valor={reg} opcoes={opcoesRegiao} />
             </div>
           )}
         </>
       )}
 
       {aba === 'novo' ? (
-        <Ficha c={null} regioes={regioes} regiaoPadrao={reg} corretores={null} corretorPadrao={corId} corretorFixo={admin ? corId : null} />
+        <Ficha c={null} regioes={regioes} regiaoPadrao={reg || regioes[0] || ''} corretores={null} corretorPadrao={corId} corretorFixo={admin ? corId : null} />
       ) : !todos.length ? (
         admin ? (
           <p style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
@@ -180,10 +186,11 @@ export default async function Posicionamento({ searchParams }: { searchParams: P
         )
       ) : (
         <div className="space-y-8">
-          <Painel lista={lista} regiao={reg} url={url} />
+          <Painel lista={lista} regiao={reg} regioes={regioes} url={url} />
+          {!reg && <PorRegiao todos={todos} regioes={regioes} url={url} />}
           <div id="predios" className="scroll-mt-4">
-            <h2 className="mb-3 text-base font-semibold text-slate-900">Prédios de {reg} ({lista.length})</h2>
-            <Lista lista={lista} ord={sp.ord || 'prioridade'} url={url} />
+            <h2 className="mb-3 text-base font-semibold text-slate-900">{reg ? `Prédios de ${reg}` : 'Todos os prédios'} ({lista.length})</h2>
+            <Lista lista={lista} ord={sp.ord || 'prioridade'} url={url} comRegiao={!reg} />
           </div>
         </div>
       )}
@@ -262,17 +269,64 @@ function Secao({ titulo, children }: { titulo: string; children: React.ReactNode
   );
 }
 
-function Painel({ lista, regiao, url }: { lista: Condominio[]; regiao: string; url: (m: Partial<SP>) => string }) {
+function juntar(xs: string[]) {
+  return xs.length <= 1 ? xs.join('') : xs.slice(0, -1).join(', ') + ' e ' + xs[xs.length - 1];
+}
+
+function PorRegiao({ todos, regioes, url }: { todos: Condominio[]; regioes: string[]; url: (m: Partial<SP>) => string }) {
+  const hoje = hojeSP();
+  const linhas = regioes
+    .map((g) => {
+      const l = todos.filter((c) => c.regiao === g);
+      return { g, r: resumir(l, hoje), a: l.filter((c) => prioridade(c) === 'A').length };
+    })
+    .sort((x, y) => y.r.total - x.r.total);
+  return (
+    <Secao titulo="Por região">
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="text-xs text-slate-500">
+            <tr>
+              {['Região', 'Prédios', 'Unidades', 'Domínio', 'Com relacionamento', 'Fichas completas', 'Prior. A', 'Ações atrasadas'].map((t) => (
+                <th key={t} className="px-3 py-2 text-left font-medium">{t}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {linhas.map(({ g, r, a }) => (
+              <tr key={g} className="hover:bg-slate-50">
+                <td className="px-3 py-2"><Link href={url({ reg: g, ord: '' })} className="font-medium text-slate-900 hover:text-blue-700">{g}</Link></td>
+                <td className="px-3 py-2 text-slate-700">{r.total}</td>
+                <td className="px-3 py-2 text-slate-700">{int(r.unidades)}</td>
+                <td className="w-40 px-3 py-2">
+                  <Barra pct={r.dominio} />
+                  <p className="mt-1 text-[11px] text-slate-500">{r.dominio}%{r.dominioBase === 'predios' ? ' (por prédios)' : ''}</p>
+                </td>
+                <td className="px-3 py-2 text-slate-700">{r.comRelacao} de {r.total}</td>
+                <td className="px-3 py-2 text-slate-700">{r.completos}/{r.total} · {r.completudeMedia}%</td>
+                <td className="px-3 py-2 text-slate-700">{a}</td>
+                <td className={`px-3 py-2 ${r.acoesAtrasadas.length ? 'font-semibold text-rose-700' : 'text-slate-700'}`}>{r.acoesAtrasadas.length}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Secao>
+  );
+}
+
+function Painel({ lista, regiao, regioes, url }: { lista: Condominio[]; regiao: string; regioes: string[]; url: (m: Partial<SP>) => string }) {
   const hoje = hojeSP();
   const r = resumir(lista, hoje);
-  const texto = pitch(regiao, r);
+  const texto = pitch(regiao || juntar(regioes), r);
+  const geral = !regiao && regioes.length > 1;
   const pct = (n: number) => (r.total ? Math.round((n / r.total) * 100) : 0);
   const topA = lista.filter((c) => prioridade(c) === 'A').slice(0, 8);
 
   return (
     <div className="space-y-5">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card titulo="Domínio da região" valor={`${r.dominio}%`} sub={r.dominioBase === 'unidades' ? 'das unidades mapeadas estão em prédios onde você tem relacionamento' : 'dos prédios mapeados têm relacionamento (preencha o total de unidades para medir por unidades)'} destaque />
+        <Card titulo={geral ? 'Domínio (todas as regiões)' : 'Domínio da região'} valor={`${r.dominio}%`} sub={r.dominioBase === 'unidades' ? 'das unidades mapeadas estão em prédios onde você tem relacionamento' : 'dos prédios mapeados têm relacionamento (preencha o total de unidades para medir por unidades)'} destaque />
         <Card titulo="Condomínios mapeados" valor={int(r.total)} sub={`${int(r.unidades)} unidades`} />
         <Card titulo="Fichas completas" valor={`${r.completos}/${r.total}`} sub={`completude média de ${r.completudeMedia}%`} />
         <Card titulo="Proprietários que você conhece" valor={int(r.proprietarios)} sub={`${int(r.negociosVille)} negócios da Ville nesses prédios`} />
@@ -295,7 +349,7 @@ function Painel({ lista, regiao, url }: { lista: Condominio[]; regiao: string; u
       </Secao>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        <Secao titulo="Mercado da região">
+        <Secao titulo={geral ? 'Mercado (todas as regiões)' : 'Mercado da região'}>
           <dl className="grid grid-cols-2 gap-3 text-sm">
             <div><dt className="text-xs text-slate-500">m² (mín – máx)</dt><dd className="font-semibold text-slate-900">{r.m2Min ? `${brl0(r.m2Min)} – ${brl0(r.m2Max)}` : '—'}</dd></div>
             <div><dt className="text-xs text-slate-500">m² médio</dt><dd className="font-semibold text-slate-900">{brl0(r.m2Medio)}</dd></div>
@@ -387,7 +441,7 @@ function Painel({ lista, regiao, url }: { lista: Condominio[]; regiao: string; u
   );
 }
 
-function Lista({ lista, ord, url }: { lista: Condominio[]; ord: string; url: (m: Partial<SP>) => string }) {
+function Lista({ lista, ord, url, comRegiao }: { lista: Condominio[]; ord: string; url: (m: Partial<SP>) => string; comRegiao?: boolean }) {
   const PESO: Record<Prioridade, number> = { A: 0, B: 1, C: 2 };
   const rows = [...lista].sort((a, b) =>
     ord === 'nome'
@@ -430,7 +484,7 @@ function Lista({ lista, ord, url }: { lista: Condominio[]; ord: string; url: (m:
                 </td>
                 <td className="px-3 py-2.5">
                   <Link href={`/posicionamento/${c.id}`} className="font-medium text-slate-900 hover:text-blue-700">{c.nome}</Link>
-                  <p className="text-xs text-slate-500">{[c.endereco, c.bairro].filter(Boolean).join(' · ') || '—'}</p>
+                  <p className="text-xs text-slate-500">{[comRegiao ? c.regiao : '', c.endereco, c.bairro].filter(Boolean).join(' · ') || '—'}</p>
                 </td>
                 <td className="px-3 py-2.5 text-slate-700">{int(c.unidades)}</td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-slate-700">
