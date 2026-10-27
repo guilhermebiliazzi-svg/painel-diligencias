@@ -1,7 +1,8 @@
 // Ficha de um condomínio (nova ou edição). Formulário simples, sem JS no cliente:
 // grava pela server action e volta para a lista.
-import { BLOCOS, prioridadeSugerida, pontuacao, type Condominio, type DefCampo } from '@/lib/posicionamento';
+import { BLOCOS, prioridadeSugerida, pontuacao, lerContatos, type Condominio, type DefCampo } from '@/lib/posicionamento';
 import { salvarCondominio } from './actions';
+import { RegiaoCampo, ContatosCampo, ItbiBotao } from './ficha-cliente';
 
 const inputCls =
   'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none';
@@ -62,6 +63,11 @@ export default function Ficha({
   corretorPadrao: number | null;
   corretorFixo?: number | null; // admin cadastrando para o corretor escolhido na tela
 }) {
+  // fichas antigas: o zelador digitado antes vira o primeiro contato da lista
+  const salvos = lerContatos(c?.contatos);
+  const contatosIniciais = salvos.length || !c?.zelador_nome
+    ? salvos
+    : [{ nome: c.zelador_nome, funcao: 'Zelador', turno: '', whatsapp: '', autorizou: false }];
   return (
     <form action={salvarCondominio} className="space-y-6">
       {c && <input type="hidden" name="id" value={c.id} />}
@@ -69,46 +75,55 @@ export default function Ficha({
 
       <section style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-5 shadow-sm">
         <h2 className="text-base font-semibold text-slate-900">Região</h2>
-        <p className="mt-0.5 text-xs text-slate-500">
-          Use sempre o mesmo nome para a mesma região — é por ela que o painel consolida o seu posicionamento.
-        </p>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <p className="mt-0.5 text-xs text-slate-500">É por ela que o painel consolida o seu posicionamento.</p>
+        <div className="mt-4 space-y-4">
           {corretores && (
-            <div className="sm:col-span-2">
+            <div>
               <label className={labelCls}>Corretor</label>
               <select name="corretor_id" defaultValue={String(c?.corretor_id ?? corretorPadrao ?? '')} className={inputCls}>
                 {corretores.map((o) => (<option key={o.id} value={o.id}>{o.nome}</option>))}
               </select>
             </div>
           )}
-          {regioes.length > 0 && (
-            <div>
-              <label className={labelCls}>Região já cadastrada</label>
-              <select name="regiao" defaultValue={c?.regiao ?? regiaoPadrao} className={inputCls}>
-                {regioes.map((r) => (<option key={r} value={r}>{r}</option>))}
-              </select>
-            </div>
-          )}
-          <div>
-            <label className={labelCls}>{regioes.length ? 'Ou uma região nova' : 'Região'}{!regioes.length && <span className="text-rose-600"> *</span>}</label>
-            <input
-              name="regiao_nova"
-              required={!regioes.length}
-              placeholder="Ex.: Jardim Paulista — Al. Santos × R. Estados Unidos"
-              className={inputCls}
-            />
-          </div>
+          <RegiaoCampo regioes={regioes} padrao={c?.regiao ?? regiaoPadrao} />
         </div>
       </section>
 
-      {BLOCOS.map((b) => (
-        <section key={b.titulo} style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-5 shadow-sm">
-          <h2 className="text-base font-semibold text-slate-900">{b.titulo}</h2>
-          <p className="mt-0.5 text-xs text-slate-500">{b.descricao}</p>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            {b.campos.map((d) => (<Campo key={String(d.k)} d={d} c={c} />))}
+      {(['mesa', 'visita'] as const).map((etapa) => (
+        <div key={etapa} className="space-y-4">
+          <div className="flex items-baseline gap-3 border-b border-slate-200 pb-2 pt-2">
+            <span className="flex size-7 items-center justify-center rounded-full bg-blue-700 text-xs font-bold text-white">{etapa === 'mesa' ? 1 : 2}</span>
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">{etapa === 'mesa' ? 'Antes de ir (da mesa)' : 'Na visita (pesquisa)'}</h2>
+              <p className="text-xs text-slate-500">
+                {etapa === 'mesa'
+                  ? 'Dados do prédio, mercado e o que se vê da rua. Dá para salvar só com esta parte e completar depois da visita.'
+                  : 'Pesquisa de 15 minutos com zelador, porteiro ou gerente predial, na ordem do treinamento.'}
+              </p>
+            </div>
           </div>
-        </section>
+          {BLOCOS.filter((b) => b.etapa === etapa).map((b) => (
+            <section key={b.chave} style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-5 shadow-sm">
+              <h3 className="text-base font-semibold text-slate-900">{b.titulo}</h3>
+              {b.descricao && <p className="mt-0.5 text-xs text-slate-500">{b.descricao}</p>}
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                {b.chave === 'mercado' && <ItbiBotao />}
+                {b.campos.map((d) => (<Campo key={String(d.k)} d={d} c={c} />))}
+              </div>
+            </section>
+          )).flatMap((el, i, arr) =>
+            etapa === 'visita' && i === arr.length - 1
+              ? [
+                  <section key="contatos" style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-5 shadow-sm">
+                    <h3 className="text-base font-semibold text-slate-900">Contatos do prédio</h3>
+                    <p className="mt-0.5 text-xs text-slate-500">Zelador, porteiros de cada turno, gerente predial: quem autorizou deixar o contato.</p>
+                    <div className="mt-4"><ContatosCampo iniciais={contatosIniciais} /></div>
+                  </section>,
+                  el,
+                ]
+              : [el]
+          )}
+        </div>
       ))}
 
       <section style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border border-slate-200 p-5 shadow-sm">
