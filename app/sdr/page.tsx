@@ -535,6 +535,22 @@ async function FunilProprietario({ dias, alugar }: { dias: number | null; alugar
     const atual = porTel.get(k);
     if (!atual || (atual.evento !== 'formulario' && c.evento === 'formulario') || (!atual.endereco && c.endereco)) porTel.set(k, { ...atual, ...c, nome: c.nome || atual?.nome || null, descartado_em: c.descartado_em || atual?.descartado_em || null, referenciado_em: c.referenciado_em || atual?.referenciado_em || null });
   }
+  // 28/10: o nome do perfil do WhatsApp/formulário vale mais que o nome dito na conversa (ex.: Rute respondeu "Luiz").
+  const nomesTel = new Map<string, { base: string | null; dito: string | null }>();
+  for (const c of doFunil) {
+    if (!c.telefone || !c.nome) continue;
+    const k = fim8(c.telefone);
+    const n = nomesTel.get(k) ?? { base: null, dito: null };
+    if (c.evento === 'formulario' || c.evento === 'whatsapp_inicio') n.base = n.base || c.nome; else n.dito = n.dito || c.nome;
+    nomesTel.set(k, n);
+  }
+  for (const [k, c] of porTel) {
+    const n = nomesTel.get(k);
+    const b = n?.base || n?.dito;
+    if (!n || !b) continue;
+    const extra = n.base && n.dito && n.dito.trim().toLowerCase() !== n.base.trim().toLowerCase() ? ' / ' + n.dito : '';
+    porTel.set(k, { ...c, nome: b + extra });
+  }
   // proprietários que chegaram por outros canais (portais, site, WhatsApp da Eva): o SDR transforma o lead em captação
   const inicio = desde(dias);
   for (const l of leads) {
