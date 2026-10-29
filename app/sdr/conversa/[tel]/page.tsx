@@ -6,7 +6,7 @@ import { notFound } from 'next/navigation';
 import { exigirSdrGestao } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import MensagemEva from '@/app/sdr/lead/[id]/mensagem';
-import { statusDasMensagens, enviosDaEva, casarEnvio, rotuloStatus } from '@/lib/wa-status';
+import { statusDasMensagens, enviosDaEva, casarEnvio, rotuloStatus, mensagensAvulsas, casarAvulsa } from '@/lib/wa-status';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Conversa — SDR REMAX Ville' };
@@ -54,7 +54,9 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
 
   // status de entrega das mensagens do sistema e das respostas da Eva (29/10: eva_envios)
   const envios = await enviosDaEva(sb, dig.slice(-8));
-  const stPor = await statusDasMensagens(sb, [...((msgs ?? []) as { wa_message_id: string | null }[]).map((m) => m.wa_message_id), ...envios.map((e) => e.wa_message_id)]);
+  const idsConhecidos = [...((msgs ?? []) as { wa_message_id: string | null }[]).map((m) => m.wa_message_id), ...envios.map((e) => e.wa_message_id)];
+  const avulsas = await mensagensAvulsas(sb, dig.slice(-8), undefined, idsConhecidos);
+  const stPor = await statusDasMensagens(sb, [...idsConhecidos, ...avulsas.map((e) => e.wa_message_id)]);
 
   const cor = ((cors ?? []) as { nome: string; apelido: string | null }[])[0];
   const parc = ((parcs ?? []) as { lead_id: string; parceiro_nome: string | null; ref: string | null }[]);
@@ -92,7 +94,7 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
     } else if (h.message?.type === 'ai' && tRef != null) {
       const tx = c.trim();
       if (!tx || tx.startsWith('[Aviso do sistema') || sistema.has(tx)) continue;
-      const env = casarEnvio(envios, tx, tRef); ++seq;
+      const env = casarEnvio(envios, tx, tRef) ?? casarAvulsa(avulsas, tRef); ++seq;
       eventos.push({ k: 'h' + h.id, t: env ? new Date(env.enviado_em).getTime() : tRef + 1000 * seq, lado: 'eva', rotulo: 'Eva', texto: tx, aprox: !env, status: env ? rotuloStatus(stPor, env.wa_message_id) : undefined });
     }
   }
