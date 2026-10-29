@@ -8,7 +8,7 @@ import Decisao, { type CorretorOpc, type ImovelRef } from '../../decisao';
 import Resgatar from './resgatar';
 import MensagemEva, { type DestinoMsg } from './mensagem';
 import ArquivarForaPerfil from '../../fora-perfil';
-import { statusDasMensagens, enviosDaEva, casarEnvio, rotuloStatus } from '@/lib/wa-status';
+import { statusDasMensagens, enviosDaEva, casarEnvio, rotuloStatus, mensagensAvulsas, casarAvulsa } from '@/lib/wa-status';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Lead — SDR REMAX Ville' };
@@ -101,7 +101,9 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
   ]);
   // 29/10: status de entrega/leitura (mensagens do sistema e respostas da Eva).
   const envios = await enviosDaEva(sb, fim8, desde);
-  const stPor = await statusDasMensagens(sb, [...((msgs ?? []) as Msg[]).map((m) => m.wa_message_id), ...envios.map((e) => e.wa_message_id)]);
+  const idsConhecidos = [...((msgs ?? []) as Msg[]).map((m) => m.wa_message_id), ...envios.map((e) => e.wa_message_id)];
+  const avulsas = await mensagensAvulsas(sb, fim8, desde, idsConhecidos);
+  const stPor = await statusDasMensagens(sb, [...idsConhecidos, ...avulsas.map((e) => e.wa_message_id)]);
   type Ev = { k: string; t: number; rotulo: string; texto: string; status?: string; aprox?: boolean };
   const eventos: Ev[] = [];
   const bufs = (buf ?? []) as { id: number; mensagem_texto: string | null; tipo_msg: string | null; created_at: string; processado_em: string | null }[];
@@ -125,7 +127,7 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
     } else if (h.message?.type === 'ai' && tRef != null) {
       const tx = c.trim();
       if (!tx || tx.startsWith('[') || enviadosCliente.has(tx)) continue;
-      const env = casarEnvio(envios, tx, tRef); ++seq;
+      const env = casarEnvio(envios, tx, tRef) ?? casarAvulsa(avulsas, tRef); ++seq;
       eventos.push({ k: 'h' + h.id, t: env ? new Date(env.enviado_em).getTime() : tRef + 1000 * seq, rotulo: 'Eva → cliente', texto: tx, aprox: !env, status: env ? rotuloStatus(stPor, env.wa_message_id) : undefined });
     }
   }
