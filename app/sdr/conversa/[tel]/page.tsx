@@ -96,6 +96,8 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
       eventos.push({ k: 'h' + h.id, t: env ? new Date(env.enviado_em).getTime() : tRef + 1000 * seq, lado: 'eva', rotulo: 'Eva', texto: tx, aprox: !env, status: env ? rotuloStatus(stPor, env.wa_message_id) : undefined });
     }
   }
+  // 29/10: respostas da Eva gravadas no envio que não casaram com o histórico (ex.: fluxos sem memória) entram assim mesmo.
+  for (const e of envios) if (!e.usado && !sistema.has(String(e.texto ?? '').trim())) eventos.push({ k: 'e' + e.wa_message_id, t: new Date(e.enviado_em).getTime(), lado: 'eva', rotulo: 'Eva', texto: String(e.texto ?? ''), status: rotuloStatus(stPor, e.wa_message_id) });
   eventos.sort((a, b) => a.t - b.t);
 
   const cor_ = { pessoa: 'bg-white border-slate-200', eva: 'bg-blue-50 border-blue-100', sistema: 'bg-amber-50 border-amber-100' };
