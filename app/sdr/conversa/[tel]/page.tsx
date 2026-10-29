@@ -6,6 +6,7 @@ import { notFound } from 'next/navigation';
 import { exigirSdrGestao } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import MensagemEva from '@/app/sdr/lead/[id]/mensagem';
+import { statusDasMensagens, enviosDaEva, casarEnvio, rotuloStatus } from '@/lib/wa-status';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Conversa — SDR REMAX Ville' };
@@ -23,8 +24,6 @@ function variantes(tel: string): string[] {
 }
 
 type Ev = { k: string; t: number; lado: 'pessoa' | 'eva' | 'sistema'; rotulo: string; texto: string; status?: string; aprox?: boolean };
-const ORDEM_ST: Record<string, number> = { failed: 0, sent: 1, delivered: 2, read: 3 };
-const ST_TXT: Record<string, string> = { failed: 'não entregue', sent: 'enviada', delivered: 'entregue', read: 'lida' };
 
 export default async function ConversaSdr({ params }: { params: Promise<{ tel: string }> }) {
   await exigirSdrGestao();
@@ -53,16 +52,9 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
   const nomeProf = ((prof ?? []) as { nome: string | null }[])[0]?.nome;
   const ehProf = ((prof ?? []) as unknown[]).length > 0;
 
-  // status de entrega das mensagens do sistema
-  const wids = ((msgs ?? []) as { wa_message_id: string | null }[]).map((m) => m.wa_message_id).filter((x): x is string => !!x);
-  const stPor = new Map<string, string>();
-  for (let i = 0; i < wids.length; i += 200) {
-    const { data } = await sb.from('sdr_wa_status').select('wa_message_id,status').in('wa_message_id', wids.slice(i, i + 200));
-    for (const s of (data ?? []) as { wa_message_id: string; status: string }[]) {
-      const a = stPor.get(s.wa_message_id);
-      if (!a || (ORDEM_ST[s.status] ?? -1) > (ORDEM_ST[a] ?? -1)) stPor.set(s.wa_message_id, s.status);
-    }
-  }
+  // status de entrega das mensagens do sistema e das respostas da Eva (29/10: eva_envios)
+  const envios = await enviosDaEva(sb, dig.slice(-8));
+  const stPor = await statusDasMensagens(sb, [...((msgs ?? []) as { wa_message_id: string | null }[]).map((m) => m.wa_message_id), ...envios.map((e) => e.wa_message_id)]);
 
   const cor = ((cors ?? []) as { nome: string; apelido: string | null }[])[0];
   const parc = ((parcs ?? []) as { lead_id: string; parceiro_nome: string | null; ref: string | null }[]);
@@ -84,7 +76,7 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
     if (m.direcao === 'out') sistema.add(tx.replace(/^\[ERRO [^\]]*\]\s*/, ''));
     if (m.direcao === 'in') continue; // entradas já vêm do buffer
     eventos.push({ k: 'm' + m.id, t: new Date(m.created_at).getTime(), lado: 'sistema',
-      rotulo: 'sistema' + (m.template ? ' · modelo ' + m.template : ''), texto: tx, status: m.wa_message_id ? ST_TXT[stPor.get(m.wa_message_id) ?? ''] ?? 'enviada' : (tx.startsWith('[ERRO') ? 'não saiu' : undefined) });
+      rotulo: 'sistema' + (m.template ? ' · modelo ' + m.template : ''), texto: tx, status: rotuloStatus(stPor, m.wa_message_id, tx.startsWith('[ERRO')) });
   }
   // respostas da Eva: herdam o horário da mensagem da pessoa que responderam
   const limpa = (c: string) => c.replace(/^(\s*\[[^\]]*\]\s*)+/, '').replace(/\n+IMPORTANTE:[\s\S]*$/, '').trim();
@@ -100,7 +92,8 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
     } else if (h.message?.type === 'ai' && tRef != null) {
       const tx = c.trim();
       if (!tx || tx.startsWith('[Aviso do sistema') || sistema.has(tx)) continue;
-      eventos.push({ k: 'h' + h.id, t: tRef + 1000 * ++seq, lado: 'eva', rotulo: 'Eva', texto: tx, aprox: true });
+      const env = casarEnvio(envios, tx, tRef); ++seq;
+      eventos.push({ k: 'h' + h.id, t: env ? new Date(env.enviado_em).getTime() : tRef + 1000 * seq, lado: 'eva', rotulo: 'Eva', texto: tx, aprox: !env, status: env ? rotuloStatus(stPor, env.wa_message_id) : undefined });
     }
   }
   eventos.sort((a, b) => a.t - b.t);
@@ -119,7 +112,7 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
               .map((x) => <Link key={x.id + x.t} href={'/sdr/lead/' + x.id} className="rounded-full border border-slate-300 px-2.5 py-0.5 text-slate-700 hover:bg-slate-50">{x.t}</Link>)}
           </div>
         )}
-        <p className="mt-2 text-xs text-slate-500">Branco: a pessoa · azul: resposta da Eva (horário aproximado) · amarelo: mensagem do sistema, com status do WhatsApp.</p>
+        <p className="mt-2 text-xs text-slate-500">Branco: a pessoa · azul: resposta da Eva · amarelo: mensagem do sistema. Status do WhatsApp: enviada, entregue, lida (só aparece “lida” se a pessoa não desligou a confirmação de leitura). Horário com ~ é aproximado (respostas antes de 29/10).</p>
       </section>
       <ol className="mt-4 space-y-2">
         {eventos.map((e) => (
