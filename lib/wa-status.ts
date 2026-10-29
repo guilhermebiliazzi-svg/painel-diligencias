@@ -55,3 +55,35 @@ export function rotuloStatus(st: Map<string, string>, wid: string | null | undef
   if (!wid) return erro ? 'não saiu' : undefined;
   return ST_TXT[st.get(wid) ?? ''] ?? 'enviada';
 }
+
+/**
+ * Mensagens enviadas a um telefone que não estão em sdr_mensagens nem em eva_envios (ex.: respostas da Eva
+ * de antes de 29/10). Só têm id, horário e status — servem para casar pelo horário com a resposta do histórico.
+ */
+export async function mensagensAvulsas(sb: SupabaseClient, fim8: string, desdeIso: string | undefined, conhecidos: (string | null | undefined)[]): Promise<EnvioEva[]> {
+  if (fim8.length !== 8) return [];
+  const ja = new Set(conhecidos.filter((x): x is string => !!x));
+  let q = sb.from('sdr_wa_status').select('wa_message_id,recebido_em').like('destinatario', '%' + fim8);
+  q = q.gte('recebido_em', desdeIso ?? new Date(Date.now() - 90 * 864e5).toISOString());
+  const { data } = await q.order('recebido_em', { ascending: true }).limit(2000);
+  const prim = new Map<string, string>();
+  for (const r of (data ?? []) as { wa_message_id: string; recebido_em: string }[]) {
+    if (ja.has(r.wa_message_id)) continue;
+    const a = prim.get(r.wa_message_id);
+    if (!a || r.recebido_em < a) prim.set(r.wa_message_id, r.recebido_em);
+  }
+  return [...prim.entries()].map(([wa_message_id, enviado_em]) => ({ wa_message_id, texto: null, enviado_em })).sort((a, b) => a.enviado_em.localeCompare(b.enviado_em));
+}
+
+/** Casa pelo horário: primeira mensagem avulsa enviada até 10 min depois da mensagem que a Eva respondeu. */
+export function casarAvulsa(avulsas: EnvioEva[], depoisDe: number | null): EnvioEva | null {
+  if (depoisDe == null) return null;
+  for (const e of avulsas) {
+    if (e.usado) continue;
+    const t = new Date(e.enviado_em).getTime();
+    if (t < depoisDe - 60e3) continue;
+    if (t > depoisDe + 10 * 60e3) return null;
+    e.usado = true; return e;
+  }
+  return null;
+}
