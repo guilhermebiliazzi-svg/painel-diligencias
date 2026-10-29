@@ -9,7 +9,7 @@ import Decisao, { type CorretorOpc } from '../../decisao';
 import ReferenciarCaptacao from './referenciar';
 import { lojasProximas } from '@/lib/lojas-remax';
 import MensagemEva from '@/app/sdr/lead/[id]/mensagem';
-import { statusDasMensagens, enviosDaEva, casarEnvio, rotuloStatus } from '@/lib/wa-status';
+import { statusDasMensagens, enviosDaEva, casarEnvio, rotuloStatus, mensagensAvulsas, casarAvulsa } from '@/lib/wa-status';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Captação — SDR REMAX Ville' };
@@ -46,7 +46,9 @@ export default async function CaptacaoSdr({ params }: { params: Promise<{ id: st
     ]);
     // 29/10: status de entrega/leitura (mensagens do sistema e respostas da Eva).
     const envios = await enviosDaEva(sb, fim8, desde);
-    const stPor = await statusDasMensagens(sb, [...((sm ?? []) as { wa_message_id: string | null }[]).map((m) => m.wa_message_id), ...envios.map((e) => e.wa_message_id)]);
+    const idsConhecidos = [...((sm ?? []) as { wa_message_id: string | null }[]).map((m) => m.wa_message_id), ...envios.map((e) => e.wa_message_id)];
+    const avulsas = await mensagensAvulsas(sb, fim8, desde, idsConhecidos);
+    const stPor = await statusDasMensagens(sb, [...idsConhecidos, ...avulsas.map((e) => e.wa_message_id)]);
     const bufs = (buf ?? []) as { id: number; mensagem_texto: string | null; tipo_msg: string | null; created_at: string; processado_em: string | null }[];
     for (const b of bufs) {
       const tx = (b.mensagem_texto || '').trim() || (b.tipo_msg && b.tipo_msg !== 'text' ? '[' + b.tipo_msg + ']' : '');
@@ -67,7 +69,7 @@ export default async function CaptacaoSdr({ params }: { params: Promise<{ id: st
       } else if (h.message?.type === 'ai' && tRef != null) {
         const tx = x.trim();
         if (!tx || tx.startsWith('[') || enviados.has(tx)) continue;
-        const env = casarEnvio(envios, tx, tRef); ++seq;
+        const env = casarEnvio(envios, tx, tRef) ?? casarAvulsa(avulsas, tRef); ++seq;
         eventos.push({ k: 'h' + h.id, t: env ? new Date(env.enviado_em).getTime() : tRef + 1000 * seq, rotulo: 'Eva → cliente', texto: tx, aprox: !env, status: env ? rotuloStatus(stPor, env.wa_message_id) : undefined });
       }
     }
