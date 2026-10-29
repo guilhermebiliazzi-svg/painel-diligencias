@@ -9,6 +9,7 @@ import Decisao, { type CorretorOpc } from '../../decisao';
 import ReferenciarCaptacao from './referenciar';
 import { lojasProximas } from '@/lib/lojas-remax';
 import MensagemEva from '@/app/sdr/lead/[id]/mensagem';
+import { statusDasMensagens, enviosDaEva, casarEnvio, rotuloStatus } from '@/lib/wa-status';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Captação — SDR REMAX Ville' };
@@ -33,7 +34,7 @@ export default async function CaptacaoSdr({ params }: { params: Promise<{ id: st
   const quer = /^alug/i.test(String(c.intencao ?? '')) ? 'Alugar' : 'Vender';
   // Conversa do proprietário com a Eva (17/10): mensagens do cliente (mensagens_buffer) + respostas da Eva
   // (n8n_chat_histories) + avisos do sistema para este telefone (sdr_mensagens), em ordem de horário.
-  type Ev = { k: string; t: number; rotulo: string; texto: string };
+  type Ev = { k: string; t: number; rotulo: string; texto: string; status?: string; aprox?: boolean };
   const eventos: Ev[] = [];
   const fim8 = tel.slice(-8);
   if (fim8.length === 8) {
@@ -41,14 +42,17 @@ export default async function CaptacaoSdr({ params }: { params: Promise<{ id: st
     const [{ data: buf }, { data: hist }, { data: sm }] = await Promise.all([
       sb.from('mensagens_buffer').select('id,mensagem_texto,tipo_msg,created_at,processado_em').like('phone', '%' + fim8).gte('created_at', desde).order('created_at').limit(200),
       sb.from('n8n_chat_histories').select('id,message').like('session_id', '%' + fim8).order('id', { ascending: false }).limit(120),
-      sb.from('sdr_mensagens').select('id,created_at,direcao,interlocutor,conteudo').like('telefone', '%' + fim8).gte('created_at', desde).order('created_at', { ascending: false }).limit(40),
+      sb.from('sdr_mensagens').select('id,created_at,direcao,interlocutor,conteudo,wa_message_id').like('telefone', '%' + fim8).gte('created_at', desde).order('created_at', { ascending: false }).limit(40),
     ]);
+    // 29/10: status de entrega/leitura (mensagens do sistema e respostas da Eva).
+    const envios = await enviosDaEva(sb, fim8, desde);
+    const stPor = await statusDasMensagens(sb, [...((sm ?? []) as { wa_message_id: string | null }[]).map((m) => m.wa_message_id), ...envios.map((e) => e.wa_message_id)]);
     const bufs = (buf ?? []) as { id: number; mensagem_texto: string | null; tipo_msg: string | null; created_at: string; processado_em: string | null }[];
     for (const b of bufs) {
       const tx = (b.mensagem_texto || '').trim() || (b.tipo_msg && b.tipo_msg !== 'text' ? '[' + b.tipo_msg + ']' : '');
       if (tx) eventos.push({ k: 'b' + b.id, t: new Date(b.created_at).getTime(), rotulo: 'cliente → Eva', texto: tx });
     }
-    const msgs = (sm ?? []) as { id: string; created_at: string; direcao: string; interlocutor: string; conteudo: string | null }[];
+    const msgs = (sm ?? []) as { id: string; created_at: string; direcao: string; interlocutor: string; conteudo: string | null; wa_message_id: string | null }[];
     const enviados = new Set(msgs.map((m) => String(m.conteudo ?? '').trim()));
     const limpa = (x: string) => x.replace(/^(\s*\[[^\]]*\]\s*)+/, '').trim();
     let ptr = 0; let tRef: number | null = null; let seq = 0;
@@ -63,10 +67,12 @@ export default async function CaptacaoSdr({ params }: { params: Promise<{ id: st
       } else if (h.message?.type === 'ai' && tRef != null) {
         const tx = x.trim();
         if (!tx || tx.startsWith('[') || enviados.has(tx)) continue;
-        eventos.push({ k: 'h' + h.id, t: tRef + 1000 * ++seq, rotulo: 'Eva → cliente', texto: tx });
+        const env = casarEnvio(envios, tx, tRef); ++seq;
+        eventos.push({ k: 'h' + h.id, t: env ? new Date(env.enviado_em).getTime() : tRef + 1000 * seq, rotulo: 'Eva → cliente', texto: tx, aprox: !env, status: env ? rotuloStatus(stPor, env.wa_message_id) : undefined });
       }
     }
-    for (const m of msgs) eventos.push({ k: 'm' + m.id, t: new Date(m.created_at).getTime(), rotulo: (m.direcao === 'in' ? 'de ' : 'para ') + m.interlocutor, texto: String(m.conteudo ?? '') });
+    for (const m of msgs) eventos.push({ k: 'm' + m.id, t: new Date(m.created_at).getTime(), rotulo: (m.direcao === 'in' ? 'de ' : 'para ') + m.interlocutor, texto: String(m.conteudo ?? ''),
+      status: m.direcao === 'in' ? undefined : rotuloStatus(stPor, m.wa_message_id, String(m.conteudo ?? '').startsWith('[ERRO')) });
     eventos.sort((x, y) => y.t - x.t);
   }
   // 24/10: enviar mensagem pela Eva também na captação (só para o proprietário).
@@ -118,7 +124,7 @@ export default async function CaptacaoSdr({ params }: { params: Promise<{ id: st
           <ul className="mt-2 divide-y divide-slate-100">
             {eventos.slice(0, 40).map((e) => (
               <li key={e.k} className="py-2 text-sm">
-                <p className={'text-xs ' + (e.rotulo.includes('Eva') ? 'font-medium text-blue-700' : 'text-slate-500')}>{fmt.format(new Date(e.t))} · {e.rotulo}</p>
+                <p className={'text-xs ' + (e.rotulo.includes('Eva') ? 'font-medium text-blue-700' : 'text-slate-500')}>{(e.aprox ? '~' : '') + fmt.format(new Date(e.t))} · {e.rotulo}{e.status ? ' · ' + e.status : ''}</p>
                 <p className="mt-0.5 whitespace-pre-line break-words text-slate-800">{e.texto.slice(0, 600)}</p>
               </li>
             ))}
