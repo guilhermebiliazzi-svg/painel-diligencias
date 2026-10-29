@@ -73,6 +73,8 @@ export default async function CaptacaoSdr({ params }: { params: Promise<{ id: st
     }
     for (const m of msgs) eventos.push({ k: 'm' + m.id, t: new Date(m.created_at).getTime(), rotulo: (m.direcao === 'in' ? 'de ' : 'para ') + m.interlocutor, texto: String(m.conteudo ?? ''),
       status: m.direcao === 'in' ? undefined : rotuloStatus(stPor, m.wa_message_id, String(m.conteudo ?? '').startsWith('[ERRO')) });
+    // 29/10: respostas da Eva gravadas no envio que não casaram com o histórico entram assim mesmo.
+    for (const e of envios) if (!e.usado && !enviados.has(String(e.texto ?? '').trim())) eventos.push({ k: 'e' + e.wa_message_id, t: new Date(e.enviado_em).getTime(), rotulo: 'Eva → cliente', texto: String(e.texto ?? ''), status: rotuloStatus(stPor, e.wa_message_id) });
     eventos.sort((x, y) => y.t - x.t);
   }
   // 24/10: enviar mensagem pela Eva também na captação (só para o proprietário).
