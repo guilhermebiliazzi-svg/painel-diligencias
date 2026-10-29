@@ -8,6 +8,7 @@ import Decisao, { type CorretorOpc, type ImovelRef } from '../../decisao';
 import Resgatar from './resgatar';
 import MensagemEva, { type DestinoMsg } from './mensagem';
 import ArquivarForaPerfil from '../../fora-perfil';
+import { statusDasMensagens, enviosDaEva, casarEnvio, rotuloStatus } from '@/lib/wa-status';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Lead — SDR REMAX Ville' };
@@ -20,7 +21,7 @@ type Lead = {
   fila_corretores: string[] | null; corretor_phone: string | null; created_at: string; cartao_enviado_em: string | null;
   motivo_arquivamento: string | null;
 };
-type Msg = { id: string; created_at: string; direcao: string; interlocutor: string; telefone: string | null; template: string | null; conteudo: string | null };
+type Msg = { id: string; created_at: string; direcao: string; interlocutor: string; telefone: string | null; template: string | null; conteudo: string | null; wa_message_id: string | null };
 
 const STATUS: Record<string, { t: string; c: string }> = {
   aguardando_guilherme: { t: 'Esperando você', c: 'bg-amber-100 text-amber-800' },
@@ -70,7 +71,7 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
 
   const [{ data: lead }, { data: msgs }, { data: cors }, { data: outros }, { data: etapasCap }, { data: imvs }] = await Promise.all([
     sb.from('sdr_leads').select('*').eq('id', id).maybeSingle(),
-    sb.from('sdr_mensagens').select('id,created_at,direcao,interlocutor,telefone,template,conteudo').eq('lead_id', id).order('created_at', { ascending: false }).limit(40),
+    sb.from('sdr_mensagens').select('id,created_at,direcao,interlocutor,telefone,template,conteudo,wa_message_id').eq('lead_id', id).order('created_at', { ascending: false }).limit(40),
     sb.from('corretores_associados').select('phone,nome,apelido,foto_url').eq('status', 'ativo').not('phone', 'is', null).order('nome'),
     sb.from('sdr_leads').select('id,nome,imovel_anuncio_endereco,bairros').eq('status', 'aguardando_guilherme').neq('id', id).gte('updated_at', new Date(Date.now() - 7 * 864e5).toISOString()).order('cartao_enviado_em', { ascending: false }).limit(10),
     sb.from('sdr_captacao_etapas').select('etapa,quando,created_at').eq('lead_id', id).order('created_at'),
@@ -98,7 +99,10 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
     sb.from('mensagens_buffer').select('id,mensagem_texto,tipo_msg,created_at,processado_em').like('phone', '%' + fim8).gte('created_at', desde).order('created_at').limit(200),
     sb.from('n8n_chat_histories').select('id,message').like('session_id', '%' + fim8).order('id', { ascending: false }).limit(120),
   ]);
-  type Ev = { k: string; t: number; rotulo: string; texto: string };
+  // 29/10: status de entrega/leitura (mensagens do sistema e respostas da Eva).
+  const envios = await enviosDaEva(sb, fim8, desde);
+  const stPor = await statusDasMensagens(sb, [...((msgs ?? []) as Msg[]).map((m) => m.wa_message_id), ...envios.map((e) => e.wa_message_id)]);
+  type Ev = { k: string; t: number; rotulo: string; texto: string; status?: string; aprox?: boolean };
   const eventos: Ev[] = [];
   const bufs = (buf ?? []) as { id: number; mensagem_texto: string | null; tipo_msg: string | null; created_at: string; processado_em: string | null }[];
   for (const b of bufs) {
@@ -121,13 +125,15 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
     } else if (h.message?.type === 'ai' && tRef != null) {
       const tx = c.trim();
       if (!tx || tx.startsWith('[') || enviadosCliente.has(tx)) continue;
-      eventos.push({ k: 'h' + h.id, t: tRef + 1000 * ++seq, rotulo: 'Eva → cliente', texto: tx });
+      const env = casarEnvio(envios, tx, tRef); ++seq;
+      eventos.push({ k: 'h' + h.id, t: env ? new Date(env.enviado_em).getTime() : tRef + 1000 * seq, rotulo: 'Eva → cliente', texto: tx, aprox: !env, status: env ? rotuloStatus(stPor, env.wa_message_id) : undefined });
     }
   }
   for (const m of (msgs ?? []) as Msg[]) {
     eventos.push({ k: 'm' + m.id, t: new Date(m.created_at).getTime(),
       rotulo: (m.direcao === 'in' ? 'de ' : 'para ') + m.interlocutor + (m.interlocutor === 'corretor' && m.telefone ? ' ' + nomeCor(m.telefone) : ''),
-      texto: m.template === 'comando_fila' ? 'Fila: ' + String(m.conteudo ?? '').split(',').filter(Boolean).map(nomeCor).join(' → ') : String(m.conteudo ?? '') });
+      texto: m.template === 'comando_fila' ? 'Fila: ' + String(m.conteudo ?? '').split(',').filter(Boolean).map(nomeCor).join(' → ') : String(m.conteudo ?? ''),
+      status: m.direcao === 'in' || m.template === 'comando_fila' ? undefined : rotuloStatus(stPor, m.wa_message_id, String(m.conteudo ?? '').startsWith('[ERRO')) });
   }
   eventos.sort((a, b) => b.t - a.t);
   const linhaTempo = eventos.slice(0, 40);
@@ -266,7 +272,7 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
             {linhaTempo.map((e) => (
               <li key={e.k} className="py-2 text-sm">
                 <p className={'text-xs ' + (e.rotulo.includes('Eva') ? 'font-medium text-blue-700' : 'text-slate-500')}>
-                  {fmt.format(new Date(e.t))} · {e.rotulo}
+                  {(e.aprox ? '~' : '') + fmt.format(new Date(e.t))} · {e.rotulo}{e.status ? ' · ' + e.status : ''}
                 </p>
                 <p className="mt-0.5 whitespace-pre-line break-words text-slate-800">{e.texto.slice(0, 600)}</p>
               </li>
