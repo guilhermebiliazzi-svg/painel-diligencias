@@ -108,33 +108,49 @@ export function qualificacao(p: Parte, opts: { comConjuge?: boolean } = {}): str
     ].join(", ");
   }
   const ec = p.estado_civil ? ESTADO_CIVIL[p.estado_civil]?.[fem(p) ? 1 : 0] : null;
-  const partes: string[] = [nome];
-  if (p.nacionalidade) partes.push(p.nacionalidade);
+  let ecTxt: string | null = null;
   if (ec) {
-    let e = ec;
+    ecTxt = ec;
     if (p.estado_civil && COM_CONJUGE.has(p.estado_civil)) {
       const reg = regimeTxt(p.regime_bens);
-      if (reg && p.estado_civil === "casado") e += ` sob o regime da ${reg}`;
+      if (reg && p.estado_civil === "casado") ecTxt += ` sob o regime da ${reg}`;
     }
-    partes.push(e);
   }
+  const c = p.estado_civil && COM_CONJUGE.has(p.estado_civil) && p.conjuge?.nome ? p.conjuge : null;
+  // locador/locatário com cônjuge: "..., casado sob o regime ... com FULANA, (dados dela),
+  // residentes e domiciliados em ..."; fiador: o cônjuge assina como anuente (no fim)
+  const conjugeNaQualificacao = !!c && !opts.comConjuge;
+
+  const partes: string[] = [nome];
+  if (p.nacionalidade) partes.push(p.nacionalidade);
+  if (ecTxt && !conjugeNaQualificacao) partes.push(ecTxt);
   if (p.profissao) partes.push(p.profissao);
   partes.push(`${o_a(p, "inscrito", "inscrita")} no CPF sob o nº ${cpfTxt(p.cpf_cnpj)}`);
   if (p.rg) partes.push(`portador${fem(p) ? "a" : ""} do RG nº ${p.rg}`);
   if (p.email) partes.push(`endereço eletrônico ${p.email}`);
-  partes.push(`residente e ${o_a(p, "domiciliado", "domiciliada")} em ${p.endereco || "____________"}`);
+  if (conjugeNaQualificacao && c) {
+    // gênero do cônjuge pela nacionalidade ("brasileira"); sem isso, o oposto do titular
+    const nac = String(c.nacionalidade || "").trim().toLowerCase();
+    const cFem = /a$/.test(nac) ? true : /(o|ês|es)$/.test(nac) ? false : !fem(p);
+    const cq: string[] = [c.nome!.toUpperCase()];
+    if (c.nacionalidade) cq.push(c.nacionalidade);
+    if (c.profissao) cq.push(c.profissao);
+    if (c.cpf) cq.push(`${cFem ? "inscrita" : "inscrito"} no CPF sob o nº ${cpfTxt(c.cpf)}`);
+    if (c.rg) cq.push(`${cFem ? "portadora" : "portador"} do RG nº ${c.rg}`);
+    partes.push(`${ecTxt || o_a(p, "casado", "casada")} com ${cq.join(", ")}`);
+    const ambasF = fem(p) && cFem;
+    partes.push(`residentes e ${ambasF ? "domiciliadas" : "domiciliados"} em ${p.endereco || "____________"}`);
+  } else {
+    partes.push(`residente e ${o_a(p, "domiciliado", "domiciliada")} em ${p.endereco || "____________"}`);
+  }
   let s = partes.join(", ");
-  if (p.estado_civil && COM_CONJUGE.has(p.estado_civil) && p.conjuge?.nome) {
-    const c = p.conjuge;
+  if (c && opts.comConjuge) {
     const cp: string[] = [c.nome!.toUpperCase()];
     if (c.nacionalidade) cp.push(c.nacionalidade);
     if (c.profissao) cp.push(c.profissao);
     if (c.cpf) cp.push(`CPF nº ${cpfTxt(c.cpf)}`);
     if (c.rg) cp.push(`RG nº ${c.rg}`);
-    // fiador: o cônjuge assina como anuente (outorga da fiança);
-    // locador/locatário: o cônjuge só é identificado, no fim da qualificação
-    if (opts.comConjuge) s += `, e seu cônjuge ${cp.join(", ")}, que comparece na qualidade de anuente`;
-    else s += `, tendo como cônjuge ${cp.join(", ")}`;
+    s += `, e seu cônjuge ${cp.join(", ")}, que comparece na qualidade de anuente`;
   }
   return s;
 }
