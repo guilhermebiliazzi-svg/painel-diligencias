@@ -20,13 +20,25 @@ import { CopiarLinkCliente } from '../../CopiarLinkCliente';
 import { CardExtraNovo, ExcluirCardExtra } from '../../CardExtra';
 import { GerarParecer } from '../../GerarParecer';
 import { rotaDoTipo } from '@/lib/rota-certidao';
+import {
+  agrupar,
+  categoriasFor,
+  preencherCategorias,
+  rotuloSituacao,
+  SITUACOES_ATENCAO,
+  type Group as GroupOrdem,
+  type GroupTipo,
+} from '@/lib/diligencia-ordem';
 import { GerarCCV } from '../../GerarCCV';
 import { btn } from '../../botoes';
 import { FichaNegocio } from '../../FichaNegocio';
 import { EmitirCobranca } from '../../EmitirCobranca';
 import { EnviarArquivoCard } from '../../EnviarArquivoCard';
+import { BaixarCertidoesPdf } from '../../BaixarCertidoesPdf';
 import { CorretoresDiligencia } from '../../CorretoresDiligencia';
 import { exigirVerDiligencia } from '@/lib/diligencia-acesso';
+
+type Group = GroupOrdem<AdminRow>;
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -126,298 +138,6 @@ async function fetchDiligencia(id: string): Promise<AdminRow[] | null> {
 }
 
 // -----------------------------------------------------------------------------
-// Categorias
-// -----------------------------------------------------------------------------
-
-type GroupTipo = 'imovel' | 'pf' | 'pj';
-
-// Subgrupo opcional dentro de uma categoria (ex: e-SAJ vs eproc dentro de TJSP)
-type Subgrupo = { titulo: string; tipos: Set<string> };
-
-type Categoria = {
-  titulo: string;
-  // Lista ordenada de tipos pertencentes (define a ordem da numeracao)
-  tipos: string[];
-  subgrupos?: Subgrupo[];
-};
-
-const CATEGORIAS_IMOVEL: Categoria[] = [
-  {
-    titulo: 'Documentos do imóvel',
-    tipos: [
-      'matricula_imovel',
-      'dados_cadastrais_imovel',
-      'ata_sindico',
-      'cnd_condominio',
-      'iptu_pref_sp',
-    ],
-  },
-  {
-    titulo: 'Contas de consumo',
-    tipos: [
-      'conta_consumo',
-      'conta_consumo_agua',
-      'conta_consumo_luz',
-      'conta_consumo_gas',
-    ],
-  },
-];
-
-const CATEGORIAS_PF: Categoria[] = [
-  {
-    titulo: 'Documentos pessoais',
-    tipos: [
-      'doc_identidade',
-      'cert_estado_civil',
-      'comp_residencia',
-      'sit_cadastral_rf',
-      'cert_simplificada_jucesp_pf',
-    ],
-  },
-  {
-    titulo: 'CNDs do TJSP',
-    tipos: [
-      // eproc
-      'tjsp_civel_1g',
-      // e-SAJ
-      'tjsp_civeis',
-      'tjsp_criminais',
-      'tjsp_inventarios',
-      'tjsp_falencia',
-    ],
-    subgrupos: [
-      {
-        titulo: 'eproc',
-        tipos: new Set(['tjsp_civel_1g']),
-      },
-      {
-        titulo: 'e-SAJ',
-        tipos: new Set([
-          'tjsp_civeis',
-          'tjsp_criminais',
-          'tjsp_inventarios',
-          'tjsp_falencia',
-        ]),
-      },
-    ],
-  },
-  {
-    titulo: 'CNDs TRF',
-    tipos: ['trf_civel', 'trf_criminal'],
-  },
-  {
-    titulo: 'Trabalhistas',
-    tipos: ['trt2_digital', 'trt2_fisico', 'cndt_tst'],
-  },
-  {
-    titulo: 'Fiscais e protestos',
-    tipos: [
-      'cnd_federal',
-      'pge_sp_inscritos',
-      'sefaz_sp_nao_inscritos',
-      'mobiliaria_pref_sp',
-      'cenprot_pf',
-    ],
-  },
-];
-
-const CATEGORIAS_PJ: Categoria[] = [
-  {
-    titulo: 'Documentos cadastrais',
-    tipos: [
-      'sit_cadastral_rf_pj',
-      'cert_simplificada_jucesp',
-      'contrato_social',
-    ],
-  },
-  {
-    titulo: 'CNDs do TJSP',
-    tipos: [
-      // eproc
-      'tjsp_civel_1g',
-      // e-SAJ
-      'tjsp_civeis',
-      'tjsp_criminais',
-      'tjsp_inventarios',
-      'tjsp_falencia',
-    ],
-    subgrupos: [
-      {
-        titulo: 'eproc',
-        tipos: new Set(['tjsp_civel_1g']),
-      },
-      {
-        titulo: 'e-SAJ',
-        tipos: new Set([
-          'tjsp_civeis',
-          'tjsp_criminais',
-          'tjsp_inventarios',
-          'tjsp_falencia',
-        ]),
-      },
-    ],
-  },
-  {
-    titulo: 'CNDs TRF',
-    tipos: ['trf_civel'],
-  },
-  {
-    titulo: 'Trabalhistas',
-    tipos: ['trt2_digital', 'trt2_fisico', 'cndt_tst_pj', 'crf_fgts'],
-  },
-  {
-    titulo: 'Fiscais e protestos',
-    tipos: [
-      'cnd_federal_pj',
-      'pge_sp_inscritos',
-      'sefaz_sp_nao_inscritos',
-      'mobiliaria_pref_sp',
-      'cenprot_pj',
-    ],
-  },
-];
-
-function categoriasFor(tipo: GroupTipo): Categoria[] {
-  if (tipo === 'imovel') return CATEGORIAS_IMOVEL;
-  if (tipo === 'pj') return CATEGORIAS_PJ;
-  return CATEGORIAS_PF;
-}
-
-// -----------------------------------------------------------------------------
-// Agrupamento por titular
-// -----------------------------------------------------------------------------
-
-type Group = {
-  key: string;
-  tipo: GroupTipo;
-  titulo: string;
-  subtitulo?: string;
-  rows: AdminRow[];
-  pasta_id?: string | null;
-};
-
-const SITUACOES_ATENCAO = new Set(['Positiva', 'Com pendencias', 'Em revisao', 'Falhou']);
-
-function agrupar(rows: AdminRow[], endereco: string): Group[] {
-  const imovel: AdminRow[] = [];
-  const porDocumento = new Map<string, AdminRow[]>();
-
-  for (const r of rows) {
-    if (r.tipo_documento === 'imovel' || !r.documento_normalizado) {
-      imovel.push(r);
-    } else {
-      const chave = r.documento_normalizado;
-      const arr = porDocumento.get(chave) ?? [];
-      arr.push(r);
-      porDocumento.set(chave, arr);
-    }
-  }
-
-  const groups: Group[] = [];
-
-  if (imovel.length > 0) {
-    groups.push({
-      key: 'imovel',
-      tipo: 'imovel',
-      titulo: 'Imóvel',
-      subtitulo: endereco,
-      rows: imovel,
-      pasta_id: imovel.find((r) => r.pasta_id)?.pasta_id ?? null,
-    });
-  }
-
-  const pessoas: Group[] = [];
-  for (const [, rowsPessoa] of porDocumento) {
-    const first = rowsPessoa[0];
-    const tipo: GroupTipo = first.tipo_documento === 'pj' ? 'pj' : 'pf';
-    const titular = first.titular ?? 'Titular sem nome';
-    const rotuloDoc = tipo === 'pj' ? 'CNPJ' : 'CPF';
-    pessoas.push({
-      key: first.documento_normalizado ?? Math.random().toString(),
-      tipo,
-      titulo: titular,
-      subtitulo: `${rotuloDoc} ${first.documento_mascarado ?? ''}`,
-      rows: rowsPessoa,
-      pasta_id: rowsPessoa.find((r) => r.pasta_id)?.pasta_id ?? null,
-    });
-  }
-
-  pessoas.sort((a, b) => {
-    if (a.tipo !== b.tipo) return a.tipo === 'pf' ? -1 : 1;
-    return a.titulo.localeCompare(b.titulo, 'pt-BR');
-  });
-
-  return [...groups, ...pessoas];
-}
-
-/**
- * Agrupa rows do titular por categoria/subgrupo, mantendo a ordem dos tipos
- * definida em CATEGORIAS_*. Tipos nao mapeados caem em "Outros".
- */
-type CategoriaPreenchida = {
-  titulo: string;
-  rows: AdminRow[];
-  subgrupos: { titulo: string | null; rows: AdminRow[] }[];
-};
-
-function preencherCategorias(
-  rowsTitular: AdminRow[],
-  cats: Categoria[]
-): CategoriaPreenchida[] {
-  const usados = new Set<string>();
-  const result: CategoriaPreenchida[] = [];
-
-  for (const cat of cats) {
-    // Filtra rows desta categoria, na ordem dos tipos
-    const rowsDaCategoria: AdminRow[] = [];
-    for (const tipo of cat.tipos) {
-      const rs = rowsTitular.filter((r) => r.tipo === tipo);
-      for (const r of rs) {
-        rowsDaCategoria.push(r);
-        usados.add(r.certidao_id);
-      }
-    }
-    if (rowsDaCategoria.length === 0) continue;
-
-    // Subgrupos (se a categoria tem)
-    if (cat.subgrupos && cat.subgrupos.length > 0) {
-      const subs = cat.subgrupos.map((sg) => ({
-        titulo: sg.titulo,
-        rows: rowsDaCategoria.filter((r) => sg.tipos.has(r.tipo)),
-      }));
-      // Filtra sub-grupos vazios
-      const subsNaoVazios = subs.filter((s) => s.rows.length > 0);
-      result.push({
-        titulo: cat.titulo,
-        rows: rowsDaCategoria,
-        subgrupos: subsNaoVazios.map((s) => ({
-          titulo: s.titulo,
-          rows: s.rows,
-        })),
-      });
-    } else {
-      result.push({
-        titulo: cat.titulo,
-        rows: rowsDaCategoria,
-        subgrupos: [{ titulo: null, rows: rowsDaCategoria }],
-      });
-    }
-  }
-
-  // "Outros" - tipos não mapeados
-  const outros = rowsTitular.filter((r) => !usados.has(r.certidao_id));
-  if (outros.length > 0) {
-    result.push({
-      titulo: 'Outros',
-      rows: outros,
-      subgrupos: [{ titulo: null, rows: outros }],
-    });
-  }
-
-  return result;
-}
-
-// -----------------------------------------------------------------------------
 // Estilos por situacao
 // -----------------------------------------------------------------------------
 
@@ -507,12 +227,6 @@ const DEFAULT_STYLE: Style = {
 
 function styleFor(s: string): Style {
   return SITUACAO_STYLES[s] ?? DEFAULT_STYLE;
-}
-
-function rotuloSituacao(s: string): string {
-  if (s === 'Positiva') return 'Constam ocorrências';
-  if (s === 'Falhou') return 'Não foi possível emitir';
-  return s;
 }
 
 function formatDate(iso: string | null): string {
@@ -1050,6 +764,7 @@ export default async function AdminDiligenciaPage({
                 </a>
               )}
               <CopiarLinkCliente diligencia_id={id} />
+              <BaixarCertidoesPdf diligenciaId={id} />
               <form
                 action={async () => {
                   'use server';
