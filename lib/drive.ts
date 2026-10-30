@@ -117,3 +117,35 @@ export async function listPdfsInFolders(folderIds: string[]): Promise<DriveFile[
     `(${clauses}) and trashed=false and mimeType='application/pdf'`
   );
 }
+
+export type DriveDownload = { bytes: Uint8Array; mimeType: string; name: string };
+export type DriveMeta = { id: string; name: string; mimeType: string; size: number | null };
+
+/** Nome, tipo e tamanho (bytes) de um arquivo do Drive. */
+export async function driveFileMeta(fileId: string): Promise<DriveMeta> {
+  const token = await getAccessToken();
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=name,mimeType,size&supportsAllDrives=true`;
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!resp.ok) throw new Error(`Drive metadata falhou: ${resp.status}`);
+  const m = (await resp.json()) as { name?: string; mimeType?: string; size?: string };
+  return { id: fileId, name: String(m.name || ''), mimeType: String(m.mimeType || ''), size: m.size ? Number(m.size) : null };
+}
+
+/**
+ * Baixa o conteúdo de um arquivo do Drive. Documentos nativos do Google
+ * (Docs, Sheets...) saem exportados em PDF.
+ */
+export async function downloadDriveFile(fileId: string, meta?: DriveMeta): Promise<DriveDownload> {
+  const m = meta ?? (await driveFileMeta(fileId));
+  const token = await getAccessToken();
+  const base = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`;
+  const nativo = m.mimeType.startsWith('application/vnd.google-apps.');
+  const url = nativo ? `${base}/export?mimeType=application/pdf` : `${base}?alt=media&supportsAllDrives=true`;
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!resp.ok) throw new Error(`Drive download falhou: ${resp.status}`);
+  return {
+    bytes: new Uint8Array(await resp.arrayBuffer()),
+    mimeType: nativo ? 'application/pdf' : m.mimeType || String(resp.headers.get('content-type') || ''),
+    name: m.name,
+  };
+}
