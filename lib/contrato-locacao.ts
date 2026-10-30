@@ -112,9 +112,19 @@ export function qualificacao(p: Parte, opts: { comConjuge?: boolean } = {}): str
   if (p.nacionalidade) partes.push(p.nacionalidade);
   if (ec) {
     let e = ec;
-    if (opts.comConjuge && p.estado_civil && COM_CONJUGE.has(p.estado_civil)) {
+    if (p.estado_civil && COM_CONJUGE.has(p.estado_civil)) {
       const reg = regimeTxt(p.regime_bens);
       if (reg && p.estado_civil === "casado") e += ` sob o regime da ${reg}`;
+      // locador/locatário: o cônjuge entra só na qualificação ("casado ... com FULANA (dados)")
+      if (!opts.comConjuge && p.conjuge?.nome) {
+        const c = p.conjuge;
+        const d: string[] = [];
+        if (c.nacionalidade) d.push(c.nacionalidade);
+        if (c.profissao) d.push(c.profissao);
+        if (c.cpf) d.push(`CPF nº ${cpfTxt(c.cpf)}`);
+        if (c.rg) d.push(`RG nº ${c.rg}`);
+        e += ` com ${String(c.nome).toUpperCase()}${d.length ? ` (${d.join(", ")})` : ""}`;
+      }
     }
     partes.push(e);
   }
@@ -124,14 +134,15 @@ export function qualificacao(p: Parte, opts: { comConjuge?: boolean } = {}): str
   if (p.email) partes.push(`endereço eletrônico ${p.email}`);
   partes.push(`residente e ${o_a(p, "domiciliado", "domiciliada")} em ${p.endereco || "____________"}`);
   let s = partes.join(", ");
-  if (opts.comConjuge && p.estado_civil && COM_CONJUGE.has(p.estado_civil) && p.conjuge?.nome) {
+  if (p.estado_civil && COM_CONJUGE.has(p.estado_civil) && p.conjuge?.nome) {
     const c = p.conjuge;
     const cp: string[] = [c.nome!.toUpperCase()];
     if (c.nacionalidade) cp.push(c.nacionalidade);
     if (c.profissao) cp.push(c.profissao);
     if (c.cpf) cp.push(`CPF nº ${cpfTxt(c.cpf)}`);
     if (c.rg) cp.push(`RG nº ${c.rg}`);
-    s += `, e seu cônjuge ${cp.join(", ")}, que comparece na qualidade de anuente`;
+    // fiador: o cônjuge assina como anuente (outorga da fiança)
+    if (opts.comConjuge) s += `, e seu cônjuge ${cp.join(", ")}, que comparece na qualidade de anuente`;
   }
   return s;
 }
