@@ -65,6 +65,16 @@ async function emParalelo<T, R>(lista: T[], n: number, fn: (x: T) => Promise<R>)
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  try {
+    return await gerar(id);
+  } catch (e) {
+    console.error('[diligencia-pdf] erro', e);
+    const msg = e instanceof Error ? e.message : String(e);
+    return erro(`Não consegui gerar o PDF (${msg.slice(0, 200)}).`, 500);
+  }
+}
+
+async function gerar(id: string) {
   if (!UUID_RE.test(id)) return erro('Diligência inválida.');
   if (!(await podeVerDiligencia(id))) return erro('Sem acesso a esta diligência.', 403);
 
