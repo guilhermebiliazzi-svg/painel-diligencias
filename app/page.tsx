@@ -7,6 +7,7 @@ import { exigirPerfil } from '@/lib/perfil';
 import { logoutAction } from './actions';
 import { getNav, type ItemNav, type IconeNav, type Cor } from '@/lib/nav';
 import { AREAS, podeTela, escopoDiligencias, escopoSdr } from '@/lib/acesso';
+import { ehMonitor } from '@/lib/oficinas';
 
 export const metadata = { title: 'Painel interno — REMAX Ville' };
 
@@ -101,12 +102,16 @@ export default async function Home() {
   const perfil = await exigirPerfil();
   const proprias = escopoDiligencias(perfil) === 'proprias';
   const meuFunil = escopoSdr(perfil) === 'proprio';
+  // Oficinas: o monitor vê o card mesmo sem a tela no perfil
+  const monitor = !perfil.is_admin && (await ehMonitor(perfil.email));
   const itens = getNav()
-    .filter((i) => podeTela(perfil, i.tela))
+    .filter((i) => podeTela(perfil, i.tela) || (i.chave === 'oficinas' && monitor))
     // quem vê só o que é seu enxerga o card com o nome certo
     .map((i) =>
       i.chave === 'diligencias' && proprias
         ? { ...i, titulo: 'Minhas diligências', descricao: 'As diligências dos negócios em que você é o corretor.' }
+        : i.chave === 'oficinas' && monitor
+          ? { ...i, titulo: 'Minhas oficinas', descricao: 'Registrar a presença na sua oficina e acessar o material de apoio.' }
         : i.chave === 'sdr' && meuFunil
           ? { ...i, titulo: 'Meu funil', descricao: 'Os leads da Eva oferecidos a você: aceite, contato, visita e proposta.' }
           : i
