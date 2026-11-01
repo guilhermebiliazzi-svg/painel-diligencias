@@ -94,8 +94,8 @@ begin
       (2, 'Suzana%',         3, 'manha'),
       (3, 'Lucas%',          3, 'tarde'),
       (4, 'Guilherme%',      4, 'manha'),
-      (5, 'Silvia Freitas%', null::int, null::text),
-      (5, 'Samia%',          null, null)
+      (5, 'Samia%',          4, 'tarde'),
+      (5, 'Silvia Freitas%', 5, null)
     ) as t(oficina_id, padrao, dia, periodo)
   loop
     select array_agg(id) into v_ids
