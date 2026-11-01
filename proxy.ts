@@ -26,6 +26,8 @@ const REGRAS: Regra[] = [
   { re: /^\/api\/adm(\/|$)/, perm: 'any', legacy: true },
   { re: /^\/usuarios(\/|$)/, perm: 'usuarios', legacy: false },
   { re: /^\/treinamento(\/|$)/, perm: 'treinamento', legacy: false },
+  // a página decide: admin vê todas, monitor só a sua (onb_oficina_monitores)
+  { re: /^\/oficinas(\/|$)/, perm: 'any', legacy: false },
   { re: /^\/sdr(\/|$)/, perm: 'sdr', legacy: false },
   { re: /^\/vitrine(\/|$)/, perm: 'vitrine', legacy: false },
   { re: /^\/captacao(\/|$)/, perm: 'captacao', legacy: false },
