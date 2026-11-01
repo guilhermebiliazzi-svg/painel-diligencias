@@ -90,13 +90,11 @@ begin
     select * from (values
       (1, 'Salete%',         1, 'tarde'),
       (1, 'Andrea%',         2, 'tarde'),
-      (2, 'Rafael Vaz%',     null::int, null::text),
-      (2, 'Suzana%',         null, null),
-      (3, 'Lucas%',          null, null),
-      (3, 'Diogo%',          null, null),
-      (4, 'Samia%',          3, null),
-      (4, 'Guilherme%',      4, null),
-      (5, 'Silvia Freitas%', null, null),
+      (2, 'Rafael Vaz%',     3, 'manha'),
+      (2, 'Suzana%',         3, 'manha'),
+      (3, 'Lucas%',          3, 'tarde'),
+      (4, 'Guilherme%',      4, 'manha'),
+      (5, 'Silvia Freitas%', null::int, null::text),
       (5, 'Samia%',          null, null)
     ) as t(oficina_id, padrao, dia, periodo)
   loop
@@ -106,12 +104,19 @@ begin
     if coalesce(array_length(v_ids, 1), 0) = 1 then
       insert into public.onb_oficina_monitores (oficina_id, corretor_id, dia_semana, periodo)
       values (r.oficina_id, v_ids[1], r.dia, r.periodo)
-      on conflict (oficina_id, corretor_id) do nothing;
+      on conflict (oficina_id, corretor_id) do update
+        set dia_semana = excluded.dia_semana, periodo = excluded.periodo;
     else
       raise notice 'Oficina %: "%" não entrou (% corretores ativos com esse nome)', r.oficina_id, r.padrao, coalesce(array_length(v_ids, 1), 0);
     end if;
   end loop;
 end $$;
+
+-- Grade de nov/2026: V1 só com o Lucas e ACM só com o Guilherme (se já tiverem entrado)
+delete from public.onb_oficina_monitores m
+using public.corretores_associados c
+where c.id = m.corretor_id
+  and ((m.oficina_id = 3 and c.nome ilike 'Diogo%') or (m.oficina_id = 4 and c.nome ilike 'Samia%'));
 
 -- Conferência: monitores cadastrados
 select o.nome as oficina, c.nome as monitor, m.dia_semana, m.periodo
