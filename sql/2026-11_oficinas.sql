@@ -79,6 +79,14 @@ where not exists (
   where m.oficina_id = v.oficina_id and m.titulo = 'Manual do monitor'
 );
 
+-- Material para os participantes do Call Blitz: aula da Monica Silva sobre script telefônico
+insert into public.onb_oficina_materiais (oficina_id, publico, titulo, url, criado_por)
+select 2, 'participante', 'Aula da Monica Silva: script telefônico', 'https://www.youtube.com/watch?v=ZQlyCw8cYmA', 'sistema'
+where not exists (
+  select 1 from public.onb_oficina_materiais
+  where oficina_id = 2 and url = 'https://www.youtube.com/watch?v=ZQlyCw8cYmA'
+);
+
 -- Monitores: só entra quem tem UM corretor ativo com aquele nome. Quem ficar de
 -- fora (nome ambíguo ou não encontrado) aparece na conferência e se acerta na tela.
 do $$
