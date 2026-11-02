@@ -575,7 +575,7 @@ export function montarAdministracao(d: DadosContrato): { blocos: Bloco[]; penden
   if (!d.conta) pend.push("Cadastre a conta de repasse do locador (seção Conta de repasse).");
   const contaTxt = contaTexto(d.conta);
   C("QUARTA",
-    `Pela intermediação da locação será devido ao CONTRATADO o valor equivalente ao primeiro aluguel integral do imóvel e pela administração da locação, será devido ao CONTRATADO o percentual de ${taxa ? percentualComExtenso(taxa) : "__% (__ por cento)"} sobre o valor de cada aluguel mensal.`,
+    `Pela intermediação da locação será devido ao CONTRATADO o valor equivalente ao primeiro aluguel integral do imóvel e pela administração da locação, será devido ao CONTRATADO o percentual de ${taxa ? percentualComExtenso(taxa) : "__% (__ por cento)"} sobre o valor de cada aluguel mensal, não incidindo sobre os valores de IPTU, condomínio e demais encargos locatícios.`,
     `§ PRIMEIRO: O aluguel será cobrado do inquilino e depositados na conta do CONTRATANTE, uma vez deduzida a remuneração estabelecida no “caput”, até o segundo dia útil subsequente ao do seu efetivo recebimento ${contaTxt}.`,
     "§ SEGUNDO: Os valores de IPTU e condomínio poderão ser incluídos discriminados no boleto de cobrança, podendo ser repassados juntamente com o aluguel ou pagos diretamente pela CONTRATADA a critério do CONTRATANTE.");
   C("QUINTA", "Caso a Imobiliária pague qualquer inadimplemento do inquilino, opera-se a cessão parcial dos Direitos do Locador em relação ao pagamento efetuado, inclusive de eventuais multas penais ou moratórias devidas pelo inquilino. Nesses casos, o Locador autoriza a Imobiliária a ceder sua posição contratual ou qualquer de seus direitos e/ou obrigações decorrentes deste Contrato.");
@@ -584,7 +584,7 @@ export function montarAdministracao(d: DadosContrato): { blocos: Bloco[]; penden
   [
     "Verificar o estado do imóvel, antes e após o término da locação, lavrando para isso os necessários termos de vistoria;",
     "Divulgar, pelos meios usuais e a seu critério, a oferta da locação;",
-    "Cobrar os alugueres e respectivos encargos de IPTU e Condomínio nas épocas convencionadas, deles deduzindo os honorários devidos;",
+    "Cobrar os aluguéis e os respectivos encargos de IPTU e condomínio nas épocas convencionadas, deduzindo exclusivamente do valor do aluguel os honorários de administração devidos;",
     "Providenciar nos reparos que se fizerem necessários para a conservação do imóvel na vigência da locação, mediante expressa autorização do CONTRATANTE e à vista de orçamentos elaborados por profissionais competentes;",
     "Notificar e cobrar eventuais inadimplementos do inquilino e prestar todo auxílio caso seja necessário ingressar com ação de cobrança e despejo;",
   ].forEach((t) => B.push({ t: "item", texto: t }));
