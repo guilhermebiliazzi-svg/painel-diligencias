@@ -3,7 +3,7 @@
 // (Jurídico, Comercial, Marketing, Financeiro, Administração).
 
 import Link from 'next/link';
-import { exigirPerfil } from '@/lib/perfil';
+import { exigirPerfil, corretorDaPessoa } from '@/lib/perfil';
 import { logoutAction } from './actions';
 import { getNav, type ItemNav, type IconeNav, type Cor } from '@/lib/nav';
 import { AREAS, podeTela, escopoDiligencias, escopoSdr } from '@/lib/acesso';
@@ -104,8 +104,10 @@ export default async function Home() {
   const meuFunil = escopoSdr(perfil) === 'proprio';
   // Oficinas: o monitor vê o card mesmo sem a tela no perfil
   const monitor = !perfil.is_admin && (await ehMonitor(perfil.email));
+  // Lista de ligações: todo corretor associado tem a sua
+  const corretor = !perfil.is_admin && !!(await corretorDaPessoa(perfil.email));
   const itens = getNav()
-    .filter((i) => podeTela(perfil, i.tela) || (i.chave === 'oficinas' && monitor))
+    .filter((i) => podeTela(perfil, i.tela) || (i.chave === 'oficinas' && monitor) || (i.chave === 'ligacoes' && corretor))
     // quem vê só o que é seu enxerga o card com o nome certo
     .map((i) =>
       i.chave === 'diligencias' && proprias
