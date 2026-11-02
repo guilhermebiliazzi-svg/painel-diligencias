@@ -587,7 +587,7 @@ export function montarAdministracao(d: DadosContrato): { blocos: Bloco[]; penden
     "Verificar o estado do imóvel, antes e após o término da locação, lavrando para isso os necessários termos de vistoria;",
     "Divulgar, pelos meios usuais e a seu critério, a oferta da locação;",
     "Cobrar os aluguéis e os respectivos encargos de IPTU e condomínio nas épocas convencionadas, deduzindo exclusivamente do valor do aluguel os honorários de administração devidos;",
-    "Providenciar nos reparos que se fizerem necessários para a conservação do imóvel na vigência da locação, mediante expressa autorização do CONTRATANTE e à vista de orçamentos elaborados por profissionais competentes;",
+    "Providenciar os reparos que se fizerem necessários para a conservação do imóvel na vigência da locação, mediante expressa autorização do CONTRATANTE e à vista de orçamentos elaborados por profissionais competentes;",
     "Notificar e cobrar eventuais inadimplementos do inquilino e prestar todo auxílio caso seja necessário ingressar com ação de cobrança e despejo;",
   ].forEach((t) => B.push({ t: "item", texto: t }));
   B.push({ t: "clausula", texto: "SÉTIMA:" });
