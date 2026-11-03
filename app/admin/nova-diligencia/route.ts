@@ -43,7 +43,8 @@ function pagina(status: number, titulo: string, texto: string) {
 }
 
 // Perfil Corretor (alcance "proprias"):
-//  - esconde o "Editar diligência existente" (a busca do n8n lista todas);
+//  - esconde o "Editar diligência existente" (a busca do n8n lista todas) — editar
+//    só pelo botão da própria diligência (?editar=<id>), que confere o acesso;
 //  - depois de enviar, avisa o painel para marcar a diligência como dele
 //    (/api/adm/diligencia-criada), com novas tentativas enquanto o WF-01 grava.
 const SCRIPT_CORRETOR = `<script>(function(){
@@ -55,7 +56,7 @@ function marcar(end,i){fetch('/api/adm/diligencia-criada',{method:'POST',headers
 .catch(function(){if(i<ESPERAS.length)setTimeout(function(){marcar(end,i+1);},ESPERAS[i]);});}
 var orig=window.fetch;
 window.fetch=function(u,o){var p=orig.apply(this,arguments);
-try{var url=String(u&&u.url?u.url:u);if(/\\/nova-diligencia-submit(\\?|$)/.test(url)&&o&&typeof o.body==='string'){var b={};try{b=JSON.parse(o.body);}catch(e){}
+try{var url=String(u&&u.url?u.url:u);if(!window.__EDIT_ID&&/\\/nova-diligencia-submit(\\?|$)/.test(url)&&o&&typeof o.body==='string'){var b={};try{b=JSON.parse(o.body);}catch(e){}
 p.then(function(r){if(r&&r.ok&&b.endereco)setTimeout(function(){marcar(b.endereco,0);},1500);}).catch(function(){});}}catch(e){}
 return p;};
 })();</script>`;
@@ -69,6 +70,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 function scriptEditar(id: string) {
   return `<script>(function(){
 var ID=${JSON.stringify(id)};
+window.__EDIT_ID=ID; // edição: não marca o corretor como criador
 function iniciar(){
   try{var h=document.querySelector('.card h1');if(h)h.textContent='Editar diligência';
   var sub=document.querySelector('.card .subtitle');if(sub)sub.textContent='RE/MAX Ville — confira e ajuste os dados do imóvel e dos vendedores';
@@ -83,7 +85,8 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 export async function GET(req: Request) {
   const acesso = await acessoDiligencias();
   const editar = new URL(req.url).searchParams.get('editar') || '';
-  const editId = UUID_RE.test(editar) && acesso?.todas && (await podeVerDiligencia(editar)) ? editar : '';
+  // Editar: quem gerencia todas OU o corretor ligado a esta diligência.
+  const editId = UUID_RE.test(editar) && acesso && (await podeVerDiligencia(editar)) ? editar : '';
   let html: string;
   try {
     const r = await fetch(`${N8N}/nova-diligencia`, { cache: 'no-store', signal: AbortSignal.timeout(20000) });
