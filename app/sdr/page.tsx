@@ -888,6 +888,10 @@ export default async function FunilSdr({ searchParams }: { searchParams: Promise
             <FunilSelect funis={FUNIS.map((x) => ({ k: x.k, rotulo: x.rotulo }))} atual={funil} periodo={periodo} />
             <Link href="/sdr/parceiros" className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Corretores de fora</Link>
             <VerComoCorretor corretores={corretores.map((x) => ({ id: x.id, nome: x.nome.split(' - ')[0] }))} base={`/sdr?d=${periodo}&f=${funil}&c=`} />
+            <form action="/sdr/busca" method="get" className="flex min-w-0 flex-1 gap-2 sm:max-w-xs">
+              <input name="q" placeholder="Buscar cliente (nome ou telefone)" className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm focus:border-slate-500 focus:outline-none" />
+              <button className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">Buscar</button>
+            </form>
           </div>
         </div>
 
