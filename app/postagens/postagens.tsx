@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
-import { gerarPostagem, aprovarPrevia, aprovarEPostar, rejeitarPostagem, salvarInstagram, gerarPrevia, tentarDeNovo } from './actions';
+import { gerarPostagem, aprovarPrevia, aprovarEPostar, rejeitarPostagem, salvarInstagram, gerarPrevia, tentarDeNovo, cadastrarExterno, urlFotoExterno, registrarFotoExterno, removerFotoExterno } from './actions';
 
 export type Corretor = {
   id: number;
@@ -29,6 +29,8 @@ export type ImovelNS = {
   area: number | null;
   vagas: number | null;
   fotos: string[];
+  externo: boolean;       // cadastrado pelo link (fora do NonStop), fotos enviadas pelo painel
+  link: string | null;    // link do anúncio original
 };
 
 export type Pedido = {
@@ -71,6 +73,25 @@ const STATUS: Record<string, string> = {
 const TRAVA_MS = 10 * 60000;
 const EM_GERACAO = ['novo', 'gerando', 'gerando_previa'];
 
+// Reduz a foto no navegador antes de subir (o carrossel não precisa de mais que 1600 px,
+// e foto de celular de 8–12 MB pesaria no gerador). Sempre devolve JPEG.
+async function reduzirFoto(file: File): Promise<Blob> {
+  const bmp = await createImageBitmap(file);
+  const escala = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+  const w = Math.round(bmp.width * escala), h = Math.round(bmp.height * escala);
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Navegador sem suporte a imagem.');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(bmp, 0, 0, w, h);
+  bmp.close();
+  const blob = await new Promise<Blob | null>((ok) => canvas.toBlob(ok, 'image/jpeg', 0.86));
+  if (!blob) throw new Error('Não consegui converter a foto.');
+  return blob;
+}
+
 const fmtPreco = (v: number | null) => (v ? 'R$ ' + Number(v).toLocaleString('pt-BR') : 'Sem preço');
 const fmtData = (s: string) => new Date(s).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
@@ -100,6 +121,9 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
   const [fotos, setFotos] = useState<string[]>([]);
   const [msg, setMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null);
   const [pendente, start] = useTransition();
+  const [linkExterno, setLinkExterno] = useState('');
+  const [lendoLink, setLendoLink] = useState(false);
+  const [enviando, setEnviando] = useState<{ feitas: number; total: number } | null>(null);
 
   const proprio = !!corretor?.email && corretor.email.toLowerCase() === meuEmail.toLowerCase();
   const perfilIncompleto = corretor ? !corretor.foto_url || !corretor.creci : false;
@@ -163,6 +187,60 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
         : 'Pedido enviado! Em cerca de 1 minuto os textos aparecem aqui embaixo para revisar; a prévia vai direto para o admin (pula o corretor).' });
       setAberto(null);
       setFotos([]);
+      router.refresh();
+    });
+  };
+
+  // Imóvel externo: lê o anúncio pelo link e abre o card para enviar as fotos.
+  const lerLink = async () => {
+    if (!corretor || !linkExterno.trim()) return;
+    setMsg(null);
+    setLendoLink(true);
+    try {
+      const r = await cadastrarExterno(corretor.id, linkExterno.trim());
+      if (!r.ok || !r.id) { setMsg({ tipo: 'erro', texto: r.erro || 'Não consegui ler o anúncio.' }); return; }
+      setLinkExterno('');
+      setAberto(r.id);
+      setFotos([]);
+      setMsg({ tipo: 'ok', texto: 'Anúncio lido! O imóvel está no topo da lista — agora envie as fotos.' });
+      router.refresh();
+    } finally {
+      setLendoLink(false);
+    }
+  };
+
+  const enviarFotos = async (im: ImovelNS, arquivos: FileList | null) => {
+    if (!corretor || !arquivos || !arquivos.length) return;
+    const lista = Array.from(arquivos).slice(0, 15);
+    setMsg(null);
+    setEnviando({ feitas: 0, total: lista.length });
+    let falhas = 0;
+    for (const f of lista) {
+      try {
+        const corpo = await reduzirFoto(f);
+        const u = await urlFotoExterno(corretor.id, im.listing_id);
+        if (!u.ok || !u.signedUrl || !u.path) throw new Error(u.erro || 'Falha ao preparar o envio.');
+        const r = await fetch(u.signedUrl, { method: 'PUT', headers: { 'Content-Type': 'image/jpeg' }, body: corpo });
+        if (!r.ok) throw new Error(`Falha no envio (HTTP ${r.status}).`);
+        const reg = await registrarFotoExterno(corretor.id, im.listing_id, u.path);
+        if (!reg.ok) throw new Error(reg.erro || 'Falha ao salvar a foto.');
+      } catch (e) {
+        falhas++;
+        setMsg({ tipo: 'erro', texto: `Uma foto não subiu (${f.name}): ${e instanceof Error ? e.message : 'erro'}. Se for HEIC do iPhone, envie em JPG.` });
+      }
+      setEnviando((x) => (x ? { ...x, feitas: x.feitas + 1 } : x));
+    }
+    setEnviando(null);
+    if (!falhas) setMsg({ tipo: 'ok', texto: `${lista.length} foto${lista.length > 1 ? 's enviadas' : ' enviada'}. Marque de ${MIN} a ${MAX} na ordem dos slides.` });
+    router.refresh();
+  };
+
+  const tirarFoto = (im: ImovelNS, url: string) => {
+    if (!corretor) return;
+    setFotos((a) => a.filter((u) => u !== url));
+    start(async () => {
+      const r = await removerFotoExterno(corretor.id, im.listing_id, url);
+      if (!r.ok) setMsg({ tipo: 'erro', texto: r.erro || 'Não consegui remover.' });
       router.refresh();
     });
   };
@@ -245,6 +323,27 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
             </div>
           )}
 
+          <section style={{ backgroundColor: '#ffffff' }} className="rounded-2xl border-2 border-dashed border-violet-300 p-4 shadow-sm">
+            <h2 className="text-sm font-semibold text-slate-900">Imóvel de fora do NonStop</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Cole o link do anúncio (ZAP, VivaReal, Proprietário Direto, QuintoAndar…). A Eva lê os dados da página e o imóvel entra na lista abaixo, com o selo <strong>Externo</strong>. Depois é só enviar as fotos.
+            </p>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <input
+                value={linkExterno}
+                onChange={(e) => setLinkExterno(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') lerLink(); }}
+                placeholder="https://www.zapimoveis.com.br/imovel/..."
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+              />
+              <button type="button" onClick={lerLink} disabled={lendoLink || !linkExterno.trim()}
+                className="shrink-0 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50">
+                {lendoLink ? 'Lendo o anúncio…' : 'Ler anúncio'}
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">Leva uns 20 segundos. Se o link já foi cadastrado antes (por aqui ou pela Eva no WhatsApp), aproveita o mesmo imóvel.</p>
+          </section>
+
           <section className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-base font-semibold text-slate-900">
@@ -270,18 +369,19 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
                 <div key={im.listing_id} style={{ backgroundColor: '#ffffff' }} className={`rounded-2xl border shadow-sm ${estaAberto ? 'border-violet-300' : 'border-slate-200'}`}>
                   <button type="button" onClick={() => abrir(im.listing_id)} className="flex w-full gap-4 p-4 text-left">
                     <div className="size-20 shrink-0 overflow-hidden rounded-xl bg-slate-100">
-                      {im.fotos[0] && <img src={im.fotos[0]} alt="" className="size-full object-cover" loading="lazy" />}
+                      {im.fotos[0] ? <img src={im.fotos[0]} alt="" className="size-full object-cover" loading="lazy" /> : <span className="flex size-full items-center justify-center text-2xl">🏠</span>}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600">REF {im.listing_id}</span>
+                        {im.externo && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">Externo</span>}
                         {emAndamento.has(im.listing_id) && <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-700">carrossel em andamento</span>}
                       </div>
                       <p className="mt-1 truncate font-semibold text-slate-900">{im.endereco || im.titulo || 'Sem endereço'}</p>
                       <p className="text-sm text-slate-600">
                         {[im.tipo, im.bairro, im.quartos ? im.quartos + ' dorm' + (im.quartos > 1 ? 's' : '') : '', im.area ? im.area + ' m²' : '', im.vagas ? im.vagas + ' vaga' + (im.vagas > 1 ? 's' : '') : ''].filter(Boolean).join(' · ')}
                       </p>
-                      <p className="text-sm font-medium text-slate-800">{fmtPreco(im.preco)} <span className="font-normal text-slate-400">· {im.fotos.length} fotos</span></p>
+                      <p className="text-sm font-medium text-slate-800">{fmtPreco(im.preco)} <span className="font-normal text-slate-400">· {im.fotos.length} foto{im.fotos.length === 1 ? '' : 's'}{im.externo ? (im.fotos.length === 1 ? ' enviada' : ' enviadas') : ''}</span></p>
                     </div>
                   </button>
 
@@ -289,7 +389,7 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
                     <div className="border-t border-slate-100 p-4">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-sm text-slate-700">
-                          Marque de {MIN} a {MAX} fotos na ordem que preferir. <span className="font-semibold">{fotos.length}/{MAX}</span>
+                          {im.externo && im.fotos.length < MIN ? `Envie pelo menos ${MIN} fotos do imóvel e marque na ordem dos slides.` : `Marque de ${MIN} a ${MAX} fotos na ordem que preferir.`} <span className="font-semibold">{fotos.length}/{MAX}</span>
                           {semHandle && <span className="ml-2 text-amber-700">Preencha o @ do Instagram acima para liberar.</span>}
                         </p>
                         <button
@@ -301,7 +401,21 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
                           {pendente ? 'Enviando…' : 'Gerar carrossel'}
                         </button>
                       </div>
+                      {im.externo && im.link && (
+                        <p className="mt-1 text-xs text-slate-500">
+                          Anúncio original: <a href={im.link} target="_blank" rel="noopener noreferrer" className="text-violet-700 underline">abrir</a>
+                        </p>
+                      )}
                       <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
+                        {im.externo && (
+                          <label className={`flex aspect-square cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 p-2 text-center text-xs text-slate-500 hover:bg-slate-50 ${enviando ? 'pointer-events-none opacity-60' : ''}`}>
+                            <span className="text-2xl leading-none">＋</span>
+                            {enviando ? `Enviando ${enviando.feitas}/${enviando.total}…` : 'Enviar fotos'}
+                            <span className="mt-0.5 text-[10px] text-slate-400">do computador ou celular</span>
+                            <input type="file" accept="image/*" multiple className="hidden" disabled={!!enviando}
+                              onChange={(e) => { const fs = e.target.files; enviarFotos(im, fs); e.target.value = ''; }} />
+                          </label>
+                        )}
                         {im.fotos.map((url) => {
                           const idx = fotos.indexOf(url);
                           const marcada = idx >= 0;
@@ -318,6 +432,14 @@ export default function Postagens({ isAdmin, meuEmail, corretores, corretor, imo
                               {marcada && (
                                 <span className="absolute left-1.5 top-1.5 flex size-6 items-center justify-center rounded-full bg-violet-600 text-xs font-bold text-white shadow">
                                   {idx + 1}
+                                </span>
+                              )}
+                              {im.externo && (
+                                <span role="button" tabIndex={0} title="Tirar esta foto do imóvel"
+                                  onClick={(e) => { e.stopPropagation(); tirarFoto(im, url); }}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); tirarFoto(im, url); } }}
+                                  className="absolute right-1 top-1 rounded bg-white/90 px-1 text-[10px] font-medium text-red-600 shadow hover:bg-white">
+                                  remover
                                 </span>
                               )}
                             </button>
