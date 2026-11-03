@@ -753,8 +753,9 @@ export default async function AdminDiligenciaPage({
           {/* Barra de ações: botões do mesmo tamanho, agrupados por assunto */}
           <div className="mt-5 flex flex-wrap items-start gap-x-8 gap-y-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
             <GrupoAcoes titulo="Diligência">
-              {gerir && (
-                // rota (route.ts), não página: <a> em vez de <Link>
+              {(
+                // rota (route.ts), não página: <a> em vez de <Link>.
+                // Liberado também para o corretor ligado à diligência (só chega aqui quem pode ver).
                 <a
                   href={`/admin/nova-diligencia?editar=${id}`}
                   className={btn('neutro')}
