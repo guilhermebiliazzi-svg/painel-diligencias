@@ -83,7 +83,7 @@ export async function gerarPostagem(corretorId: number, listingId: string, fotos
   const sb = supabaseAdmin();
   const { data: xml } = await sb.from('xml_cache').select('dados_jsonb').eq('listing_id', lid).maybeSingle();
   const dados = (xml as { dados_jsonb?: { corretor_email?: string; fotos?: { url?: string }[] } } | null)?.dados_jsonb;
-  if (!dados) return { ok: false, erro: 'Imóvel não encontrado no cache do NonStop.' };
+  if (!dados) return { ok: false, erro: 'Imóvel não encontrado no cache.' };
   if (String(dados.corretor_email || '').toLowerCase() !== String(cor.email || '').toLowerCase()) {
     return { ok: false, erro: 'Este imóvel não está no nome deste corretor.' };
   }
@@ -127,6 +127,114 @@ export async function gerarPostagem(corretorId: number, listingId: string, fotos
     return { ok: false, erro: falha };
   }
   return { ok: true, id: pedido.id as string };
+}
+
+// ─── Imóvel externo (fora do NonStop) ────────────────────────────────────────
+// O corretor cola o link do anúncio; o n8n lê a página (Cadastrar_Imovel_Externo, o
+// mesmo da Eva no WhatsApp) e grava em xml_cache como ext-link-XXXX. O painel marca o
+// corretor (dados_jsonb.corretor_email) e as fotos enviadas pelo navegador
+// (dados_jsonb.fotos), e daí em diante o carrossel segue o mesmo fluxo dos imóveis do NonStop.
+const WEBHOOK_EXTERNO = 'https://villejds.app.n8n.cloud/webhook/painel-imovel-externo';
+const BUCKET_FOTOS = 'criativos-imoveis';
+const MAX_FOTOS_EXTERNO = 30;
+type DadosExterno = Record<string, unknown> & { corretor_email?: string; fotos?: { url?: string }[] };
+
+async function externoDoCorretor(corretorId: number, listingId: string) {
+  const { eu, cor, erro } = await corretorPermitido(Number(corretorId));
+  if (erro || !cor) return { erro: erro ?? 'Sem permissão.' } as const;
+  const lid = String(listingId || '').trim();
+  if (!/^ext-[A-Za-z0-9-]{3,40}$/.test(lid)) return { erro: 'Imóvel externo inválido.' } as const;
+  const { data } = await supabaseAdmin().from('xml_cache').select('dados_jsonb,fonte').eq('listing_id', lid).maybeSingle();
+  const row = data as { dados_jsonb: DadosExterno | null; fonte: string } | null;
+  if (!row || row.fonte !== 'link_externo') return { erro: 'Imóvel externo não encontrado.' } as const;
+  const dados = row.dados_jsonb || {};
+  if (String(dados.corretor_email || '').toLowerCase() !== String(cor.email || '').toLowerCase()) {
+    return { erro: 'Este imóvel não está no nome deste corretor.' } as const;
+  }
+  return { eu, cor, lid, dados, erro: null } as const;
+}
+
+// Lê o anúncio pelo link e vincula o imóvel ao corretor.
+export async function cadastrarExterno(corretorId: number, link: string): Promise<Resultado> {
+  const { eu, cor, erro } = await corretorPermitido(Number(corretorId));
+  if (erro || !cor) return { ok: false, erro: erro ?? 'Sem permissão.' };
+  if (!cor.email) return { ok: false, erro: 'Este corretor está sem e-mail no cadastro.' };
+  const url = String(link || '').trim();
+  if (!/^https?:\/\/\S+$/i.test(url) || url.length > 600) return { ok: false, erro: 'Cole o link completo do anúncio (começando com https://).' };
+  if (/remax\.com\.br|usenonstop\.com/i.test(url)) return { ok: false, erro: 'Imóvel da REMAX/NonStop já aparece na lista abaixo — não precisa cadastrar pelo link.' };
+
+  const sb = supabaseAdmin();
+  const { data: sec } = await sb.from('credenciais_sistema').select('valor').eq('chave', 'painel_upload_secret').maybeSingle();
+  const segredo = (sec as { valor?: string } | null)?.valor;
+  if (!segredo) return { ok: false, erro: 'Integração não configurada (segredo ausente).' };
+
+  let out: { ok?: boolean; erro?: string; listing_id?: string } = {};
+  try {
+    const r = await fetch(WEBHOOK_EXTERNO, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-painel-secret': segredo },
+      body: JSON.stringify({ link_url: url, phone: cor.phone || '' }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(110_000),
+    });
+    out = await r.json().catch(() => ({}));
+    if (!r.ok && !out.erro) out.erro = `O leitor de anúncios não respondeu (${r.status}).`;
+  } catch {
+    return { ok: false, erro: 'O leitor de anúncios demorou demais. Tente de novo em instantes.' };
+  }
+  if (!out.ok || !out.listing_id) return { ok: false, erro: out.erro || 'Não consegui ler o anúncio desse link.' };
+
+  const lid = String(out.listing_id);
+  const { data } = await sb.from('xml_cache').select('dados_jsonb').eq('listing_id', lid).maybeSingle();
+  const dados = ((data as { dados_jsonb?: DadosExterno } | null)?.dados_jsonb) || {};
+  const dono = String(dados.corretor_email || '').toLowerCase();
+  if (dono && dono !== cor.email.toLowerCase() && !eu.is_admin) {
+    return { ok: false, erro: 'Este anúncio já foi cadastrado para outro corretor. Fale com o administrador.' };
+  }
+  if (dono !== cor.email.toLowerCase()) {
+    const { error } = await sb.from('xml_cache').update({ dados_jsonb: { ...dados, corretor_email: cor.email } }).eq('listing_id', lid);
+    if (error) return { ok: false, erro: 'Li o anúncio, mas não consegui vincular ao corretor: ' + error.message };
+  }
+  return { ok: true, id: lid };
+}
+
+// URL assinada para o navegador subir uma foto do imóvel externo direto no Storage.
+export async function urlFotoExterno(corretorId: number, listingId: string): Promise<{ ok: boolean; erro?: string; signedUrl?: string; path?: string }> {
+  const x = await externoDoCorretor(corretorId, listingId);
+  if (x.erro !== null) return { ok: false, erro: x.erro };
+  if ((x.dados.fotos || []).length >= MAX_FOTOS_EXTERNO) return { ok: false, erro: `Limite de ${MAX_FOTOS_EXTERNO} fotos por imóvel.` };
+  const path = `externos/${x.lid}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const { data, error } = await supabaseAdmin().storage.from(BUCKET_FOTOS).createSignedUploadUrl(path);
+  if (error || !data) return { ok: false, erro: 'Não consegui preparar o envio da foto.' };
+  return { ok: true, signedUrl: data.signedUrl, path: data.path };
+}
+
+// Depois do upload: acrescenta a foto à lista do imóvel.
+export async function registrarFotoExterno(corretorId: number, listingId: string, path: string): Promise<Resultado> {
+  const x = await externoDoCorretor(corretorId, listingId);
+  if (x.erro !== null) return { ok: false, erro: x.erro };
+  const p = String(path || '');
+  if (!p.startsWith(`externos/${x.lid}/`) || p.includes('..')) return { ok: false, erro: 'Foto inválida.' };
+  const sb = supabaseAdmin();
+  const url = sb.storage.from(BUCKET_FOTOS).getPublicUrl(p).data.publicUrl;
+  // relê para não perder fotos de envios em paralelo
+  const { data } = await sb.from('xml_cache').select('dados_jsonb').eq('listing_id', x.lid).maybeSingle();
+  const dados = ((data as { dados_jsonb?: DadosExterno } | null)?.dados_jsonb) || {};
+  const fotos = (dados.fotos || []).filter((f) => f && f.url);
+  if (!fotos.some((f) => f.url === url)) fotos.push({ url });
+  const { error } = await sb.from('xml_cache').update({ dados_jsonb: { ...dados, fotos } }).eq('listing_id', x.lid);
+  if (error) return { ok: false, erro: 'Não consegui salvar a foto: ' + error.message };
+  return { ok: true };
+}
+
+// Tira a foto da lista do imóvel (o arquivo fica no Storage).
+export async function removerFotoExterno(corretorId: number, listingId: string, url: string): Promise<Resultado> {
+  const x = await externoDoCorretor(corretorId, listingId);
+  if (x.erro !== null) return { ok: false, erro: x.erro };
+  const fotos = (x.dados.fotos || []).filter((f) => f && f.url && f.url !== url);
+  const { error } = await supabaseAdmin().from('xml_cache').update({ dados_jsonb: { ...x.dados, fotos } }).eq('listing_id', x.lid);
+  if (error) return { ok: false, erro: 'Não consegui remover: ' + error.message };
+  return { ok: true };
 }
 
 type PedidoRow = { id: string; corretor_id: number; criativo_id: number | null; status: string; atualizado_em: string | null; criado_em: string };
