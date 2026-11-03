@@ -96,14 +96,15 @@ declare
 begin
   for r in
     select * from (values
-      (1, 'Salete%',         1, 'tarde'),
-      (1, 'Andrea%',         2, 'tarde'),
-      (2, 'Rafael Vaz%',     3, 'manha'),
-      (2, 'Suzana%',         3, 'manha'),
-      (3, 'Lucas%',          3, 'tarde'),
-      (4, 'Guilherme%',      4, 'manha'),
-      (5, 'Samia%',          4, 'tarde'),
-      (5, 'Silvia Freitas%', 5, null)
+      -- dia e período de cada monitor se definem na tela /oficinas
+      (1, 'Salete%',         null::int, null::text),
+      (1, 'Andrea%',         null, null),
+      (2, 'Rafael Vaz%',     null, null),
+      (2, 'Suzana%',         null, null),
+      (3, 'Lucas%',          null, null),
+      (4, 'Guilherme%',      null, null),
+      (5, 'Samia%',          null, null),
+      (5, 'Silvia Freitas%', null, null)
     ) as t(oficina_id, padrao, dia, periodo)
   loop
     select array_agg(id) into v_ids
