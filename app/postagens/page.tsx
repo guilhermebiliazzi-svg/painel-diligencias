@@ -23,6 +23,7 @@ type Dados = {
   living_area?: string | number;
   garage?: string | number;
   fotos?: { url?: string; primary?: boolean }[];
+  source_url?: string;
 };
 
 const limpa = (s: unknown) => String(s ?? '').replace(/<!\[CDATA\[|\]\]>/g, '').trim();
@@ -98,8 +99,39 @@ async function carregar(email: string, isAdmin: boolean, corretorParam: string |
         area: num(d.living_area),
         vagas: num(d.garage),
         fotos,
+        externo: false,
+        link: null,
       };
     });
+
+    // Imóveis de fora do NonStop cadastrados pelo link (ext-link-XXXX), com as fotos
+    // enviadas pelo painel. Vêm primeiro na lista.
+    const { data: ext } = await sb
+      .from('xml_cache')
+      .select('listing_id,dados_jsonb,updated_at')
+      .eq('fonte', 'link_externo')
+      .ilike('dados_jsonb->>corretor_email', corretor.email)
+      .order('updated_at', { ascending: false })
+      .limit(50);
+    const externos: ImovelNS[] = ((ext ?? []) as { listing_id: string; dados_jsonb: Dados }[]).map((r) => {
+      const d = r.dados_jsonb || {};
+      return {
+        listing_id: r.listing_id,
+        titulo: limpa(d.title),
+        tipo: tipoPt(d.property_type),
+        endereco: [limpa(d.address), limpa(d.street_number)].filter(Boolean).join(', '),
+        bairro: limpa(d.neighborhood),
+        preco: num(d.list_price),
+        quartos: num(d.bedrooms),
+        suites: num(d.suites),
+        area: num(d.living_area),
+        vagas: num(d.garage),
+        fotos: (d.fotos || []).map((f) => String(f.url || '')).filter((u) => /^https?:\/\//.test(u)),
+        externo: true,
+        link: /^https?:\/\//.test(String(d.source_url || '')) ? String(d.source_url) : null,
+      };
+    });
+    imoveis = [...externos, ...imoveis];
 
     const { data: ped } = await sb
       .from('postagem_pedidos')
