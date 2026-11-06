@@ -5,11 +5,7 @@
 
 update public.onb_trilha
 set conteudo_ref = 'antigo:' || conteudo_ref, ativo = false
-where conteudo_ref like 'oficina:%'
-  and coalesce(descricao, '') not like 'Sexta à tarde ou segunda de manhã.%'
-  and coalesce(descricao, '') not like 'Terça à tarde.%'
-  and coalesce(descricao, '') not like 'Quarta %'
-  and coalesce(descricao, '') not like 'Quinta à tarde.%';
+where conteudo_ref like 'oficina:%' and not ativo;
 
 insert into public.onb_trilha (dia, ordem, tipo, titulo, descricao, conteudo_ref, comprovacao, obrigatoria, ativo)
 select v.dia, v.ordem, 'pratica', v.titulo, v.descricao, v.ref, null, false, true
