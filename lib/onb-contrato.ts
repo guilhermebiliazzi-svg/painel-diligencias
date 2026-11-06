@@ -100,10 +100,10 @@ export async function enviarContrato(c: ContratoNovato, phoneCorretor: string, p
   return { ok: true, pedido: String(r.pedido_id) };
 }
 
-export function textoAvisoContrato(nome: string, empresa: Empresa): string {
+export function textoAvisoContrato(nome: string): string {
   return [
     `Olá, ${nome.split(' ')[0]}! Bem-vindo(a) à REMAX Ville! Sou o Max, seu assistente de treinamento, e vou te acompanhar nos seus 30 primeiros dias.`,
-    `Primeiro passo: em instantes chega no seu WhatsApp, pela Clicksign (outro número), o seu contrato de associação com a ${nomeEmpresa(empresa)} para assinar.`,
+    `Primeiro passo: em instantes chega no seu WhatsApp, pela Clicksign (outro número), o seu contrato de associação para assinar.`,
     'Assim que você assinar, eu te mando a Cartilha do Corretor e o seu acesso ao hub.',
   ].join('\n\n');
 }
