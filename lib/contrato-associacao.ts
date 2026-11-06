@@ -139,7 +139,7 @@ export function mesclarHub(atual: DadosAssociado, h: DadosHub): DadosAssociado {
 }
 
 export const OBRIGATORIOS: [keyof DadosAssociado, string][] = [
-  ['nome', 'nome'], ['nacionalidade', 'nacionalidade'], ['estado_civil', 'estado civil'], ['creci', 'CRECI'],
+  ['nome', 'nome'], ['nacionalidade', 'nacionalidade'], ['estado_civil', 'estado civil'],
   ['rg', 'RG'], ['cpf', 'CPF'], ['endereco', 'endereço'], ['numero', 'número'], ['bairro', 'bairro'],
   ['cidade', 'cidade'], ['estado', 'estado'],
 ];
@@ -166,7 +166,8 @@ export function camposContrato(c: ContratoNovato, p: Parte, ts: Testemunha[], ho
     imob_bairro: p.bairro, imob_municipio: p.municipio, imob_estado: p.estado, imob_creci_uf: p.creci_uf,
     imob_creci: p.creci, imob_cnpj: p.cnpj,
     assoc_nome: up(d.nome), assoc_nacionalidade: up(d.nacionalidade), assoc_estado_civil: up(d.estado_civil),
-    assoc_creci_uf: uf(d.creci_uf), assoc_creci: up(d.creci), assoc_rg: up(d.rg), assoc_rg_orgao: up(d.rg_orgao),
+    // estagiário ainda sem CRECI: os dois campos ficam em branco
+    assoc_creci_uf: up(d.creci) ? uf(d.creci_uf) : '', assoc_creci: up(d.creci), assoc_rg: up(d.rg), assoc_rg_orgao: up(d.rg_orgao),
     assoc_rg_uf: uf(d.rg_uf), assoc_cpf: fmtCpf(d.cpf), assoc_endereco: up(d.endereco), assoc_numero: up(d.numero),
     assoc_complemento: up(d.complemento), assoc_bairro: up(d.bairro), assoc_municipio: up(d.cidade), assoc_estado: uf(d.estado),
     mensalidade: f.mensal, mensalidade_extenso: f.mensalExt,
