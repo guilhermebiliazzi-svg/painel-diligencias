@@ -94,7 +94,7 @@ export async function cadastrarNovatos(lista: NovoNovato[], dataInicio: string, 
     };
     if (comContrato) {
       Object.assign(linha, {
-        contrato_empresa: it.contrato!.empresa, contrato_status: 'enviando', contrato_pedido_id: null, contrato_envelope_id: null,
+        contrato_empresa: it.contrato!.empresa, contrato_dados: it.contrato, contrato_status: 'enviando', contrato_pedido_id: null, contrato_envelope_id: null,
         contrato_erro: null, contrato_enviado_em: new Date().toISOString(), contrato_assinado_em: null, boas_vindas_em: null,
       });
     }
@@ -139,6 +139,32 @@ export async function cadastrarNovatos(lista: NovoNovato[], dataInicio: string, 
   res.ok = res.falhas.length === 0;
   revalidatePath('/treinamento');
   return res;
+}
+
+// Botão "Reenviar contrato" no card do novato: gera o PDF de novo com os dados guardados
+// no cadastro (onb_novatos.contrato_dados) e manda outra vez pela Clicksign. Só para
+// contrato com erro no envio ou cancelado, para não criar dois pedidos de assinatura.
+export async function reenviarContrato(novatoId: string): Promise<{ ok: boolean; erro?: string }> {
+  await exigirTela('treinamento');
+  if (!/^[0-9a-f-]{36}$/i.test(String(novatoId))) return { ok: false, erro: 'Novato inválido.' };
+  const sb = supabaseAdmin();
+  const { data, error } = await sb.from('onb_novatos').select('id,nome,phone,contrato_status,contrato_dados,boas_vindas_em').eq('id', novatoId).maybeSingle();
+  if (error || !data) return { ok: false, erro: error?.message || 'Novato não encontrado.' };
+  const n = data as { id: string; nome: string; phone: string; contrato_status: string | null; contrato_dados: ContratoNovato | null; boas_vindas_em: string | null };
+  if (!['erro', 'cancelado'].includes(String(n.contrato_status))) return { ok: false, erro: 'O contrato não está com erro nem cancelado; não há o que reenviar.' };
+  if (!n.contrato_dados) return { ok: false, erro: 'Os dados do contrato não foram guardados no cadastro. Cadastre o novato de novo pelo painel.' };
+  const v = validarContrato(n.contrato_dados);
+  if (v) return { ok: false, erro: v };
+  await sb.from('onb_novatos').update({ contrato_status: 'enviando', contrato_erro: null, contrato_pedido_id: null, contrato_envelope_id: null, contrato_enviado_em: new Date().toISOString() }).eq('id', n.id);
+  const env = await enviarContrato(n.contrato_dados, n.phone).catch((e: Error) => ({ ok: false as const, erro: e.message, pedido: undefined }));
+  if (!env.ok) {
+    await sb.from('onb_novatos').update({ contrato_status: 'erro', contrato_erro: env.erro }).eq('id', n.id);
+    revalidatePath('/treinamento');
+    return { ok: false, erro: env.erro };
+  }
+  await sb.from('onb_novatos').update({ contrato_pedido_id: env.pedido }).eq('id', n.id);
+  revalidatePath('/treinamento');
+  return { ok: true };
 }
 
 // Botão "Conferir assinaturas" e reenvio manual.
