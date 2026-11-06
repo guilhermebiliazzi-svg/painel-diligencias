@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { cadastrarNovatos, previaContrato, type ResultadoCadastro } from '../actions';
 import {
-  EMPRESAS, FAIXAS, FAIXA_ROTULO, VAZIO, faltando, fmtCpf, lerHub, mesclarHub,
+  EMPRESAS, FAIXA_ROTULO, VAZIO, faixasDe, faltando, fmtCpf, lerHub, mesclarHub,
   type DadosAssociado, type Empresa, type Faixa,
 } from '@/lib/contrato-associacao';
 
@@ -234,13 +234,13 @@ export default function Cadastro({
                     <div className="mt-3 border-t border-slate-100 pt-3">
                       <div className="flex flex-wrap items-end gap-3">
                         <label className="text-xs text-slate-500">Contrato com
-                          <select value={e.empresa} onChange={(ev) => atualizar(id, (x) => ({ ...x, empresa: ev.target.value as Empresa }))} className={inp}>
+                          <select value={e.empresa} onChange={(ev) => { const emp = ev.target.value as Empresa; atualizar(id, (x) => ({ ...x, empresa: emp, faixa: faixasDe(emp).includes(x.faixa) ? x.faixa : 40 })); }} className={inp}>
                             {EMPRESAS.map((x) => <option key={x.id} value={x.id}>{x.nome}</option>)}
                           </select>
                         </label>
                         <label className="text-xs text-slate-500">Plano de partilha
                           <select value={e.faixa} onChange={(ev) => atualizar(id, (x) => ({ ...x, faixa: Number(ev.target.value) as Faixa }))} className={inp}>
-                            {(Object.keys(FAIXAS).map(Number) as Faixa[]).map((f) => <option key={f} value={f}>{FAIXA_ROTULO(f)}</option>)}
+                            {faixasDe(e.empresa).map((f) => <option key={f} value={f}>{FAIXA_ROTULO(f, e.empresa)}</option>)}
                           </select>
                         </label>
                         <button type="button" onClick={() => colarHub(id)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50">
