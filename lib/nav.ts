@@ -17,7 +17,7 @@ const EMOJI: Record<string, string> = {
   sdr: '🔻', captacao: '🔎', estudo: '📝', representacao: '✍️', posicionamento: '🗺️', diligencias: '📄', postagens: '🖼️', vitrine: '📣',
   'cobranca-avulsa': '💳', 'notas-comissao': '🧾',
   cobrancas: '💳', contratos: '📑', repasse: '🔁', pagamentos: '🏦', locador: '🏢', notas: '🧾',
-  usuarios: '👥', treinamento: '🎓',
+  usuarios: '👥', treinamento: '🎓', oficinas: '🧑‍🏫', ligacoes: '📞',
 };
 
 function item(
@@ -42,6 +42,8 @@ export function getNav(): ItemNav[] {
     item('estudo', 'Estudo de mercado', 'Ficha de captação: preencha na visita e mande para a Eva fazer o estudo.', 'PAINEL_URL_ESTUDO', '/estudo', 'captacao', 'blue', 'estudo'),
     item('representacao', 'Contrato de representação', 'Preencher o contrato do proprietário, conferir o PDF e enviar para assinatura.', 'PAINEL_URL_REPRESENTACAO', '/representacao', 'captacao', 'blue', 'representacao'),
     item('posicionamento', 'Posicionamento', 'Mapear os condomínios da sua região e ver o quanto você já domina dela.', 'PAINEL_URL_POSICIONAMENTO', '/posicionamento', 'captacao', 'blue', 'posicionamento'),
+    item('ligacoes', 'Lista de ligações', 'Sua lista de proprietários: ligações, retornos e follow-up.', 'PAINEL_URL_LIGACOES', '/ligacoes', 'captacao', 'blue', 'ligacoes'),
+    item('oficinas', 'Oficinas', 'Registrar a presença nas oficinas da loja e acessar o material de apoio.', 'PAINEL_URL_OFICINAS', '/oficinas', 'usuarios', 'emerald', 'oficinas'),
     item('diligencias', 'Diligências', 'Auditoria de certidões e acompanhamento das diligências.', 'PAINEL_URL_DILIGENCIAS', '/admin', 'diligencias', 'blue', 'diligencias'),
     item('postagens', 'Postagens', 'Montar o carrossel de um imóvel para o Instagram escolhendo as fotos do anúncio.', 'PAINEL_URL_POSTAGENS', '/postagens', 'vitrine', 'violet', 'postagens'),
     item('vitrine', 'Vitrine Google Ads', 'Escolher os imóveis que aparecem nos anúncios por região do Google Ads.', 'PAINEL_URL_VITRINE', '/vitrine', 'vitrine', 'violet', 'vitrine'),

@@ -3,10 +3,11 @@
 // (Jurídico, Comercial, Marketing, Financeiro, Administração).
 
 import Link from 'next/link';
-import { exigirPerfil } from '@/lib/perfil';
+import { exigirPerfil, corretorDaPessoa } from '@/lib/perfil';
 import { logoutAction } from './actions';
 import { getNav, type ItemNav, type IconeNav, type Cor } from '@/lib/nav';
 import { AREAS, podeTela, escopoDiligencias, escopoSdr } from '@/lib/acesso';
+import { ehMonitor } from '@/lib/oficinas';
 
 export const metadata = { title: 'Painel interno — REMAX Ville' };
 
@@ -101,12 +102,20 @@ export default async function Home() {
   const perfil = await exigirPerfil();
   const proprias = escopoDiligencias(perfil) === 'proprias';
   const meuFunil = escopoSdr(perfil) === 'proprio';
+  // Oficinas: todo corretor vê as suas; o monitor também conduz a dele
+  const monitor = !perfil.is_admin && (await ehMonitor(perfil.email));
+  // Lista de ligações: todo corretor associado tem a sua
+  const corretor = !perfil.is_admin && !!(await corretorDaPessoa(perfil.email));
   const itens = getNav()
-    .filter((i) => podeTela(perfil, i.tela))
+    .filter((i) => podeTela(perfil, i.tela) || (i.chave === 'oficinas' && (monitor || corretor)) || (i.chave === 'ligacoes' && corretor))
     // quem vê só o que é seu enxerga o card com o nome certo
     .map((i) =>
       i.chave === 'diligencias' && proprias
         ? { ...i, titulo: 'Minhas diligências', descricao: 'As diligências dos negócios em que você é o corretor.' }
+        : i.chave === 'oficinas' && monitor
+          ? { ...i, titulo: 'Oficinas', descricao: 'Registrar a presença e o checklist da oficina que você conduz, e acompanhar as suas.' }
+        : i.chave === 'oficinas' && corretor
+          ? { ...i, titulo: 'Minhas oficinas', descricao: 'As oficinas que você fez, o checklist de aplicação e o material de apoio.' }
         : i.chave === 'sdr' && meuFunil
           ? { ...i, titulo: 'Meu funil', descricao: 'Os leads da Eva oferecidos a você: aceite, contato, visita e proposta.' }
           : i

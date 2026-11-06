@@ -9,6 +9,7 @@ import {
   STATUS_TAREFA, STATUS_NOVATO, inicioJanela, type StatusTarefa,
 } from '../util';
 import EnviarMensagem from '../EnviarMensagem';
+import { oficinasDoNovato, dataLonga } from '@/lib/oficinas';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Novato — Treinamento — REMAX Ville' };
@@ -90,6 +91,7 @@ export default async function NovatoPage({ params }: { params: Promise<{ id: str
   const contatos = (con.data ?? []) as Contato[];
   const msgs = ((msg.data ?? []) as Msg[]).sort((a, b) => a.criado_em.localeCompare(b.criado_em) || a.id - b.id);
   const padrinho = (padr.data as { nome: string } | null)?.nome ?? null;
+  const oficinas = await oficinasDoNovato(n.phone);
 
   const hoje = hojeSP();
   const limiteJanela = inicioJanela();
@@ -216,6 +218,30 @@ export default async function NovatoPage({ params }: { params: Promise<{ id: str
                     );
                   })}
                 </div>
+              )}
+            </Secao>
+
+            <Secao
+              titulo="Oficinas"
+              extra={oficinas ? <span className="text-xs text-slate-500">{oficinas.filter((o) => o.datas.length).length} de {oficinas.length} feitas</span> : undefined}
+            >
+              {!oficinas ? (
+                <p className="text-sm text-slate-500">Não achei o cadastro de corretor com o telefone do novato.</p>
+              ) : (
+                <ul className="divide-y divide-slate-100 text-sm">
+                  {oficinas.map((o) => (
+                    <li key={o.oficina.id} className="flex items-baseline justify-between gap-3 py-1.5">
+                      <span className="text-slate-800">{o.oficina.ordem}. {o.oficina.nome}</span>
+                      {o.datas.length ? (
+                        <span className="whitespace-nowrap text-xs text-emerald-700">
+                          {dataLonga(o.datas[0])}{o.total ? ` · aplic. ${o.aplic}/${o.total}` : ''}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400">pendente</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               )}
             </Secao>
 

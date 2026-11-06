@@ -26,6 +26,8 @@ export type Tela =
   | 'vitrine'
   | 'locador'
   | 'treinamento'
+  | 'oficinas'
+  | 'ligacoes'
   | 'usuarios';
 
 export type Area = 'venda' | 'administracao' | 'sistema';
@@ -73,6 +75,12 @@ export const TELAS: DefTela[] = [
   { chave: 'locador', titulo: 'Portal do locador', area: 'administracao', flag: null },
   // Acompanhamento dos novatos na trilha do Max (IA de treinamento, WhatsApp 5192-8192).
   { chave: 'treinamento', titulo: 'Treinamento de novatos', area: 'sistema', flag: null, soAdmin: true },
+  // Oficinas da loja: o admin vê todas; cada monitor vê a sua (definido em
+  // onb_oficina_monitores, não pelo perfil), por isso fica fora dos personalizados.
+  { chave: 'oficinas', titulo: 'Oficinas da loja', area: 'venda', flag: null, soAdmin: true },
+  // Lista de ligações: todo corretor associado tem a sua (o vínculo é o cadastro de
+  // corretor, não o perfil), por isso também fica fora dos personalizados.
+  { chave: 'ligacoes', titulo: 'Lista de ligações', area: 'venda', flag: null, soAdmin: true },
   { chave: 'usuarios', titulo: 'Usuários e perfis', area: 'sistema', flag: null, soAdmin: true },
 ];
 
