@@ -109,3 +109,48 @@ export async function removerMonitor(fd: FormData) {
   revalidatePath('/oficinas');
   redirect(volta('ok=removido'));
 }
+
+// Checklist do monitor de um encontro (oficina + data): grava exatamente os itens marcados.
+export async function salvarChecklistEncontro(fd: FormData) {
+  const { a, id, slug, volta } = await oficina(fd);
+  const data = txt(fd.get('data'));
+  if (!DATA.test(data) || data > hojeSP()) redirect(volta('erro=data'));
+  const sb = supabaseAdmin();
+  const { data: itens } = await sb.from('onb_oficina_check_itens').select('id').eq('oficina_id', id).eq('publico', 'monitor');
+  const validos = new Set(((itens ?? []) as { id: number }[]).map((i) => Number(i.id)));
+  const marcados = [...new Set(fd.getAll('item').map((v) => Number(v)))].filter((n) => validos.has(n));
+  const { error: e1 } = await sb.from('onb_oficina_check_marcas').delete().eq('oficina_id', id).eq('data', data).in('item_id', [...validos]);
+  if (e1) redirect(volta('erro=gravar'));
+  if (marcados.length) {
+    const { error } = await sb
+      .from('onb_oficina_check_marcas')
+      .insert(marcados.map((item_id) => ({ item_id, oficina_id: id, data, marcado_por: a.perfil.email })));
+    if (error) redirect(volta('erro=gravar'));
+  }
+  revalidatePath(`/oficinas/${slug}`);
+  redirect(volta('ok=checklist'));
+}
+
+// Checklist de aplicação: o corretor marca/desmarca o seu item (só de oficina que fez).
+export async function marcarAplicacao(fd: FormData) {
+  const a = await acessoOficinas();
+  const item = Number(txt(fd.get('item_id')));
+  if (!a.meuId || !item) redirect('/oficinas?erro=gravar');
+  const sb = supabaseAdmin();
+  const { data: it } = await sb.from('onb_oficina_check_itens').select('id,oficina_id,publico').eq('id', item).maybeSingle();
+  const i = it as { id: number; oficina_id: number; publico: string } | null;
+  if (!i || i.publico !== 'participante') redirect('/oficinas?erro=gravar');
+  const { count } = await sb
+    .from('onb_oficina_presencas')
+    .select('id', { count: 'exact', head: true })
+    .eq('oficina_id', i.oficina_id)
+    .eq('corretor_id', a.meuId);
+  if (!count) redirect('/oficinas?erro=sem-presenca');
+  const { data: ja } = await sb.from('onb_oficina_check_marcas').select('id').eq('item_id', item).eq('corretor_id', a.meuId).maybeSingle();
+  const { error } = ja
+    ? await sb.from('onb_oficina_check_marcas').delete().eq('id', (ja as { id: number }).id)
+    : await sb.from('onb_oficina_check_marcas').insert({ item_id: item, oficina_id: i.oficina_id, corretor_id: a.meuId, marcado_por: a.perfil.email });
+  if (error) redirect('/oficinas?erro=gravar');
+  revalidatePath('/oficinas');
+  redirect('/oficinas#minhas');
+}
