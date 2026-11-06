@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { exigirTela } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { verificarContratos, nomeEmpresa } from '@/lib/onb-contrato';
 import { TOTAL_DIAS, nomeDias, hojeSP, dm, dataHora, telefone, atrasada, STATUS_NOVATO } from './util';
 
 export const dynamic = 'force-dynamic';
@@ -17,10 +18,22 @@ type Placar = {
   contratos: number; media_quiz: number | null; meta_contatos: number; meta_v1: number; meta_v2: number; meta_contratos: number;
 };
 type Tarefa = { novato_id: string; status: string; data_prevista: string };
+type Contrato = { id: string; contrato_status: string | null; contrato_empresa: string | null; contrato_erro: string | null; boas_vindas_em: string | null };
+const CONTRATO: Record<string, [string, string]> = {
+  enviando: ['contrato: enviando', 'bg-amber-50 text-amber-800'],
+  aguardando: ['contrato: aguardando assinatura', 'bg-amber-50 text-amber-800'],
+  assinado: ['contrato assinado', 'bg-emerald-50 text-emerald-700'],
+  erro: ['contrato: erro no envio', 'bg-rose-50 text-rose-700'],
+  cancelado: ['contrato cancelado', 'bg-slate-100 text-slate-600'],
+};
 type Msg = { phone: string; direcao: 'in' | 'out'; criado_em: string; texto: string | null };
 
 async function carregar() {
   const sb = supabaseAdmin();
+  // contratos de associação pendentes: confere a assinatura (no máximo 1x por minuto por novato)
+  await verificarContratos().catch(() => null);
+  const ct = await sb.from('onb_novatos').select('id,contrato_status,contrato_empresa,contrato_erro,boas_vindas_em');
+  const contratos = new Map(((ct.error ? [] : ct.data) as Contrato[]).map((c) => [c.id, c]));
   const [nov, pla, tar, msg] = await Promise.all([
     sb.from('onb_novatos').select('id,nome,phone,status,data_inicio,dias_semana,agenda_ok,iconatus_ok,padrinho_id').order('data_inicio', { ascending: false }),
     sb.from('onb_placar').select('*'),
@@ -33,6 +46,7 @@ async function carregar() {
   const padr = ids.length ? await sb.from('corretores_associados').select('id,nome').in('id', ids) : { data: [] };
   return {
     novatos,
+    contratos,
     placar: new Map(((pla.data ?? []) as Placar[]).map((p) => [p.novato_id, p])),
     tarefas: (tar.data ?? []) as Tarefa[],
     msgs: (msg.data ?? []) as Msg[],
@@ -105,6 +119,8 @@ export default async function TreinamentoPage() {
             const ultima = dados!.msgs.find((m) => m.phone === n.phone);
             const ultimaIn = dados!.msgs.find((m) => m.phone === n.phone && m.direcao === 'in');
             const padrinho = n.padrinho_id ? dados!.padrinhos.get(n.padrinho_id) : null;
+            const ctr = dados!.contratos.get(n.id);
+            const selo = ctr?.contrato_status ? CONTRATO[ctr.contrato_status] : null;
             return (
               <Link
                 key={n.id}
@@ -121,6 +137,13 @@ export default async function TreinamentoPage() {
                   </div>
                   <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_NOVATO[n.status] ?? 'bg-slate-100 text-slate-600'}`}>{n.status}</span>
                 </div>
+                {selo && (
+                  <p className={`mt-2 rounded-lg px-2 py-1 text-xs ${selo[1]}`} title={ctr?.contrato_erro ?? undefined}>
+                    {selo[0]} · {nomeEmpresa(ctr?.contrato_empresa)}
+                    {ctr?.contrato_status === 'erro' && ctr.contrato_erro ? ` — ${ctr.contrato_erro}` : ''}
+                    {ctr?.contrato_status === 'assinado' && !ctr.boas_vindas_em ? ' — boas-vindas ainda não saíram' : ''}
+                  </p>
+                )}
 
                 <div className="mt-4 grid grid-cols-3 gap-3 text-center">
                   <div className="rounded-xl bg-slate-50 p-2">
