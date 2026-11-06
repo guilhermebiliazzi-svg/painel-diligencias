@@ -177,7 +177,12 @@ export async function verificarContratos(opts: { forcar?: boolean; envelopes?: s
   if (opts.envelopes?.length) {
     const alvo = new Set(opts.envelopes);
     // pedidos ainda sem envelope também entram (o envelope acabou de ser criado)
-    lista = lista.filter((n) => !n.contrato_envelope_id || alvo.has(n.contrato_envelope_id));
+    const doAviso = lista.filter((n) => !n.contrato_envelope_id || alvo.has(n.contrato_envelope_id));
+    // o aviso do Clicksign pode trazer só o id do documento (não o do envelope): aí confere todos
+    // os pendentes, respeitando o intervalo de 1 minuto por novato
+    const nossos = lista.some((n) => n.contrato_envelope_id && alvo.has(n.contrato_envelope_id));
+    if (nossos) lista = doAviso;
+    else lista = lista.filter((n) => !n.contrato_verificado_em || Date.parse(n.contrato_verificado_em) < limite);
   }
   if (!lista.length) return { conferidos: 0, assinados: [] };
   const agora = new Date().toISOString();
