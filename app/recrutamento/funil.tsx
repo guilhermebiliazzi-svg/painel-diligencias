@@ -67,7 +67,7 @@ const contar = <T,>(xs: T[], f: (x: T) => string) =>
 // ---------- recrutamento ----------
 // 05/11: etapas (Para decidir → Em contato → Entrevistas → Entraram / Descartados; Fora de SP à parte),
 // gravadas em public.recrutamento_candidatos. Perfil = etiqueta automática do "momento" + CRECI.
-type LinhaRec = { telefone: string; etapa: EtapaRec; motivo: string | null; entrevista_em: string | null; encaminhado_nome: string | null; atualizado_em: string };
+type LinhaRec = { telefone: string; etapa: EtapaRec; motivo: string | null; entrevista_em: string | null; retomar_em: string | null; encaminhado_nome: string | null; atualizado_em: string };
 
 async function custoRecrutamento(dias: number | null): Promise<number | null> {
   const dia = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(d);
@@ -88,10 +88,18 @@ async function custoRecrutamento(dias: number | null): Promise<number | null> {
 export async function FunilRecrutamento({ dias, base, aba, corretores }: { dias: number | null; base: string; aba: string; corretores: { id: number; nome: string }[] }) {
   const [ev, { data: linhas }, custo] = await Promise.all([
     carregarRecrutamento(dias),
-    supabaseAdmin().from('recrutamento_candidatos').select('telefone,etapa,motivo,entrevista_em,encaminhado_nome,atualizado_em').limit(5000),
+    supabaseAdmin().from('recrutamento_candidatos').select('telefone,etapa,motivo,entrevista_em,retomar_em,encaminhado_nome,atualizado_em').limit(5000),
     custoRecrutamento(dias),
   ]);
   const porTel = new Map(((linhas ?? []) as LinhaRec[]).map((l) => [fim8(l.telefone), l]));
+  // 06/11: candidato em andamento (contato, entrevista, pensando) aparece mesmo que tenha chegado antes do período
+  const noPeriodo = new Set(ev.map((e) => fim8(e.telefone)));
+  const faltam = [...porTel.values()].filter((l) => ['contato', 'entrevista', 'pensando'].includes(l.etapa) && !noPeriodo.has(fim8(l.telefone))).map((l) => fim8(l.telefone));
+  if (faltam.length) {
+    const { data: extra } = await supabaseAdmin().from('recrutamento_leads').select('id,criado_em,evento,nome,telefone,momento,bairro,creci,c2s_lead_id,payload')
+      .or(faltam.map((f) => `telefone.like.%${f}`).join(',')).order('criado_em', { ascending: false }).limit(500);
+    ev.push(...((extra ?? []) as Recrut[]));
+  }
   const cliques = ev.filter((e) => e.evento === 'clique_whatsapp').length;
   type Cand = {
     tel: string; nome: string | null; criado_em: string; formulario: boolean; conversa: boolean; relatorio: boolean;
@@ -128,6 +136,10 @@ export async function FunilRecrutamento({ dias, base, aba, corretores }: { dias:
   const n = (k: string) => lista.filter((c) => c.etapa === k).length;
   let daAba = lista.filter((c) => c.etapa === abaK);
   if (abaK === 'entrevista') daAba = [...daAba].sort((a, b) => (a.reg?.entrevista_em ?? '').localeCompare(b.reg?.entrevista_em ?? ''));
+  if (abaK === 'pensando') daAba = [...daAba].sort((a, b) => (a.reg?.retomar_em ?? '9').localeCompare(b.reg?.retomar_em ?? '9'));
+  const hoje = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+  const atrasados = lista.filter((c) => c.etapa === 'pensando' && c.reg?.retomar_em && c.reg.retomar_em <= hoje).length;
+  const dataBr = (d: string) => d.split('-').reverse().join('/');
   const entrevistados = lista.filter((c) => c.reg?.entrevista_em || c.etapa === 'entrevista' || c.etapa === 'entrou').length;
   const conversaram = lista.filter((c) => c.conversa).length;
   const brl = (v: number) => 'R$ ' + v.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
@@ -151,6 +163,7 @@ export async function FunilRecrutamento({ dias, base, aba, corretores }: { dias:
               <Link key={e.k} href={`${base}&a=${e.k}`}
                 className={`rounded-lg px-3 py-1.5 text-sm font-medium ${e.k === abaK ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
                 {e.rotulo} <span className={e.k === abaK ? 'text-slate-300' : 'text-slate-400'}>{n(e.k)}</span>
+                {e.k === 'pensando' && atrasados > 0 && <span className="ml-1 rounded-full bg-red-600 px-1.5 text-xs font-semibold text-white">{atrasados} para retomar</span>}
               </Link>
             ))}
           </nav>
@@ -174,6 +187,11 @@ export async function FunilRecrutamento({ dias, base, aba, corretores }: { dias:
                     {c.momento && <span className="min-w-0 break-words">· {c.momento}</span>}
                     {!c.conversa && <span>· ainda não falou com a Eva</span>}
                   </div>
+                  {c.etapa === 'pensando' && c.reg?.retomar_em && (
+                    <p className={`mt-1 text-xs font-semibold ${c.reg.retomar_em <= hoje ? 'text-red-700' : 'text-slate-700'}`}>
+                      {c.reg.retomar_em < hoje ? `Retomar desde ${dataBr(c.reg.retomar_em)} — atrasado` : c.reg.retomar_em === hoje ? 'Retomar hoje' : `Retomar em ${dataBr(c.reg.retomar_em)}`}
+                    </p>
+                  )}
                   {c.reg && (c.reg.encaminhado_nome || c.reg.entrevista_em || c.reg.motivo) && (
                     <p className="mt-1 text-xs text-slate-700">
                       {c.reg.encaminhado_nome && <>Com {c.reg.encaminhado_nome}. </>}
