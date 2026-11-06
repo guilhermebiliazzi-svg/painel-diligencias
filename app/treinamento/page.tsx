@@ -4,9 +4,12 @@ import Link from 'next/link';
 import { exigirTela } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { verificarContratos, nomeEmpresa } from '@/lib/onb-contrato';
+import Reenviar from './reenviar';
 import { TOTAL_DIAS, nomeDias, hojeSP, dm, dataHora, telefone, atrasada, STATUS_NOVATO } from './util';
 
 export const dynamic = 'force-dynamic';
+// reenvio de contrato (PDF + Clicksign) roda nesta página
+export const maxDuration = 120;
 export const metadata = { title: 'Treinamento de novatos — REMAX Ville' };
 
 type Novato = {
@@ -121,12 +124,13 @@ export default async function TreinamentoPage() {
             const padrinho = n.padrinho_id ? dados!.padrinhos.get(n.padrinho_id) : null;
             const ctr = dados!.contratos.get(n.id);
             const selo = ctr?.contrato_status ? CONTRATO[ctr.contrato_status] : null;
+            const reenviar = ctr?.contrato_status === 'erro' || ctr?.contrato_status === 'cancelado';
             return (
+              <div key={n.id} className="flex flex-col gap-2">
               <Link
-                key={n.id}
                 href={`/treinamento/${n.id}`}
                 style={{ backgroundColor: '#ffffff' }}
-                className="group rounded-2xl border border-slate-200 p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
+                className="group flex-1 rounded-2xl border border-slate-200 p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -190,6 +194,12 @@ export default async function TreinamentoPage() {
                   {ultimaIn ? ` · novato escreveu ${dataHora(ultimaIn.criado_em)}` : ' · novato ainda não escreveu'}
                 </p>
               </Link>
+              {reenviar && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
+                  <Reenviar id={n.id} nome={n.nome} />
+                </div>
+              )}
+              </div>
             );
           })}
         </div>
