@@ -1,5 +1,6 @@
 -- Oficinas da loja (/oficinas): cada monitor registra a presença dos corretores
--- na sua oficina e acessa o material de apoio (dele e para os participantes).
+-- na sua oficina, marca o checklist do encontro e acessa o material de apoio;
+-- cada corretor vê as suas oficinas e marca o checklist de aplicação.
 --
 -- RODAR ANTES DO DEPLOY (SQL editor do Supabase, role owner). Só cria coisa
 -- nova; não altera nenhuma tabela existente (nem as da Eva nem as do Max).
@@ -87,8 +88,9 @@ where not exists (
   where oficina_id = 2 and url = 'https://www.youtube.com/watch?v=ZQlyCw8cYmA'
 );
 
--- Monitores: só entra quem tem UM corretor ativo com aquele nome. Quem ficar de
--- fora (nome ambíguo ou não encontrado) aparece na conferência e se acerta na tela.
+-- Monitores da grade de nov/2026 (dia: 1 = segunda ... 5 = sexta). Só entra quem
+-- tem UM corretor ativo com aquele nome; quem ficar de fora (nome ambíguo ou não
+-- encontrado) aparece na conferência abaixo e se acerta na tela /oficinas.
 do $$
 declare
   r record;
@@ -96,15 +98,15 @@ declare
 begin
   for r in
     select * from (values
-      -- dia e período de cada monitor se definem na tela /oficinas
-      (1, 'Salete%',         null::int, null::text),
-      (1, 'Andrea%',         null, null),
-      (2, 'Rafael Vaz%',     null, null),
-      (2, 'Suzana%',         null, null),
-      (3, 'Lucas%',          null, null),
-      (4, 'Guilherme%',      null, null),
-      (5, 'Samia%',          null, null),
-      (5, 'Silvia Freitas%', null, null)
+      (1, 'Diogo%',          5, 'tarde'),   -- Posicionamento 1º dia: sexta à tarde
+      (1, 'Salete%',         1, 'manha'),   -- Posicionamento 2º dia: segunda de manhã
+      (2, 'Andrea%',         2, 'tarde'),   -- Ligações e Call Blitz: terça à tarde
+      (2, 'Suzana%',         2, 'tarde'),
+      (3, 'Lucas%',          3, 'manha'),   -- V1 1º período: quarta de manhã
+      (3, 'Gustavo%',        3, 'manha'),
+      (3, 'Rafael Vaz%',     3, 'tarde'),   -- V1 2º período: quarta à tarde
+      (4, 'Silvia%',         3, 'tarde'),   -- ACM: quarta à tarde
+      (5, 'Samia%',          4, 'tarde')    -- V2: quinta à tarde
     ) as t(oficina_id, padrao, dia, periodo)
   loop
     select array_agg(id) into v_ids
@@ -121,11 +123,65 @@ begin
   end loop;
 end $$;
 
--- Grade de nov/2026: V1 só com o Lucas e ACM só com o Guilherme (se já tiverem entrado)
-delete from public.onb_oficina_monitores m
-using public.corretores_associados c
-where c.id = m.corretor_id
-  and ((m.oficina_id = 3 and c.nome ilike 'Diogo%') or (m.oficina_id = 4 and c.nome ilike 'Samia%'));
+-- Checklists: do monitor (marcado por encontro) e de aplicação (cada participante marca o seu)
+create table if not exists public.onb_oficina_check_itens (
+  id          bigint generated always as identity primary key,
+  oficina_id  smallint not null references public.onb_oficinas(id),
+  publico     text not null check (publico in ('monitor','participante')),
+  texto       text not null,
+  ordem       smallint not null default 0,
+  ativo       boolean not null default true,
+  unique (oficina_id, publico, texto)
+);
+
+create table if not exists public.onb_oficina_check_marcas (
+  id           bigint generated always as identity primary key,
+  item_id      bigint not null references public.onb_oficina_check_itens(id) on delete cascade,
+  oficina_id   smallint not null references public.onb_oficinas(id),
+  data         date,       -- encontro (itens do monitor)
+  corretor_id  bigint,     -- participante (itens de aplicação)
+  marcado_por  text,
+  criado_em    timestamptz not null default now(),
+  check ((data is null) <> (corretor_id is null))
+);
+create unique index if not exists onb_oficina_check_marcas_encontro on public.onb_oficina_check_marcas (item_id, data) where data is not null;
+create unique index if not exists onb_oficina_check_marcas_corretor on public.onb_oficina_check_marcas (item_id, corretor_id) where corretor_id is not null;
+create index if not exists onb_oficina_check_marcas_cor on public.onb_oficina_check_marcas (corretor_id) where corretor_id is not null;
+
+alter table public.onb_oficina_check_itens  enable row level security;
+alter table public.onb_oficina_check_marcas enable row level security;
+
+insert into public.onb_oficina_check_itens (oficina_id, publico, ordem, texto) values
+  (1, 'monitor', 1, 'Cada participante escolheu o território.'),
+  (1, 'monitor', 2, 'Cada um cadastrou ao menos 1 condomínio no painel.'),
+  (1, 'monitor', 3, 'Cada um treinou a abordagem pelo menos uma vez.'),
+  (1, 'monitor', 4, 'Cada um saiu com a lista de 3 a 4 condomínios para o dia seguinte.'),
+  (2, 'monitor', 1, 'Cada participante chegou com a lista e completou pelo menos 15 nomes.'),
+  (2, 'monitor', 2, 'Cada um treinou o roteiro e as objeções.'),
+  (2, 'monitor', 3, 'Todos participaram do Call Blitz e anotaram o placar.'),
+  (2, 'monitor', 4, 'Cada um saiu com o plano de ligações dos próximos dias.'),
+  (3, 'monitor', 1, 'Cada participante conduziu ao menos uma simulação completa.'),
+  (3, 'monitor', 2, 'Cada um sabe de cor as 5 etapas e o roteiro de perguntas.'),
+  (3, 'monitor', 3, 'Cada um tem o checklist de dados para a ACM.'),
+  (3, 'monitor', 4, 'Cada um saiu com a V1 ou a simulação do dia seguinte combinada.'),
+  (4, 'monitor', 1, 'Cada participante gerou um estudo na Eva.'),
+  (4, 'monitor', 2, 'Cada um sabe explicar as regras de cálculo.'),
+  (4, 'monitor', 3, 'Os estudos foram revisados pelo monitor.'),
+  (4, 'monitor', 4, 'Cada um saiu com o imóvel da ACM do dia seguinte definido.'),
+  (5, 'monitor', 1, 'Cada participante conduziu ao menos uma V2 simulada completa.'),
+  (5, 'monitor', 2, 'Cada um sabe explicar as cláusulas principais do contrato.'),
+  (5, 'monitor', 3, 'Cada um treinou as objeções.'),
+  (5, 'monitor', 4, 'Cada um saiu com a V2 ou a simulação do dia seguinte combinada.'),
+  (1, 'participante', 1, 'Visitei as portarias dos 3 a 4 condomínios escolhidos.'),
+  (1, 'participante', 2, 'Cadastrei os condomínios no painel de posicionamento.'),
+  (1, 'participante', 3, 'Montei na Lista de ligações a lista de proprietários para ligar.'),
+  (2, 'participante', 1, 'Fiz as primeiras ligações no Call Blitz e registrei no painel.'),
+  (2, 'participante', 2, 'Agendei no painel os retornos das ligações.'),
+  (3, 'participante', 1, 'Acompanhei uma V1 real ou fiz uma simulação.'),
+  (4, 'participante', 1, 'Montei o estudo de mercado de um imóvel real na Eva.'),
+  (4, 'participante', 2, 'Enviei o estudo para o monitor da oficina de ACM revisar.'),
+  (5, 'participante', 1, 'Acompanhei uma apresentação (V2) real ou fiz uma simulação.')
+on conflict (oficina_id, publico, texto) do nothing;
 
 -- Conferência: monitores cadastrados
 select o.nome as oficina, c.nome as monitor, m.dia_semana, m.periodo
