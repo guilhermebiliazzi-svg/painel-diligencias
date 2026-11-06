@@ -131,6 +131,9 @@ export default function Cadastro({ corretores, padrinhos }: { corretores: Opcao[
               Na trilha: {res.cadastrados.join(', ')}. <Link href="/treinamento" className="font-medium underline">Ver no treinamento</Link>
             </p>
           )}
+          {res.avisos.map((f, i) => (
+            <p key={'a' + i} className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-800">{f.nome}: {f.aviso}</p>
+          ))}
           {res.falhas.map((f, i) => (
             <p key={i} className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-800">{f.nome}: {f.erro}</p>
           ))}
