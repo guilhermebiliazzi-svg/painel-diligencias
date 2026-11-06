@@ -94,7 +94,12 @@ export async function enviarMensagem(ids: string[], textoBruto: string): Promise
 // "cadastrar novato" no WhatsApp do Max): cria o novato, gera as tarefas da trilha
 // pela data de início e, se pedido, manda as boas-vindas pelo Max.
 export type NovoNovato = { corretor_id: number; padrinho_id: number | null };
-export type ResultadoCadastro = { ok: boolean; cadastrados: string[]; falhas: { nome: string; erro: string }[] };
+export type ResultadoCadastro = { ok: boolean; cadastrados: string[]; falhas: { nome: string; erro: string }[]; avisos: { nome: string; aviso: string }[] };
+
+// Boas-vindas: link da Cartilha do Corretor e senha inicial do hub.minharemax.com
+// (igual para todos; o corretor troca no primeiro acesso). Ficam na Vercel, não no código.
+const CARTILHA_URL = process.env.ONB_CARTILHA_URL || '';
+const HUB_SENHA_INICIAL = process.env.ONB_HUB_SENHA_INICIAL || '';
 
 const foneWhats = (t: string | null | undefined) => {
   const d = String(t ?? '').replace(/\D/g, '');
@@ -103,15 +108,15 @@ const foneWhats = (t: string | null | undefined) => {
 
 export async function cadastrarNovatos(lista: NovoNovato[], dataInicio: string, boasVindas: boolean): Promise<ResultadoCadastro> {
   await exigirTela('treinamento');
-  const res: ResultadoCadastro = { ok: true, cadastrados: [], falhas: [] };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dataInicio))) return { ok: false, cadastrados: [], falhas: [{ nome: '—', erro: 'Escolha a data de início.' }] };
+  const res: ResultadoCadastro = { ok: true, cadastrados: [], falhas: [], avisos: [] };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dataInicio))) return { ok: false, cadastrados: [], falhas: [{ nome: '—', erro: 'Escolha a data de início.' }], avisos: [] };
   const itens = (lista ?? []).filter((x) => Number.isInteger(Number(x?.corretor_id)) && Number(x.corretor_id) > 0);
-  if (!itens.length) return { ok: false, cadastrados: [], falhas: [{ nome: '—', erro: 'Escolha pelo menos um corretor.' }] };
+  if (!itens.length) return { ok: false, cadastrados: [], falhas: [{ nome: '—', erro: 'Escolha pelo menos um corretor.' }], avisos: [] };
 
   const sb = supabaseAdmin();
-  const { data: cs, error } = await sb.from('corretores_associados').select('id,nome,phone,calendar_id').in('id', itens.map((x) => Number(x.corretor_id)));
-  if (error) return { ok: false, cadastrados: [], falhas: [{ nome: '—', erro: error.message }] };
-  const porId = new Map(((cs ?? []) as { id: number; nome: string; phone: string | null; calendar_id: string | null }[]).map((c) => [Number(c.id), c]));
+  const { data: cs, error } = await sb.from('corretores_associados').select('id,nome,phone,email,calendar_id').in('id', itens.map((x) => Number(x.corretor_id)));
+  if (error) return { ok: false, cadastrados: [], falhas: [{ nome: '—', erro: error.message }], avisos: [] };
+  const porId = new Map(((cs ?? []) as { id: number; nome: string; phone: string | null; email: string | null; calendar_id: string | null }[]).map((c) => [Number(c.id), c]));
 
   for (const it of itens) {
     const c = porId.get(Number(it.corretor_id));
@@ -131,7 +136,19 @@ export async function cadastrarNovatos(lista: NovoNovato[], dataInicio: string, 
     if (e2) { res.falhas.push({ nome, erro: 'cadastrado, mas as tarefas não foram geradas: ' + e2.message }); continue; }
     if (boasVindas) {
       const [, m, d] = dataInicio.split('-');
-      const texto = `Bem-vindo(a) à REMAX Ville! Sou o Max, seu assistente de treinamento, e vou te acompanhar nos seus 30 primeiros dias, passo a passo. Sua trilha começa em ${d}/${m}. Para começar, me responda esta mensagem.`;
+      const email = String(c.email ?? '').trim().toLowerCase();
+      const partes = [
+        `Bem-vindo(a) à REMAX Ville! Sou o Max, seu assistente de treinamento, e vou te acompanhar nos seus 30 primeiros dias, passo a passo. Sua trilha começa em ${d}/${m}.`,
+        CARTILHA_URL ? `Sua Cartilha do Corretor: ${CARTILHA_URL}` : '',
+        email && HUB_SENHA_INICIAL
+          ? `Seu acesso ao hub.minharemax.com: login ${email} e senha inicial ${HUB_SENHA_INICIAL} (o sistema pede para você trocar a senha no primeiro acesso).`
+          : '',
+        'Para começar, me responda esta mensagem.',
+      ];
+      const texto = partes.filter(Boolean).join('\n\n');
+      if (!CARTILHA_URL) res.avisos.push({ nome, aviso: 'boas-vindas sem a Cartilha (falta ONB_CARTILHA_URL na Vercel)' });
+      if (!HUB_SENHA_INICIAL) res.avisos.push({ nome, aviso: 'boas-vindas sem o acesso ao hub (falta ONB_HUB_SENHA_INICIAL na Vercel)' });
+      else if (!email) res.avisos.push({ nome, aviso: 'boas-vindas sem o acesso ao hub: o cadastro de corretor não tem e-mail' });
       const r = await enviarUm({ id, nome, phone }, texto, false);
       if (!r.ok) { res.falhas.push({ nome, erro: 'cadastrado, mas as boas-vindas não saíram: ' + r.erro }); continue; }
     }
