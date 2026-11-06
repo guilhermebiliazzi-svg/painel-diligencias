@@ -20,7 +20,18 @@ export const FAIXAS: Record<Faixa, { mensal: string; mensalExt: string; assoc: s
   60: { mensal: '3.000,00', mensalExt: 'três mil reais', assoc: 'sessenta', imob: 'quarenta', imobPct: 40 },
   70: { mensal: '5.000,00', mensalExt: 'cinco mil reais', assoc: 'setenta', imob: 'trinta', imobPct: 30 },
 };
-export const FAIXA_ROTULO = (f: Faixa) => `${f}% · mensalidade R$ ${FAIXAS[f].mensal}`;
+// Team Samia: o contrato é com a PJ da Samia e a partilha é outra (o restante fica com a Ville).
+// A mensalidade é a mesma da faixa.
+const SAMIA: Partial<Record<Faixa, { imob: string; imobPct: number }>> = {
+  40: { imob: 'vinte', imobPct: 20 },
+  45: { imob: 'quinze', imobPct: 15 },
+};
+export const faixasDe = (e: Empresa): Faixa[] => (e === 'samia' ? [40, 45] : [40, 45, 60, 70]);
+export function partilha(e: Empresa, f: Faixa): { imob: string; imobPct: number } {
+  return e === 'samia' ? SAMIA[f]! : { imob: FAIXAS[f].imob, imobPct: FAIXAS[f].imobPct };
+}
+export const FAIXA_ROTULO = (f: Faixa, e: Empresa = 'ville') =>
+  `${f}% corretor · ${partilha(e, f).imobPct}% ${e === 'samia' ? 'Samia' : 'Ville'} · mensalidade R$ ${FAIXAS[f].mensal}`;
 const VENCIMENTO = { dia: '05', ext: 'cinco' };
 const FORO = { comarca: 'São Paulo', estado: 'São Paulo' };
 
@@ -145,6 +156,7 @@ const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julh
 export function camposContrato(c: ContratoNovato, p: Parte, ts: Testemunha[], hoje: string): Record<string, string> {
   const d = c.dados;
   const f = FAIXAS[c.faixa];
+  const pt = partilha(c.empresa, c.faixa);
   const [ano, mes, dia] = hoje.split('-');
   const t1 = ts[0] ?? { nome: '', rg: '', cpf: '' };
   const t2 = ts[1] ?? { nome: '', rg: '', cpf: '' };
@@ -159,7 +171,7 @@ export function camposContrato(c: ContratoNovato, p: Parte, ts: Testemunha[], ho
     assoc_complemento: up(d.complemento), assoc_bairro: up(d.bairro), assoc_municipio: up(d.cidade), assoc_estado: uf(d.estado),
     mensalidade: f.mensal, mensalidade_extenso: f.mensalExt,
     perc_associado: String(c.faixa), perc_associado_extenso: f.assoc,
-    perc_imob: String(f.imobPct), perc_imob_extenso: f.imob,
+    perc_imob: String(pt.imobPct), perc_imob_extenso: pt.imob,
     vencimento_dia: VENCIMENTO.dia, vencimento_extenso: VENCIMENTO.ext,
     foro_comarca: FORO.comarca, foro_estado: FORO.estado,
     assinatura_cidade: 'São Paulo', assinatura_dia: dia, assinatura_mes: MESES[Number(mes) - 1], assinatura_ano: ano,
