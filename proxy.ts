@@ -30,7 +30,10 @@ const REGRAS: Regra[] = [
   { re: /^\/oficinas(\/|$)/, perm: 'any', legacy: false },
   // cada corretor vê a sua lista; a página decide
   { re: /^\/ligacoes(\/|$)/, perm: 'any', legacy: false },
+  // 06/11: conversa da Eva também abre para quem só tem Recrutamento (a página confere se é candidato).
+  { re: /^\/sdr\/conversa\//, perm: 'any', legacy: false },
   { re: /^\/sdr(\/|$)/, perm: 'sdr', legacy: false },
+  { re: /^\/recrutamento(\/|$)/, perm: 'recrutamento', legacy: false },
   { re: /^\/vitrine(\/|$)/, perm: 'vitrine', legacy: false },
   { re: /^\/captacao(\/|$)/, perm: 'captacao', legacy: false },
   { re: /^\/postagens(\/|$)/, perm: 'postagens', legacy: false },
