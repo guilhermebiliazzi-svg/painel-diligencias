@@ -8,6 +8,8 @@ import { partesContrato } from '@/lib/onb-contrato';
 import { EMPRESAS, FAVORITO_HUB } from '@/lib/contrato-associacao';
 
 export const dynamic = 'force-dynamic';
+// o cadastro gera e envia um contrato por corretor, em sequência
+export const maxDuration = 300;
 export const metadata = { title: 'Cadastrar novatos — Treinamento — REMAX Ville' };
 
 const nomeCurto = (n: string | null | undefined) => String(n ?? '').split(' - ')[0].trim();
