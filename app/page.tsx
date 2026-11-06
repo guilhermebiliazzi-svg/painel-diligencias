@@ -102,18 +102,20 @@ export default async function Home() {
   const perfil = await exigirPerfil();
   const proprias = escopoDiligencias(perfil) === 'proprias';
   const meuFunil = escopoSdr(perfil) === 'proprio';
-  // Oficinas: o monitor vê o card mesmo sem a tela no perfil
+  // Oficinas: todo corretor vê as suas; o monitor também conduz a dele
   const monitor = !perfil.is_admin && (await ehMonitor(perfil.email));
   // Lista de ligações: todo corretor associado tem a sua
   const corretor = !perfil.is_admin && !!(await corretorDaPessoa(perfil.email));
   const itens = getNav()
-    .filter((i) => podeTela(perfil, i.tela) || (i.chave === 'oficinas' && monitor) || (i.chave === 'ligacoes' && corretor))
+    .filter((i) => podeTela(perfil, i.tela) || (i.chave === 'oficinas' && (monitor || corretor)) || (i.chave === 'ligacoes' && corretor))
     // quem vê só o que é seu enxerga o card com o nome certo
     .map((i) =>
       i.chave === 'diligencias' && proprias
         ? { ...i, titulo: 'Minhas diligências', descricao: 'As diligências dos negócios em que você é o corretor.' }
         : i.chave === 'oficinas' && monitor
-          ? { ...i, titulo: 'Minhas oficinas', descricao: 'Registrar a presença na sua oficina e acessar o material de apoio.' }
+          ? { ...i, titulo: 'Oficinas', descricao: 'Registrar a presença e o checklist da oficina que você conduz, e acompanhar as suas.' }
+        : i.chave === 'oficinas' && corretor
+          ? { ...i, titulo: 'Minhas oficinas', descricao: 'As oficinas que você fez, o checklist de aplicação e o material de apoio.' }
         : i.chave === 'sdr' && meuFunil
           ? { ...i, titulo: 'Meu funil', descricao: 'Os leads da Eva oferecidos a você: aceite, contato, visita e proposta.' }
           : i
