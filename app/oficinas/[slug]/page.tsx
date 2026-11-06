@@ -1,13 +1,13 @@
-// Uma oficina: registrar presença, encontros registrados, material de apoio e
-// (só admin) os monitores.
+// Uma oficina: registrar presença, encontros registrados (com o checklist do
+// monitor), material de apoio e (só admin) os monitores.
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import {
   acessoOficinas, podeOficina, diaMonitor, nomeCurto, dataLonga, hojeSP, DIAS,
-  type Oficina, type Monitor, type Material,
+  type Oficina, type Monitor, type Material, type CheckItem,
 } from '@/lib/oficinas';
-import { removerPresenca, salvarMaterial, removerMaterial, salvarMonitor, removerMonitor } from '../actions';
+import { removerPresenca, salvarMaterial, removerMaterial, salvarMonitor, removerMonitor, salvarChecklistEncontro } from '../actions';
 import Presenca from './presenca';
 
 export const dynamic = 'force-dynamic';
@@ -20,6 +20,7 @@ const OK: Record<string, string> = {
   presenca: 'Presença registrada.',
   material: 'Material adicionado.',
   monitor: 'Monitor salvo.',
+  checklist: 'Checklist do encontro salvo.',
   removido: 'Removido.',
 };
 const ERRO: Record<string, string> = {
@@ -44,12 +45,19 @@ export default async function OficinaPage({ params, searchParams }: { params: Pr
   const of = o as Oficina;
   if (!podeOficina(a, Number(of.id))) redirect('/sem-acesso');
 
-  const [mon, pre, mat, cor] = await Promise.all([
+  const [mon, pre, mat, cor, its, mar] = await Promise.all([
     sb.from('onb_oficina_monitores').select('id,oficina_id,corretor_id,dia_semana,periodo').eq('oficina_id', of.id),
     sb.from('onb_oficina_presencas').select('id,data,corretor_id,monitor_id').eq('oficina_id', of.id).order('data', { ascending: false }).limit(2000),
     sb.from('onb_oficina_materiais').select('id,oficina_id,publico,titulo,url').eq('oficina_id', of.id).order('id'),
     sb.from('corretores_associados').select('id,nome,status').order('nome'),
+    sb.from('onb_oficina_check_itens').select('id,oficina_id,publico,texto,ordem').eq('oficina_id', of.id).eq('publico', 'monitor').eq('ativo', true).order('ordem'),
+    sb.from('onb_oficina_check_marcas').select('item_id,data').eq('oficina_id', of.id).not('data', 'is', null).limit(5000),
   ]);
+  const checklist = (its.data ?? []) as CheckItem[];
+  const marcasDia = new Map<string, Set<number>>();
+  for (const m of (mar.data ?? []) as { item_id: number; data: string }[]) {
+    marcasDia.set(m.data, (marcasDia.get(m.data) ?? new Set()).add(Number(m.item_id)));
+  }
 
   const monitores = ((mon.data ?? []) as Monitor[]).sort((x, y) => (x.dia_semana ?? 9) - (y.dia_semana ?? 9));
   const presencas = (pre.data ?? []) as Linha[];
@@ -180,6 +188,31 @@ export default async function OficinaPage({ params, searchParams }: { params: Pr
                         </form>
                       ))}
                   </div>
+                  {checklist.length > 0 && (() => {
+                    const feitos = marcasDia.get(d) ?? new Set<number>();
+                    const n = checklist.filter((c) => feitos.has(Number(c.id))).length;
+                    const ok = n === checklist.length;
+                    return (
+                      <details className="mt-2" open={!ok && d === porData.keys().next().value}>
+                        <summary className={`cursor-pointer text-xs font-medium ${ok ? 'text-emerald-700' : 'text-amber-700'}`}>
+                          Checklist do encontro: {n}/{checklist.length}{ok ? ' ✓' : ''}
+                        </summary>
+                        <form action={salvarChecklistEncontro} className="mt-2 space-y-1.5">
+                          {ocultos}
+                          <input type="hidden" name="data" value={d} />
+                          {checklist.map((c) => (
+                            <label key={c.id} className="flex items-start gap-2 text-sm text-slate-700">
+                              <input type="checkbox" name="item" value={c.id} defaultChecked={feitos.has(Number(c.id))} className="mt-0.5 size-4" />
+                              <span>{c.texto}</span>
+                            </label>
+                          ))}
+                          <button type="submit" className="mt-1 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-900">
+                            Salvar checklist
+                          </button>
+                        </form>
+                      </details>
+                    );
+                  })()}
                 </li>
               );
             })}
