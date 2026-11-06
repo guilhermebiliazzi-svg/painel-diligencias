@@ -42,7 +42,7 @@ const CAMPOS: { k: keyof DadosAssociado; rot: string; larg?: string }[] = [
   { k: 'cidade', rot: 'Cidade' },
   { k: 'estado', rot: 'Estado (UF)' },
   { k: 'email', rot: 'E-mail' },
-  { k: 'telefone', rot: 'Celular (Clicksign)' },
+  { k: 'telefone', rot: 'Celular no hub (referência)' },
 ];
 
 export default function Cadastro({
