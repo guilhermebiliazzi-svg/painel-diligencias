@@ -156,6 +156,31 @@ export async function descartar(leadId: string): Promise<Resultado> {
   return { ok: true, msg: 'Lead descartado.' };
 }
 
+// 06/11: Encerrar lead que já está com corretor (atribuído, visita, direto ao gestor).
+// Status 'encerrado' tira o lead de todas as cobranças da Eva (captação V1/V2, acompanhamento do corretor e do cliente).
+const MOTIVOS_ENCERRAR: Record<string, string> = {
+  nao_responde: 'não responde',
+  desistiu: 'desistiu',
+  vendido: 'imóvel vendido/alugado',
+  fora_perfil: 'fora do perfil',
+};
+export async function encerrar(leadId: string, motivo: string): Promise<Resultado> {
+  await exigirSdrGestao();
+  const m = MOTIVOS_ENCERRAR[motivo];
+  if (!m) return { ok: false, erro: 'Escolha o motivo.' };
+  const lead = await lerLead(leadId);
+  if (!lead) return { ok: false, erro: 'Lead não encontrado.' };
+  if (!['atribuido', 'visita_agendada', 'direto'].includes(lead.status)) return { ok: false, erro: 'Este lead não está com corretor. Use Descartar.' };
+  const agora = new Date().toISOString();
+  const { error } = await supabaseAdmin().from('sdr_leads').update({
+    status: 'encerrado', arquivado_em: agora, updated_at: agora,
+    motivo_arquivamento: 'encerrado pelo Guilherme: ' + m,
+  }).eq('id', leadId).in('status', ['atribuido', 'visita_agendada', 'direto']);
+  if (error) return { ok: false, erro: 'Não foi possível gravar: ' + error.message };
+  await registrar(leadId, 'comando_encerrar', 'encerrado (painel): ' + m);
+  return { ok: true, msg: 'Lead encerrado (' + m + '). A Eva para de cobrar o corretor e o cliente.' };
+}
+
 // Captação da landing (Anuncie na REMAX): cria o lead na hora de escolher a fila.
 export async function ofertarCaptacao(captacaoId: string, phones: string[]): Promise<Resultado> {
   await exigirSdrGestao();
