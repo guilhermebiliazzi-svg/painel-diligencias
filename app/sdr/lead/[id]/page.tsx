@@ -8,6 +8,7 @@ import Decisao, { type CorretorOpc, type ImovelRef } from '../../decisao';
 import Resgatar from './resgatar';
 import MensagemEva, { type DestinoMsg } from './mensagem';
 import ArquivarForaPerfil from '../../fora-perfil';
+import Encerrar from './encerrar';
 import { statusDasMensagens, enviosDaEva, casarEnvio, rotuloStatus, mensagensAvulsas, casarAvulsa } from '@/lib/wa-status';
 
 export const dynamic = 'force-dynamic';
@@ -207,7 +208,7 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
             <Linha k="Fila" v={fila.length ? fila.map(nomeCor).join(' → ') : null} />
             <Linha k="Captação" v={(etapasCap ?? []).length ? (etapasCap as { etapa: string; quando: string | null; created_at: string }[]).map((e) =>
               (ETAPA_CAP[e.etapa] ?? e.etapa) + (e.quando ? ' ' + fmt.format(new Date(e.quando)) : '') + ' (' + fmt.format(new Date(e.created_at)).slice(0, 5) + ')').join(' → ') : null} />
-            <Linha k="Arquivado" v={l.status === 'arquivado' ? l.motivo_arquivamento : null} />
+            <Linha k={l.status === 'encerrado' ? 'Encerrado' : 'Arquivado'} v={['arquivado', 'encerrado'].includes(l.status) ? l.motivo_arquivamento : null} />
             <Linha k="Entrou" v={fmt.format(new Date(l.created_at))} />
           </dl>
         </header>
@@ -252,6 +253,8 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
           podeDescartar={!['atribuido', 'visita_agendada', 'encerrado', 'arquivado'].includes(l.status)}
           imoveisRef={imoveisRef}
         />
+
+        {['atribuido', 'visita_agendada', 'direto'].includes(l.status) && <Encerrar id={l.id} />}
 
         {reabre && (
           <p className="rounded-xl bg-slate-100 px-4 py-3 text-sm text-slate-600">
