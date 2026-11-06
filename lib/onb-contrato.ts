@@ -88,7 +88,9 @@ export async function enviarContrato(c: ContratoNovato, phoneCorretor: string, p
   const { partes, testemunhas } = await partesContrato();
   const p = partes[c.empresa]!;
   const d = c.dados;
-  const fone = dig(d.telefone) || dig(phoneCorretor);
+  // 06/11/2026: o celular do hub pode ser de outra pessoa (o da Suely era o do Rogério).
+  // Vale o do cadastro de corretor, o mesmo que o Max usa.
+  const fone = dig(phoneCorretor) || dig(d.telefone);
   const signatarios = [
     { nome: d.nome.trim(), email: d.email.trim().toLowerCase(), phone: fone, cpf: dig(d.cpf), papel: 'contratante' },
     { nome: p.assina.nome, email: p.assina.email, phone: p.assina.phone, cpf: dig(p.assina.cpf), papel: 'contratante' },
