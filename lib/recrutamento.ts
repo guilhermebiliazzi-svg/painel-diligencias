@@ -1,12 +1,13 @@
 // 05/11: funil de recrutamento com etapas (painel /sdr?f=recrutamento).
 // Etapa gravada em public.recrutamento_candidatos (uma linha por telefone); sem linha = "para decidir".
 
-export type EtapaRec = 'decidir' | 'contato' | 'entrevista' | 'entrou' | 'descartado';
+export type EtapaRec = 'decidir' | 'contato' | 'entrevista' | 'pensando' | 'entrou' | 'descartado';
 
 export const ETAPAS_REC: { k: EtapaRec | 'fora'; rotulo: string }[] = [
   { k: 'decidir', rotulo: 'Para decidir' },
   { k: 'contato', rotulo: 'Em contato' },
   { k: 'entrevista', rotulo: 'Entrevistas' },
+  { k: 'pensando', rotulo: 'Pensando' },
   { k: 'entrou', rotulo: 'Entraram' },
   { k: 'descartado', rotulo: 'Descartados' },
   { k: 'fora', rotulo: 'Fora de SP' },
