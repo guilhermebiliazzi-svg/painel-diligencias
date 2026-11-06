@@ -68,11 +68,14 @@ export default async function TreinamentoPage() {
           <div>
             <h1 className="text-2xl font-semibold text-slate-900">Treinamento de novatos</h1>
             <p className="mt-1 text-sm text-slate-600">
-              Trilha de 30 dias conduzida pelo Max no WhatsApp (11) 5192-8192. Para cadastrar, mudar datas, dias de
-              trabalho ou padrinho, fale com o Max pelo seu número.
+              Trilha de 30 dias conduzida pelo Max no WhatsApp (11) 5192-8192. Cadastre os novatos aqui; para mudar datas,
+              dias de trabalho ou padrinho, fale com o Max pelo seu número.
             </p>
           </div>
           <div className="flex gap-2">
+            <Link href="/treinamento/novo" className="rounded-lg bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800">
+              Cadastrar novatos
+            </Link>
             <Link href="/treinamento/enviar" className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">
               Mensagem pelo Max
             </Link>
@@ -88,7 +91,7 @@ export default async function TreinamentoPage() {
 
         {dados && dados.novatos.length === 0 && (
           <p className="mt-6 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
-            Nenhum novato cadastrado ainda. Mande para o Max: &quot;Cadastrar novato Fulano, 11 99999-9999, início dia 20/10&quot;.
+            Nenhum novato cadastrado ainda. Use &quot;Cadastrar novatos&quot;.
           </p>
         )}
 
