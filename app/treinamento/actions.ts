@@ -10,57 +10,13 @@
 import { revalidatePath } from 'next/cache';
 import { exigirTela } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-
-const WEBHOOK = 'https://villejds.app.n8n.cloud/webhook/onb-painel-enviar';
-// Chave combinada com o n8n (nó "Conferir envio do painel"), guardada na Vercel.
-const CHAVE = process.env.ONB_PAINEL_CHAVE || '';
-const JANELA_MS = (23 * 60 + 50) * 60 * 1000;
-const LIMITE_TEXTO = 1000;
+import { enviarUm, LIMITE_TEXTO, janelaAberta } from '@/lib/onb-whats';
+import {
+  enviarContrato, gerarPdfContrato, nomeEmpresa, textoAvisoContrato, textoBoasVindas, validarContrato, verificarContratos,
+} from '@/lib/onb-contrato';
+import type { ContratoNovato } from '@/lib/contrato-associacao';
 
 export type ResultadoEnvio = { ok: boolean; enviados: string[]; falhas: { nome: string; erro: string }[] };
-
-// Texto do modelo: a Meta não aceita quebra de linha, tab ou 4+ espaços nos parâmetros.
-const limpaModelo = (s: string) =>
-  s.replace(/\r/g, '').split('\n').map((x) => x.trim()).filter(Boolean).join(' | ').replace(/\s{2,}/g, ' ').replace(/\t/g, ' ');
-
-type Meta = { messages?: { id?: string }[]; error?: { message?: string; error_data?: { details?: string } } };
-
-async function enviarUm(n: { id: string; nome: string; phone: string }, texto: string, janela: boolean) {
-  const primeiro = n.nome.split(' ')[0];
-  const payload = janela
-    ? { messaging_product: 'whatsapp', to: n.phone, type: 'text', text: { body: texto } }
-    : {
-        messaging_product: 'whatsapp', to: n.phone, type: 'template',
-        template: {
-          name: 'onb_aviso', language: { code: 'pt_BR' },
-          components: [{ type: 'body', parameters: [{ type: 'text', text: primeiro }, { type: 'text', text: limpaModelo(texto).slice(0, LIMITE_TEXTO) }] }],
-        },
-      };
-  if (!CHAVE) return { ok: false as const, erro: 'falta configurar ONB_PAINEL_CHAVE na Vercel' };
-  let j: Meta = {};
-  try {
-    const r = await fetch(WEBHOOK, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-chave': CHAVE },
-      body: JSON.stringify({ payload }),
-      cache: 'no-store',
-    });
-    j = (await r.json().catch(() => ({}))) as Meta;
-    if (!r.ok && !j.error) return { ok: false as const, erro: `o n8n respondeu ${r.status}` };
-  } catch {
-    return { ok: false as const, erro: 'o n8n não respondeu' };
-  }
-  const wamid = j.messages?.[0]?.id;
-  if (!wamid) return { ok: false as const, erro: j.error?.error_data?.details || j.error?.message || 'a Meta não confirmou o envio' };
-  // Registra o que o novato recebeu (no modelo, a Meta monta o texto a partir do onb_aviso).
-  await supabaseAdmin().from('onb_mensagens').insert({
-    novato_id: n.id, phone: n.phone, direcao: 'out',
-    tipo: janela ? 'painel' : 'painel_modelo',
-    texto: janela ? texto : limpaModelo(texto).slice(0, LIMITE_TEXTO),
-    wa_message_id: wamid,
-  });
-  return { ok: true as const };
-}
 
 export async function enviarMensagem(ids: string[], textoBruto: string): Promise<ResultadoEnvio> {
   await exigirTela('treinamento');
@@ -74,12 +30,9 @@ export async function enviarMensagem(ids: string[], textoBruto: string): Promise
   const { data: novatos, error } = await sb.from('onb_novatos').select('id,nome,phone').in('id', lista);
   if (error) return { ok: false, enviados: [], falhas: [{ nome: '—', erro: error.message }] };
 
-  const desde = new Date(Date.now() - JANELA_MS).toISOString();
   const res: ResultadoEnvio = { ok: true, enviados: [], falhas: [] };
   for (const n of (novatos ?? []) as { id: string; nome: string; phone: string }[]) {
-    const { count } = await sb.from('onb_mensagens').select('id', { count: 'exact', head: true })
-      .eq('phone', n.phone).eq('direcao', 'in').gte('criado_em', desde);
-    const r = await enviarUm(n, texto, (count ?? 0) > 0);
+    const r = await enviarUm(n, texto, await janelaAberta(n.phone));
     if (r.ok) res.enviados.push(n.nome);
     else res.falhas.push({ nome: n.nome, erro: r.erro });
   }
@@ -91,22 +44,30 @@ export async function enviarMensagem(ids: string[], textoBruto: string): Promise
 
 // ------------------------------------------------------------------ cadastro
 // Cadastra corretores na trilha do Max a partir do painel (o mesmo que o comando
-// "cadastrar novato" no WhatsApp do Max): cria o novato, gera as tarefas da trilha
-// pela data de início e, se pedido, manda as boas-vindas pelo Max.
-export type NovoNovato = { corretor_id: number; padrinho_id: number | null };
+// "cadastrar novato" no WhatsApp do Max): cria o novato e gera as tarefas da trilha
+// pela data de início. Boas-vindas pelo Max:
+//  - com contrato: o Max avisa que o contrato vai chegar pela Clicksign, o contrato
+//    sai para assinatura e, quando o corretor assina, o Max manda a Cartilha e o hub
+//    (lib/onb-contrato.ts → verificarContratos);
+//  - sem contrato: as boas-vindas completas saem na hora.
+export type NovoNovato = { corretor_id: number; padrinho_id: number | null; contrato?: ContratoNovato | null };
 export type ResultadoCadastro = { ok: boolean; cadastrados: string[]; falhas: { nome: string; erro: string }[]; avisos: { nome: string; aviso: string }[] };
-
-// Boas-vindas: link da Cartilha do Corretor e senha inicial do hub.minharemax.com
-// (igual para todos; o corretor troca no primeiro acesso). Ficam na Vercel, não no código.
-const CARTILHA_URL = process.env.ONB_CARTILHA_URL || '';
-const HUB_SENHA_INICIAL = process.env.ONB_HUB_SENHA_INICIAL || '';
 
 const foneWhats = (t: string | null | undefined) => {
   const d = String(t ?? '').replace(/\D/g, '');
   return d.length === 10 || d.length === 11 ? '55' + d : d.length >= 12 ? d : '';
 };
 
-export async function cadastrarNovatos(lista: NovoNovato[], dataInicio: string, boasVindas: boolean): Promise<ResultadoCadastro> {
+export async function previaContrato(c: ContratoNovato): Promise<{ ok: boolean; pdf?: string; erro?: string }> {
+  await exigirTela('treinamento');
+  try {
+    return await gerarPdfContrato(c);
+  } catch (e) {
+    return { ok: false, erro: (e as Error).message };
+  }
+}
+
+export async function cadastrarNovatos(lista: NovoNovato[], dataInicio: string, boasVindas: boolean, comContrato = false): Promise<ResultadoCadastro> {
   await exigirTela('treinamento');
   const res: ResultadoCadastro = { ok: true, cadastrados: [], falhas: [], avisos: [] };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dataInicio))) return { ok: false, cadastrados: [], falhas: [{ nome: '—', erro: 'Escolha a data de início.' }], avisos: [] };
@@ -124,9 +85,19 @@ export async function cadastrarNovatos(lista: NovoNovato[], dataInicio: string, 
     if (!c || !nome) { res.falhas.push({ nome: `#${it.corretor_id}`, erro: 'corretor não encontrado' }); continue; }
     const phone = foneWhats(c.phone);
     if (!phone) { res.falhas.push({ nome, erro: 'sem celular no cadastro de corretor' }); continue; }
+    if (comContrato) {
+      const v = validarContrato(it.contrato);
+      if (v) { res.falhas.push({ nome, erro: v }); continue; }
+    }
     const linha: Record<string, unknown> = {
       corretor_id: c.id, nome, phone, data_inicio: dataInicio, calendar_id: c.calendar_id ?? null, status: 'ativo',
     };
+    if (comContrato) {
+      Object.assign(linha, {
+        contrato_empresa: it.contrato!.empresa, contrato_status: 'enviando', contrato_pedido_id: null, contrato_envelope_id: null,
+        contrato_erro: null, contrato_enviado_em: new Date().toISOString(), contrato_assinado_em: null, boas_vindas_em: null,
+      });
+    }
     const padr = Number(it.padrinho_id);
     if (padr > 0 && padr !== Number(c.id)) linha.padrinho_id = padr;
     const { data: nov, error: e1 } = await sb.from('onb_novatos').upsert(linha, { onConflict: 'phone' }).select('id').single();
@@ -134,27 +105,50 @@ export async function cadastrarNovatos(lista: NovoNovato[], dataInicio: string, 
     const id = (nov as { id: string }).id;
     const { error: e2 } = await sb.rpc('onb_gerar_tarefas', { p_novato: id });
     if (e2) { res.falhas.push({ nome, erro: 'cadastrado, mas as tarefas não foram geradas: ' + e2.message }); continue; }
-    if (boasVindas) {
-      const [, m, d] = dataInicio.split('-');
+
+    if (comContrato) {
+      const ct = it.contrato!;
+      // 1) PDF primeiro: se o preenchimento falhar, ninguém recebe nada
+      const pdf = await gerarPdfContrato(ct).catch((e: Error) => ({ ok: false as const, erro: e.message, pdf: undefined }));
+      if (!pdf.ok) {
+        await sb.from('onb_novatos').update({ contrato_status: 'erro', contrato_erro: pdf.erro }).eq('id', id);
+        res.falhas.push({ nome, erro: 'cadastrado, mas o contrato não foi gerado: ' + pdf.erro });
+        continue;
+      }
+      // 2) aviso do Max e 3) envio pela Clicksign
+      const aviso = await enviarUm({ id, nome, phone }, textoAvisoContrato(ct.dados.nome || nome, ct.empresa), await janelaAberta(phone));
+      if (!aviso.ok) res.avisos.push({ nome, aviso: 'o aviso do Max sobre o contrato não saiu: ' + aviso.erro });
+      const env = await enviarContrato(ct, phone, pdf.pdf).catch((e: Error) => ({ ok: false as const, erro: e.message, pedido: undefined }));
+      if (!env.ok) {
+        await sb.from('onb_novatos').update({ contrato_status: 'erro', contrato_erro: env.erro }).eq('id', id);
+        res.falhas.push({ nome, erro: 'cadastrado, mas o contrato não foi enviado: ' + env.erro });
+        continue;
+      }
+      await sb.from('onb_novatos').update({ contrato_pedido_id: env.pedido }).eq('id', id);
+      res.avisos.push({ nome, aviso: `contrato enviado pela Clicksign (${nomeEmpresa(ct.empresa)}). A Cartilha e o hub vão quando ele(a) assinar.` });
+    } else if (boasVindas) {
       const email = String(c.email ?? '').trim().toLowerCase();
-      const partes = [
-        `Bem-vindo(a) à REMAX Ville! Sou o Max, seu assistente de treinamento, e vou te acompanhar nos seus 30 primeiros dias, passo a passo. Sua trilha começa em ${d}/${m}.`,
-        CARTILHA_URL ? `Sua Cartilha do Corretor: ${CARTILHA_URL}` : '',
-        email && HUB_SENHA_INICIAL
-          ? `Seu acesso ao hub.minharemax.com: login ${email} e senha inicial ${HUB_SENHA_INICIAL} (o sistema pede para você trocar a senha no primeiro acesso).`
-          : '',
-        'Para começar, me responda esta mensagem.',
-      ];
-      const texto = partes.filter(Boolean).join('\n\n');
-      if (!CARTILHA_URL) res.avisos.push({ nome, aviso: 'boas-vindas sem a Cartilha (falta ONB_CARTILHA_URL na Vercel)' });
-      if (!HUB_SENHA_INICIAL) res.avisos.push({ nome, aviso: 'boas-vindas sem o acesso ao hub (falta ONB_HUB_SENHA_INICIAL na Vercel)' });
-      else if (!email) res.avisos.push({ nome, aviso: 'boas-vindas sem o acesso ao hub: o cadastro de corretor não tem e-mail' });
+      const { texto, avisos } = textoBoasVindas(dataInicio, email, false);
+      for (const a of avisos) res.avisos.push({ nome, aviso: a });
       const r = await enviarUm({ id, nome, phone }, texto, false);
       if (!r.ok) { res.falhas.push({ nome, erro: 'cadastrado, mas as boas-vindas não saíram: ' + r.erro }); continue; }
+      await sb.from('onb_novatos').update({ boas_vindas_em: new Date().toISOString() }).eq('id', id);
     }
     res.cadastrados.push(nome);
   }
   res.ok = res.falhas.length === 0;
   revalidatePath('/treinamento');
   return res;
+}
+
+// Botão "Conferir assinaturas" e reenvio manual.
+export async function conferirContratos(): Promise<{ ok: boolean; assinados: string[]; erro?: string }> {
+  await exigirTela('treinamento');
+  try {
+    const r = await verificarContratos({ forcar: true });
+    revalidatePath('/treinamento');
+    return { ok: true, assinados: r.assinados };
+  } catch (e) {
+    return { ok: false, assinados: [], erro: (e as Error).message };
+  }
 }
