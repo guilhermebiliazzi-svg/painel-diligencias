@@ -8,7 +8,7 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { enviarUm, janelaAberta } from '@/lib/onb-whats';
 import {
-  camposContrato, faltando, EMPRESAS,
+  camposContrato, faltando, faixasDe, EMPRESAS,
   type ContratoNovato, type Empresa, type Parte, type Testemunha,
 } from '@/lib/contrato-associacao';
 
@@ -61,7 +61,7 @@ async function modeloId(): Promise<number | null> {
 export function validarContrato(c: ContratoNovato | null | undefined): string | null {
   if (!c) return 'faltam os dados do contrato';
   if (!EMPRESAS.some((e) => e.id === c.empresa)) return 'escolha a empresa do contrato';
-  if (![40, 45, 60, 70].includes(Number(c.faixa))) return 'escolha a faixa do plano de partilha';
+  if (!faixasDe(c.empresa).includes(Number(c.faixa) as ContratoNovato['faixa'])) return `a faixa ${c.faixa}% não vale para ${c.empresa === 'samia' ? 'o Team Samia (só 40% ou 45%)' : 'a REMAX Ville'}`;
   const f = faltando(c.dados);
   return f.length ? 'falta no contrato: ' + f.join(', ') : null;
 }
