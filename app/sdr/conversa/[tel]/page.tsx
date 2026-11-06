@@ -2,8 +2,8 @@
 // Junta: mensagens recebidas (mensagens_buffer), respostas da Eva (n8n_chat_histories, sem horário —
 // herdam o horário da mensagem que responderam) e mensagens do sistema (sdr_mensagens, com status do WhatsApp).
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
-import { exigirSdrGestao } from '@/lib/perfil';
+import { notFound, redirect } from 'next/navigation';
+import { exigirPerfil, podeTela, escopoSdr } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import MensagemEva from '@/app/sdr/lead/[id]/mensagem';
 import { statusDasMensagens, enviosDaEva, casarEnvio, rotuloStatus, mensagensAvulsas, casarAvulsa } from '@/lib/wa-status';
@@ -26,12 +26,19 @@ function variantes(tel: string): string[] {
 type Ev = { k: string; t: number; lado: 'pessoa' | 'eva' | 'sistema'; rotulo: string; texto: string; status?: string; aprox?: boolean };
 
 export default async function ConversaSdr({ params }: { params: Promise<{ tel: string }> }) {
-  await exigirSdrGestao();
+  // 06/11: quem gerencia o SDR vê qualquer conversa; quem tem só a tela Recrutamento vê só a de candidatos.
+  const perfil = await exigirPerfil();
+  const gestao = podeTela(perfil, 'sdr') && escopoSdr(perfil) === 'todos';
+  if (!gestao && !podeTela(perfil, 'recrutamento')) redirect('/sem-acesso');
   const { tel } = await params;
   const dig = decodeURIComponent(tel).replace(/\D/g, '');
   if (dig.length < 10 || dig.length > 13) notFound();
   const vs = variantes(dig.length <= 11 ? '55' + dig : dig);
   const sb = supabaseAdmin();
+  if (!gestao) {
+    const { count } = await sb.from('recrutamento_leads').select('id', { count: 'exact', head: true }).like('telefone', '%' + dig.slice(-8));
+    if (!count) redirect('/sem-acesso');
+  }
 
   const [{ data: buf }, { data: hist }, { data: msgs }, { data: cors }, { data: leadsCli }, { data: leadsCor }, { data: parcs }, { data: orulo }] = await Promise.all([
     sb.from('mensagens_buffer').select('id,mensagem_texto,tipo_msg,created_at,processado_em').in('phone', vs).order('created_at', { ascending: true }).limit(800),
@@ -105,11 +112,11 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
   const cor_ = { pessoa: 'bg-white border-slate-200', eva: 'bg-blue-50 border-blue-100', sistema: 'bg-amber-50 border-amber-100' };
   return (
     <main className="mx-auto max-w-3xl px-4 py-6">
-      <Link href="/sdr" className="text-sm text-blue-700 underline">← SDR</Link>
+      <Link href={gestao ? '/sdr' : '/recrutamento'} className="text-sm text-blue-700 underline">{gestao ? '← SDR' : '← Recrutamento'}</Link>
       <section style={{ backgroundColor: '#ffffff' }} className="mt-3 rounded-2xl border border-slate-200 p-4 shadow-sm">
         <h1 className="text-lg font-semibold text-slate-900">Conversa com {quem}</h1>
         <p className="text-sm text-slate-600">{telFmt(vs[0])} · <a href={'https://wa.me/' + vs[0]} target="_blank" className="text-blue-700 underline">abrir no WhatsApp</a></p>
-        {(lc.length > 0 || lr.length > 0 || parc.length > 0) && (
+        {gestao && (lc.length > 0 || lr.length > 0 || parc.length > 0) && (
           <div className="mt-2 flex flex-wrap gap-2 text-xs">
             {[...lc.map((x) => ({ id: x.id, t: 'cliente: ' + (x.nome || 'lead') })), ...lr.map((x) => ({ id: x.id, t: 'corretor de ' + (x.nome || 'lead') })), ...parc.map((x) => ({ id: x.lead_id, t: 'parceiro · ' + (x.ref || 'imóvel') }))]
               .filter((x, i, a) => a.findIndex((y) => y.id === x.id) === i).slice(0, 12)
@@ -129,7 +136,7 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
         ))}
         {!eventos.length && <li className="text-sm text-slate-500">Nenhuma mensagem com este número.</li>}
       </ol>
-      {externo && (
+      {gestao && externo && (
         <div className="mt-4">
           <MensagemEva leadId="" parceiroTel={vs[0]}
             destinos={[{ chave: 'parceiro', destino: 'parceiro', rotulo: 'Corretor(a) de fora', detalhe: (nomeProf || nomeOrulo || parc[0]?.parceiro_nome || 'Corretor') + ' · ' + telFmt(vs[0]), janela: (recentes ?? 0) > 0 }]} />
