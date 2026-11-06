@@ -174,3 +174,11 @@ export async function exigirSdrGestao(): Promise<Perfil> {
   if (escopoSdr(perfil) !== 'todos') redirect('/sem-acesso');
   return perfil;
 }
+
+// 06/11: recrutamento de corretores — quem gerencia o SDR inteiro ou quem tem só a tela Recrutamento.
+export async function exigirRecrutamento(): Promise<Perfil> {
+  const perfil = await exigirPerfil();
+  const gestaoSdr = podeTela(perfil, 'sdr') && escopoSdr(perfil) === 'todos';
+  if (!gestaoSdr && !podeTela(perfil, 'recrutamento')) redirect('/sem-acesso');
+  return perfil;
+}

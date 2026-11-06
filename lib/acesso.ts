@@ -19,6 +19,7 @@ export type Tela =
   | 'pagamentos'
   | 'captacao'
   | 'sdr'
+  | 'recrutamento'
   | 'estudo'
   | 'representacao'
   | 'posicionamento'
@@ -59,6 +60,8 @@ export type DefTela = {
 
 export const TELAS: DefTela[] = [
   { chave: 'sdr', titulo: 'Funil do SDR', area: 'venda', flag: null },
+  // 06/11: só o funil de recrutamento (candidatos a corretor), sem o resto do SDR.
+  { chave: 'recrutamento', titulo: 'Recrutamento de corretores', area: 'venda', flag: null },
   { chave: 'captacao', titulo: 'Captação', area: 'venda', flag: 'pode_captacao' },
   { chave: 'estudo', titulo: 'Estudo de mercado', area: 'venda', flag: 'pode_postagens' },
   { chave: 'representacao', titulo: 'Contrato de representação', area: 'venda', flag: null },

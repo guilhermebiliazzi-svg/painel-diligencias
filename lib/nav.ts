@@ -14,7 +14,7 @@ export type ItemNav = {
 };
 
 const EMOJI: Record<string, string> = {
-  sdr: '🔻', captacao: '🔎', estudo: '📝', representacao: '✍️', posicionamento: '🗺️', diligencias: '📄', postagens: '🖼️', vitrine: '📣',
+  sdr: '🔻', recrutamento: '🤝', captacao: '🔎', estudo: '📝', representacao: '✍️', posicionamento: '🗺️', diligencias: '📄', postagens: '🖼️', vitrine: '📣',
   'cobranca-avulsa': '💳', 'notas-comissao': '🧾',
   cobrancas: '💳', contratos: '📑', repasse: '🔁', pagamentos: '🏦', locador: '🏢', notas: '🧾',
   usuarios: '👥', treinamento: '🎓', oficinas: '🧑‍🏫', ligacoes: '📞',
@@ -38,6 +38,7 @@ export function getNav(): ItemNav[] {
   return [
     // Venda
     item('sdr', 'Funil do SDR', 'Leads da Eva: quem respondeu, qualificou, foi distribuído e visitou.', 'PAINEL_URL_SDR', '/sdr', 'funil', 'blue', 'sdr'),
+    item('recrutamento', 'Recrutamento de corretores', 'Candidatos a corretor: quem decidir, encaminhar, entrevistas e quem entrou.', 'PAINEL_URL_RECRUTAMENTO', '/recrutamento', 'usuarios', 'violet', 'recrutamento'),
     item('captacao', 'Captação', 'Quem consta ligado a uma unidade, e como falar com a pessoa.', 'PAINEL_URL_CAPTACAO', '/captacao', 'captacao', 'blue', 'captacao'),
     item('estudo', 'Estudo de mercado', 'Ficha de captação: preencha na visita e mande para a Eva fazer o estudo.', 'PAINEL_URL_ESTUDO', '/estudo', 'captacao', 'blue', 'estudo'),
     item('representacao', 'Contrato de representação', 'Preencher o contrato do proprietário, conferir o PDF e enviar para assinatura.', 'PAINEL_URL_REPRESENTACAO', '/representacao', 'captacao', 'blue', 'representacao'),
