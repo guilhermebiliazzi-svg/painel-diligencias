@@ -2,7 +2,7 @@
 
 // 05/11: ações do funil de recrutamento (painel). A etapa fica em public.recrutamento_candidatos.
 // Mensagens saem pela Eva via n8n (sdr-painel-acao); o telefone é sempre resolvido no banco.
-import { exigirSdrGestao } from '@/lib/perfil';
+import { exigirRecrutamento } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { MOTIVOS_DESCARTE, telFmt, type EtapaRec } from '@/lib/recrutamento';
 
@@ -56,7 +56,7 @@ async function acaoN8n(body: Record<string, unknown>): Promise<ResultadoRec> {
 
 // Muda a etapa (descartar, entrou, voltar para decidir, marcar entrevista).
 export async function mudarEtapaCandidato(tel: string, etapa: EtapaRec, extra?: { motivo?: string; entrevista_em?: string }): Promise<ResultadoRec> {
-  const eu = await exigirSdrGestao();
+  const eu = await exigirRecrutamento();
   const c = await lerCandidato(tel);
   if (!c) return { ok: false, erro: 'Candidato não encontrado.' };
   if (!['decidir', 'contato', 'entrevista', 'entrou', 'descartado'].includes(etapa)) return { ok: false, erro: 'Etapa inválida.' };
@@ -83,7 +83,7 @@ export async function mudarEtapaCandidato(tel: string, etapa: EtapaRec, extra?: 
 
 // Encaminha o candidato para quem o Guilherme escolher (corretor da Ville) — ou "eu mesmo", sem mensagem.
 export async function encaminharCandidato(tel: string, corretorId: number | null): Promise<ResultadoRec> {
-  const eu = await exigirSdrGestao();
+  const eu = await exigirRecrutamento();
   const c = await lerCandidato(tel);
   if (!c) return { ok: false, erro: 'Candidato não encontrado.' };
   if (corretorId == null) {
@@ -110,7 +110,7 @@ export async function encaminharCandidato(tel: string, corretorId: number | null
 
 // Mensagem da Eva para o candidato (texto livre na janela de 24h; fora dela, mensagem-modelo).
 export async function chamarCandidato(tel: string, texto: string): Promise<ResultadoRec> {
-  const eu = await exigirSdrGestao();
+  const eu = await exigirRecrutamento();
   const c = await lerCandidato(tel);
   if (!c) return { ok: false, erro: 'Candidato não encontrado.' };
   const t = String(texto ?? '').replace(/\r/g, '').trim();
