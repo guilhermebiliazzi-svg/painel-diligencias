@@ -116,7 +116,7 @@ export async function cadastrarNovatos(lista: NovoNovato[], dataInicio: string, 
         continue;
       }
       // 2) aviso do Max e 3) envio pela Clicksign
-      const aviso = await enviarUm({ id, nome, phone }, textoAvisoContrato(ct.dados.nome || nome, ct.empresa), await janelaAberta(phone));
+      const aviso = await enviarUm({ id, nome, phone }, textoAvisoContrato(ct.dados.nome || nome), await janelaAberta(phone));
       if (!aviso.ok) res.avisos.push({ nome, aviso: 'o aviso do Max sobre o contrato não saiu: ' + aviso.erro });
       const env = await enviarContrato(ct, phone, pdf.pdf).catch((e: Error) => ({ ok: false as const, erro: e.message, pedido: undefined }));
       if (!env.ok) {
