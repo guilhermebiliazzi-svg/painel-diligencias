@@ -55,11 +55,11 @@ async function acaoN8n(body: Record<string, unknown>): Promise<ResultadoRec> {
 }
 
 // Muda a etapa (descartar, entrou, voltar para decidir, marcar entrevista).
-export async function mudarEtapaCandidato(tel: string, etapa: EtapaRec, extra?: { motivo?: string; entrevista_em?: string }): Promise<ResultadoRec> {
+export async function mudarEtapaCandidato(tel: string, etapa: EtapaRec, extra?: { motivo?: string; entrevista_em?: string; retomar_em?: string }): Promise<ResultadoRec> {
   const eu = await exigirRecrutamento();
   const c = await lerCandidato(tel);
   if (!c) return { ok: false, erro: 'Candidato não encontrado.' };
-  if (!['decidir', 'contato', 'entrevista', 'entrou', 'descartado'].includes(etapa)) return { ok: false, erro: 'Etapa inválida.' };
+  if (!['decidir', 'contato', 'entrevista', 'pensando', 'entrou', 'descartado'].includes(etapa)) return { ok: false, erro: 'Etapa inválida.' };
   const patch: Record<string, unknown> = { etapa };
   let evento: string = etapa;
   if (etapa === 'descartado') {
@@ -74,6 +74,13 @@ export async function mudarEtapaCandidato(tel: string, etapa: EtapaRec, extra?: 
     patch.entrevista_em = iso;
     patch.motivo = null;
     evento = 'entrevista marcada: ' + q.replace('T', ' ');
+  } else if (etapa === 'pensando') {
+    // 06/11: fez entrevista e ficou de pensar — data para retomar o contato
+    const d = String(extra?.retomar_em ?? '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return { ok: false, erro: 'Informe a data para retomar.' };
+    patch.retomar_em = d;
+    patch.motivo = null;
+    evento = 'pensando, retomar em ' + d.split('-').reverse().join('/');
   } else {
     patch.motivo = null;
   }

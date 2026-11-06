@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { mudarEtapaCandidato, encaminharCandidato, chamarCandidato, type ResultadoRec } from './recrutamento-actions';
 import { MOTIVOS_DESCARTE, type EtapaRec } from '@/lib/recrutamento';
 
-type Painel = '' | 'encaminhar' | 'entrevista' | 'descartar' | 'mensagem';
+type Painel = '' | 'encaminhar' | 'entrevista' | 'pensando' | 'descartar' | 'mensagem';
 const btn = 'rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50';
 const btnOn = 'rounded-lg border border-slate-900 bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white';
 const campo = 'min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm';
@@ -18,6 +18,7 @@ export default function AcoesCandidato({ tel, etapa, fora, corretores }: { tel: 
   const [pend, start] = useTransition();
   const [cor, setCor] = useState('');
   const [quando, setQuando] = useState('');
+  const [retomar, setRetomar] = useState('');
   const [motivo, setMotivo] = useState(fora ? 'Fora de SP' : '');
   const [texto, setTexto] = useState('');
 
@@ -33,7 +34,10 @@ export default function AcoesCandidato({ tel, etapa, fora, corretores }: { tel: 
       <div className="flex flex-wrap gap-1.5">
         {!encerrado && <button type="button" className={aberto === 'encaminhar' ? btnOn : btn} onClick={() => alternar('encaminhar')}>Encaminhar</button>}
         {!encerrado && <button type="button" className={aberto === 'entrevista' ? btnOn : btn} onClick={() => alternar('entrevista')}>{etapa === 'entrevista' ? 'Remarcar entrevista' : 'Marcar entrevista'}</button>}
-        {(etapa === 'contato' || etapa === 'entrevista') && (
+        {(etapa === 'contato' || etapa === 'entrevista' || etapa === 'pensando') && (
+          <button type="button" className={aberto === 'pensando' ? btnOn : btn} onClick={() => alternar('pensando')}>{etapa === 'pensando' ? 'Mudar data de retomar' : 'Ficou de pensar'}</button>
+        )}
+        {(etapa === 'contato' || etapa === 'entrevista' || etapa === 'pensando') && (
           <button type="button" disabled={pend} className={btn} onClick={() => rodar(() => mudarEtapaCandidato(tel, 'entrou'))}>Entrou</button>
         )}
         <button type="button" className={aberto === 'mensagem' ? btnOn : btn} onClick={() => alternar('mensagem')}>Mensagem pela Eva</button>
@@ -62,6 +66,15 @@ export default function AcoesCandidato({ tel, etapa, fora, corretores }: { tel: 
           <input type="datetime-local" value={quando} onChange={(e) => setQuando(e.target.value)} className={campo} />
           <button type="button" disabled={pend || !quando} className={btnOn}
             onClick={() => rodar(() => mudarEtapaCandidato(tel, 'entrevista', { entrevista_em: quando }))}>{pend ? 'Gravando…' : 'Gravar'}</button>
+        </div>
+      )}
+
+      {aberto === 'pensando' && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-slate-600">Retomar em</span>
+          <input type="date" value={retomar} onChange={(e) => setRetomar(e.target.value)} className={campo} />
+          <button type="button" disabled={pend || !retomar} className={btnOn}
+            onClick={() => rodar(() => mudarEtapaCandidato(tel, 'pensando', { retomar_em: retomar }))}>{pend ? 'Gravando…' : 'Gravar'}</button>
         </div>
       )}
 
