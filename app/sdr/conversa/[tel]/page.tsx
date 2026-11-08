@@ -89,14 +89,21 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
   }
   // respostas da Eva: herdam o horário da mensagem da pessoa que responderam
   const limpa = (c: string) => c.replace(/^(\s*\[[^\]]*\]\s*)+/, '').replace(/\n+IMPORTANTE:[\s\S]*$/, '').trim();
+  const norm = (x: string) => x.toLowerCase().replace(/\s+/g, ' ').trim();
   let ptr = 0; let tRef: number | null = null; let seq = 0;
   for (const h of (hist ?? []) as { id: number; message: { type?: string; content?: string } }[]) {
     const c = String(h.message?.content ?? '');
     if (h.message?.type === 'human') {
       const tx = limpa(c); seq = 0;
-      for (let i = ptr; i < bufs.length; i++) {
-        const bt = (bufs[i].mensagem_texto || '').trim();
-        if (bt && tx && (tx.includes(bt) || bt.includes(tx))) { tRef = new Date(bufs[i].processado_em || bufs[i].created_at).getTime(); ptr = i + 1; break; }
+      // 08/11: texto curto ("ok", "não") só casa se for igual; "contém" só para textos longos. E só olha as próximas
+      // mensagens da pessoa — antes, um "não" de hoje casava com uma mensagem antiga que continha "não" e puxava
+      // todas as respostas antigas da Eva para a data de hoje.
+      const nt = norm(tx);
+      for (let i = ptr; i < Math.min(bufs.length, ptr + 30); i++) {
+        const nb = norm(bufs[i].mensagem_texto || '');
+        if (!nb || !nt) continue;
+        const casa = nb === nt || (Math.min(nb.length, nt.length) >= 20 && (nt.includes(nb) || nb.includes(nt)));
+        if (casa) { tRef = new Date(bufs[i].processado_em || bufs[i].created_at).getTime(); ptr = i + 1; break; }
       }
     } else if (h.message?.type === 'ai' && tRef != null) {
       const tx = c.trim();
