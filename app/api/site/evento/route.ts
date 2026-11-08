@@ -1,12 +1,13 @@
 // 08/11: registro próprio de navegação do www.villejardins.com.br (painel → Site).
-// O site manda cada página vista e cada ação (WhatsApp, formulário, busca) por
+// O site manda cada página vista, o tempo nela, e cada ação (WhatsApp, formulário, busca,
+// telefone, link para fora) por
 // navigator.sendBeacon. Nada identifica a pessoa: o visitante é um id aleatório
 // guardado no navegador. Aqui só se aceita o domínio do site, classifica-se a
 // origem (Google orgânico, Google Ads, Instagram, direto...) e grava-se em site_eventos.
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
-const TIPOS = new Set(['pagina', 'whatsapp', 'formulario', 'busca', 'telefone', 'compartilhar']);
+const TIPOS = new Set(['pagina', 'whatsapp', 'formulario', 'busca', 'telefone', 'compartilhar', 'tempo', 'link']);
 const ROBO = /bot|crawl|spider|slurp|headless|lighthouse|preview|facebookexternalhit|whatsapp\/|python|curl|wget/i;
 
 function origemPermitida(o: string | null) {
@@ -48,6 +49,8 @@ function classificar(ref: string | null, u: Record<string, string | null>, cliqu
   if (clique === 'gclid' || clique === 'gbraid' || clique === 'wbraid' || (pagoUtm && /google|adwords/.test(src))) {
     return { origem: 'Google Ads', detalhe: 'Google Ads', pago: true };
   }
+  // clique em anúncio de Display/Demand Gen que chegou sem gclid (o anúncio abre por esses domínios)
+  if (/googlesyndication\.com|doubleclick\.net|googleadservices\.com/.test(h)) return { origem: 'Google Ads', detalhe: 'Google Ads (rede de display)', pago: true };
   if (clique === 'fbclid' && pagoUtm) return { origem: 'Meta Ads', detalhe: 'Meta Ads', pago: true };
   if (pagoUtm) {
     const n = src || h || 'anúncio';
@@ -71,6 +74,19 @@ function classificar(ref: string | null, u: Record<string, string | null>, cliqu
   if (/remax\.com\.br|usesquare|usenonstop/.test(h)) return { origem: 'Sites REMAX', detalhe: h, pago: false };
   if (/villejardins\.com\.br$/.test(h)) return { origem: 'Direto', detalhe: 'Direto (navegação interna)', pago: false };
   return { origem: 'Outros sites', detalhe: h, pago: false };
+}
+
+// Só guarda do "extra" o que a tela usa: id da visualização, segundos e % rolada.
+function extraLimpo(e: unknown) {
+  if (!e || typeof e !== 'object') return null;
+  const x = e as Record<string, unknown>;
+  const out: Record<string, string | number> = {};
+  if (typeof x.pv === 'string' && /^[\w-]{4,20}$/.test(x.pv)) out.pv = x.pv;
+  const n = (v: unknown, max: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(max, Math.round(v))) : null);
+  const seg = n(x.seg, 3600), rol = n(x.rolagem, 100);
+  if (seg != null) out.seg = seg;
+  if (rol != null) out.rolagem = rol;
+  return Object.keys(out).length ? out : null;
 }
 
 function dispositivo(ua: string) {
@@ -128,7 +144,7 @@ export async function POST(req: Request) {
     imovel_id: txt(b.i, 40),
     bairro: txt(b.b, 80),
     valor: txt(b.x, 200),
-    extra: b.e && typeof b.e === 'object' ? b.e : null,
+    extra: extraLimpo(b.e),
   });
   if (error) return new NextResponse(null, { status: 500, headers: h });
   return new NextResponse(null, { status: 204, headers: h });
