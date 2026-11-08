@@ -22,7 +22,7 @@ type Dados = {
   links: { destino: string; vezes: number; sessoes: number }[];
   jornadas: Jornada[];
   dispositivos: { dispositivo: string; sessoes: number; contatos: number; tempo_medio: number }[];
-  imoveis: { imovel_id: string; titulo: string | null; caminho: string | null; visitas: number; sessoes: number; contatos: number; tempo_medio: number; rolagem_media: number }[];
+  imoveis: { imovel_id: string; titulo: string | null; caminho: string | null; visitas: number; sessoes: number; contatos: number; whats?: number; chegaram?: number; forms?: number; tels?: number; tempo_medio: number; rolagem_media: number }[];
   bairros: { bairro: string; visitas: number; sessoes: number }[];
   buscas: { termo: string; vezes: number }[];
   saidas: { caminho: string; sessoes: number; sem_contato: number }[];
@@ -283,10 +283,13 @@ export default async function SitePage({ searchParams }: { searchParams: Promise
 
             <Secao titulo="Imóveis mais vistos">
               <Tabela
-                cab={[{ t: 'Imóvel' }, { t: 'Visualizações', dir: true }, { t: 'Visitas', dir: true }, { t: 'Tempo médio', dir: true }, { t: 'Rolou até', dir: true }, { t: 'Contatos', dir: true }]}
+                cab={[{ t: 'Imóvel' }, { t: 'Visualizações', dir: true }, { t: 'Visitas', dir: true }, { t: 'Tempo médio', dir: true }, { t: 'Rolou até', dir: true }, { t: 'WhatsApp', dir: true }, { t: 'Contatos', dir: true }]}
                 linhas={d.imoveis.map((i) => [
                   <a key="a" href={SITE + (i.caminho || '/imovel/' + i.imovel_id)} target="_blank" rel="noopener" className="text-blue-700 hover:underline">{(i.titulo || i.imovel_id).replace(/ \| REMAX Ville$/, '')}</a>,
-                  int(i.visitas), int(i.sessoes), dur(i.tempo_medio), i.rolagem_media ? i.rolagem_media + '%' : '—', int(i.contatos),
+                  int(i.visitas), int(i.sessoes), dur(i.tempo_medio), i.rolagem_media ? i.rolagem_media + '%' : '—',
+                  // 08/11: clique no WhatsApp ≠ contato. Contato = chegou na Eva, formulário ou ligação.
+                  i.whats ? <span key="w" className="whitespace-nowrap">{int(i.whats)} {i.whats === 1 ? 'clique' : 'cliques'}<span className="block text-xs text-slate-500">{int(i.chegaram ?? 0)} {(i.chegaram ?? 0) === 1 ? 'chegou' : 'chegaram'} na Eva</span></span> : '—',
+                  (i.chegaram ?? 0) + (i.forms ?? 0) + (i.tels ?? 0) ? <span key="c" className="whitespace-nowrap">{int((i.chegaram ?? 0) + (i.forms ?? 0) + (i.tels ?? 0))}<span className="block text-xs text-slate-500">{[i.chegaram ? int(i.chegaram) + ' WhatsApp' : '', i.forms ? int(i.forms) + ' formulário' : '', i.tels ? int(i.tels) + ' ligação' : ''].filter(Boolean).join(' · ')}</span></span> : '—',
                 ])}
               />
             </Secao>
