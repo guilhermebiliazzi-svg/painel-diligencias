@@ -35,6 +35,8 @@ const REGRAS: Regra[] = [
   { re: /^\/sdr(\/|$)/, perm: 'sdr', legacy: false },
   { re: /^\/recrutamento(\/|$)/, perm: 'recrutamento', legacy: false },
   { re: /^\/vitrine(\/|$)/, perm: 'vitrine', legacy: false },
+  // 08/11: números do site villejardins.com.br (mesma permissão da Vitrine)
+  { re: /^\/site(\/|$)/, perm: 'vitrine', legacy: false },
   { re: /^\/captacao(\/|$)/, perm: 'captacao', legacy: false },
   { re: /^\/postagens(\/|$)/, perm: 'postagens', legacy: false },
   { re: /^\/estudo(\/|$)/, perm: 'estudo', legacy: false },
