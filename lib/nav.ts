@@ -14,7 +14,7 @@ export type ItemNav = {
 };
 
 const EMOJI: Record<string, string> = {
-  sdr: '🔻', recrutamento: '🤝', captacao: '🔎', estudo: '📝', representacao: '✍️', posicionamento: '🗺️', diligencias: '📄', postagens: '🖼️', vitrine: '📣',
+  sdr: '🔻', recrutamento: '🤝', captacao: '🔎', estudo: '📝', representacao: '✍️', posicionamento: '🗺️', diligencias: '📄', postagens: '🖼️', vitrine: '📣', site: '📊',
   'cobranca-avulsa': '💳', 'notas-comissao': '🧾',
   cobrancas: '💳', contratos: '📑', repasse: '🔁', pagamentos: '🏦', locador: '🏢', notas: '🧾',
   usuarios: '👥', treinamento: '🎓', oficinas: '🧑‍🏫', ligacoes: '📞',
@@ -47,6 +47,7 @@ export function getNav(): ItemNav[] {
     item('oficinas', 'Oficinas', 'Registrar a presença nas oficinas da loja e acessar o material de apoio.', 'PAINEL_URL_OFICINAS', '/oficinas', 'usuarios', 'emerald', 'oficinas'),
     item('diligencias', 'Diligências', 'Auditoria de certidões e acompanhamento das diligências.', 'PAINEL_URL_DILIGENCIAS', '/admin', 'diligencias', 'blue', 'diligencias'),
     item('postagens', 'Postagens', 'Montar o carrossel de um imóvel para o Instagram escolhendo as fotos do anúncio.', 'PAINEL_URL_POSTAGENS', '/postagens', 'vitrine', 'violet', 'postagens'),
+    item('site', 'Números do site', 'Visitas, imóveis vistos, contatos e de onde vieram (orgânico ou anúncio) no villejardins.com.br.', 'PAINEL_URL_SITE', '/site', 'vitrine', 'violet', 'vitrine'),
     item('vitrine', 'Vitrine Google Ads', 'Escolher os imóveis que aparecem nos anúncios por região do Google Ads.', 'PAINEL_URL_VITRINE', '/vitrine', 'vitrine', 'violet', 'vitrine'),
     // Tela do painel (/cobranca-split); a emissão continua no n8n (WF-A4).
     item('cobranca-avulsa', 'Cobrança com split', 'Boleto no Asaas com a comissão já dividida, ligado à venda, e o histórico com status.', 'PAINEL_URL_COBRANCA_SPLIT', '/cobranca-split', 'cobrancas', 'amber', 'cobrancas', 'venda'),
