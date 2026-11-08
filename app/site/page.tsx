@@ -11,11 +11,11 @@ export const metadata = { title: 'Site — REMAX Ville' };
 
 type Jornada = {
   sessao: string; inicio: string; origem: string | null; referrer: string | null; pago: boolean; dispositivo: string | null;
-  tempo: number; paginas: number; contato: boolean; acoes: string | null;
+  tempo: number; paginas: number; contato: boolean; acoes: string | null; eva_phone: string | null;
   passos: { caminho: string | null; titulo: string | null; seg: number | null; rolagem: number | null }[] | null;
 };
 type Dados = {
-  resumo: { visitantes: number; sessoes: number; paginas: number; contatos: number; whatsapp: number; formularios: number; telefones: number; sessoes_pagas: number; contatos_pagos: number; uma_pagina: number; tempo_medio: number; tempo_mediano: number; buscas: number };
+  resumo: { visitantes: number; sessoes: number; paginas: number; contatos: number; whatsapp: number; formularios: number; telefones: number; whats_chegaram: number; sessoes_pagas: number; contatos_pagos: number; uma_pagina: number; tempo_medio: number; tempo_mediano: number; buscas: number };
   por_dia: { dia: string; visitantes: number; sessoes: number; contatos: number }[];
   origens: { origem: string; pago: boolean; sessoes: number; visitantes: number; contatos: number; paginas_por_sessao: number; tempo_medio: number }[];
   entradas: { caminho: string; sessoes: number; sairam: number; contatos: number; tempo_medio: number }[];
@@ -88,6 +88,9 @@ function Jornadas({ lista }: { lista: Jornada[] }) {
                   ? 'Ações: ' + j.acoes.split(', ').map((a) => { const [t, ...r] = a.split(' '); return (ACAO[t] ?? t) + (r.length ? ' ' + r.join(' ') : ''); }).join(' · ')
                   : 'Saiu sem clicar em contato nem em link.'}
               </p>
+              {j.acoes?.includes('whatsapp') && (j.eva_phone
+                ? <p className="mt-1 text-xs font-semibold text-emerald-700">A mensagem chegou na Eva: <a href={'/sdr/conversa/' + j.eva_phone} className="underline">ver a conversa</a></p>
+                : <p className="mt-1 text-xs font-semibold text-amber-700">Abriu o WhatsApp, mas a mensagem não chegou na Eva (não enviou, ou mandou para o número de um corretor).</p>)}
               <p className="mt-1 text-[11px] text-slate-400">Gravação no Clarity: filtro “vj_sessao” = {j.sessao}</p>
             </div>
           </details>
@@ -219,9 +222,9 @@ export default async function SitePage({ searchParams }: { searchParams: Promise
               <Cartao titulo="Páginas vistas" valor={int(r.paginas)} nota={`${pct(r.uma_pagina, r.sessoes)} saíram na 1ª página`} />
               <Cartao titulo="Tempo no site" valor={dur(r.tempo_mediano)} nota={`metade das visitas fica até isso · média ${dur(r.tempo_medio)}`} />
               <Cartao titulo="Buscas no site" valor={int(r.buscas)} nota="uso da busca de imóveis" />
-              <Cartao titulo="Contatos" valor={int(r.contatos)} nota={`${int(r.whatsapp)} WhatsApp · ${int(r.formularios)} formulário · ${int(r.telefones)} telefone`} />
+              <Cartao titulo="Contatos" valor={int(r.contatos)} nota={`${int(r.whatsapp)} cliques no WhatsApp (${int(r.whats_chegaram)} chegaram na Eva) · ${int(r.formularios)} formulário · ${int(r.telefones)} telefone`} />
               <Cartao titulo="Conversão" valor={pct(r.contatos, r.sessoes)} nota="visitas com contato" />
-              <Cartao titulo="Anúncios de imóveis" valor={brl(custoImoveis)} nota={`${int(d.custo_imoveis.cliques)} cliques no Google Ads`} />
+              <Cartao titulo="Anúncios de imóveis" valor={brl(custoImoveis)} nota={`${int(d.custo_imoveis.cliques)} cliques no Google Ads, desde o início do registro (dias completos)`} />
               <Cartao titulo="Custo por contato" valor={r.contatos_pagos ? brl(custoImoveis / r.contatos_pagos) : '—'} nota={`${int(r.contatos_pagos)} contatos de anúncio`} />
             </div>
 
