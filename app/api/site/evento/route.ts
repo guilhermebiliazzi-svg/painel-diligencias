@@ -62,7 +62,10 @@ function classificar(ref: string | null, u: Record<string, string | null>, cliqu
     if (/mail|email|newsletter/.test(src + med)) return { origem: 'E-mail', detalhe: 'E-mail', pago: false };
     return { origem: 'Campanhas (utm)', detalhe: 'utm: ' + src, pago: false };
   }
-  if (!h) return { origem: 'Direto', detalhe: 'Direto (digitou ou salvo)', pago: false };
+  // equipe abrindo o site pelos links do painel: fica fora dos números
+  if (h === 'painel.villejardins.com.br') return { origem: 'Equipe', detalhe: 'Equipe (painel)', pago: false };
+  // sem referrer: apps (WhatsApp, Instagram, e-mail), link salvo ou digitado
+  if (!h) return { origem: 'Direto', detalhe: 'Sem origem (app, WhatsApp ou link salvo)', pago: false };
   if (/(^|\.)google\./.test(h)) return { origem: 'Busca orgânica', detalhe: 'Google (orgânico)', pago: false };
   if (/bing\.|yahoo\.|duckduckgo\.|ecosia\.|yandex\./.test(h)) return { origem: 'Busca orgânica', detalhe: h.split('.')[0].replace(/^\w/, (c) => c.toUpperCase()) + ' (orgânico)', pago: false };
   if (/chatgpt|openai|perplexity|gemini|claude\.ai|copilot/.test(h)) return { origem: 'Assistentes de IA', detalhe: h, pago: false };
@@ -72,7 +75,7 @@ function classificar(ref: string | null, u: Record<string, string | null>, cliqu
   }
   if (/whatsapp|wa\.me/.test(h)) return { origem: 'WhatsApp', detalhe: 'WhatsApp', pago: false };
   if (/remax\.com\.br|usesquare|usenonstop/.test(h)) return { origem: 'Sites REMAX', detalhe: h, pago: false };
-  if (/villejardins\.com\.br$/.test(h)) return { origem: 'Direto', detalhe: 'Direto (navegação interna)', pago: false };
+  if (/villejardins\.com\.br$/.test(h)) return { origem: 'Direto', detalhe: 'Sem origem (navegação interna)', pago: false };
   return { origem: 'Outros sites', detalhe: h, pago: false };
 }
 
