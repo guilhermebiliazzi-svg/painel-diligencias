@@ -82,13 +82,14 @@ export default async function BuscaSdr({ searchParams }: { searchParams: Promise
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="font-medium text-slate-900">{p.nomes[0] ?? 'Sem nome'}{p.nomes.length > 1 && <span className="font-normal text-slate-500"> · {p.nomes.slice(1, 3).join(' · ')}</span>}</div>
-                    <div className="text-sm text-slate-600">{telFmt(p.tel)}{p.ult && <> · última atividade {fmt.format(new Date(p.ult))}</>}</div>
+                    {/* 08/11: lead que chegou sem telefone (ex.: só e-mail) não tem conversa no WhatsApp */}
+                    <div className="text-sm text-slate-600">{p.tel.startsWith('sem-telefone') ? 'sem telefone' : telFmt(p.tel)}{p.ult && <> · última atividade {fmt.format(new Date(p.ult))}</>}</div>
                     <div className="mt-2 flex flex-wrap gap-1">
                       {[...p.fontes].map((f) => <span key={f} className={`rounded-full px-2 py-0.5 text-xs font-medium ${COR[f] ?? 'bg-slate-100 text-slate-700'}`}>{ROTULO[f] ?? f}</span>)}
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Link href={`/sdr/conversa/${p.tel.replace(/\D/g, '')}`} className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">Conversa</Link>
+                    {!p.tel.startsWith('sem-telefone') && <Link href={`/sdr/conversa/${p.tel.replace(/\D/g, '')}`} className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">Conversa</Link>}
                     {lead?.lead_id && <Link href={`/sdr/lead/${lead.lead_id}`} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Lead</Link>}
                     {cap?.cap_id && <Link href={`/sdr/captacao/${cap.cap_id}`} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Captação</Link>}
                   </div>
