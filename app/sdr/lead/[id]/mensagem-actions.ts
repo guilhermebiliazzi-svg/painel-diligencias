@@ -7,7 +7,7 @@ import { exigirSdrGestao } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
 export type ResultadoMsg = { ok: boolean; msg?: string; erro?: string };
-export type DestinoTipo = 'cliente' | 'corretor' | 'parceiro';
+export type DestinoTipo = 'cliente' | 'corretor' | 'parceiro' | 'contato';
 
 const WEBHOOK_ACAO = 'https://villejds.app.n8n.cloud/webhook/sdr-painel-acao';
 const CHAVE_ACAO = 'ville-sdr-painel-7c2e9a41f0b84d6e';
@@ -16,7 +16,8 @@ const CHAVE_ACAO = 'ville-sdr-painel-7c2e9a41f0b84d6e';
 export async function enviarMensagemEva(leadId: string, destino: DestinoTipo, texto: string, imovelId?: string, captacaoId?: string, parceiroTel?: string): Promise<ResultadoMsg> {
   const eu = await exigirSdrGestao();
   if (captacaoId) return enviarCaptacao(captacaoId, texto, eu.email);
-  if (parceiroTel) return enviarAvulso({ acao: 'enviar_mensagem_parceiro', telefone: parceiroTel }, texto, eu.email);
+  // 08/11: contato sem lead (tela Conversa): o n8n só envia se o número já escreveu para a Eva.
+  if (parceiroTel) return enviarAvulso({ acao: destino === 'contato' ? 'enviar_mensagem_contato' : 'enviar_mensagem_parceiro', telefone: parceiroTel }, texto, eu.email);
   if (!/^[0-9a-f-]{36}$/i.test(leadId)) return { ok: false, erro: 'Lead inválido.' };
   if (!['cliente', 'corretor', 'parceiro'].includes(destino)) return { ok: false, erro: 'Escolha o destinatário.' };
   const t = String(texto ?? '').replace(/\r/g, '').trim();
