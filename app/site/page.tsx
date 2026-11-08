@@ -28,7 +28,7 @@ type Dados = {
   saidas: { caminho: string; sessoes: number; sem_contato: number }[];
   termos_site: { termo: string; pago: boolean; sessoes: number; contatos: number }[];
   termos_ads: { termo: string; campanhas: string; cliques: number; impressoes: number; custo: number; conversoes: number }[];
-  campanhas: { campanha: string; tipo: string; custo: number; cliques: number; impressoes: number; conversoes: number; todas_conversoes: number }[];
+  campanhas: { campanha: string; tipo: string | null; custo: number | null; cliques: number | null; impressoes: number | null; conversoes: number | null; todas_conversoes: number | null; visitas?: number | null; paginas_por_visita?: number | null; tempo_medio?: number | null; contatos?: number | null }[];
   custo_imoveis: { custo: number; cliques: number; impressoes: number; conversoes: number };
   leads_sdr: { fonte: string; n: number; do_site: number }[];
 };
@@ -312,10 +312,11 @@ export default async function SitePage({ searchParams }: { searchParams: Promise
               </Secao>
             </div>
 
-            <Secao titulo="Campanhas do Google Ads" descricao="Custo e conversões no período (dias completos). Só as campanhas de imóveis entram no custo por contato acima.">
+            <Secao titulo="Campanhas do Google Ads" descricao="Custo e conversões no período (dias completos). Visitas, páginas, tempo e contatos são de quem chegou ao site por cada campanha (registrado a partir de 08/11, nas campanhas de imóveis). Só as campanhas de imóveis entram no custo por contato acima.">
               <Tabela
-                cab={[{ t: 'Campanha' }, { t: 'Tipo' }, { t: 'Custo', dir: true }, { t: 'Cliques', dir: true }, { t: 'Impressões', dir: true }, { t: 'Conv. principais', dir: true }, { t: 'Todas as conv.', dir: true }]}
-                linhas={d.campanhas.map((c) => [c.campanha, TIPO_CAMP[c.tipo] ?? c.tipo, brl(c.custo), int(c.cliques), int(c.impressoes), int(c.conversoes), int(c.todas_conversoes)])}
+                cab={[{ t: 'Campanha' }, { t: 'Tipo' }, { t: 'Custo', dir: true }, { t: 'Cliques', dir: true }, { t: 'Impressões', dir: true }, { t: 'Conv. principais', dir: true }, { t: 'Todas as conv.', dir: true }, { t: 'Visitas no site', dir: true }, { t: 'Págs./visita', dir: true }, { t: 'Tempo médio', dir: true }, { t: 'Contatos', dir: true }]}
+                linhas={d.campanhas.map((c) => [c.campanha, (c.tipo && TIPO_CAMP[c.tipo]) ?? c.tipo ?? '—', brl(Number(c.custo) || 0), int(Number(c.cliques) || 0), int(Number(c.impressoes) || 0), int(Number(c.conversoes) || 0), int(Number(c.todas_conversoes) || 0),
+                  c.visitas ? int(c.visitas) : '—', c.visitas ? String(c.paginas_por_visita ?? '').replace('.', ',') : '—', c.visitas ? dur(Number(c.tempo_medio) || 0) : '—', c.visitas ? int(Number(c.contatos) || 0) : '—'])}
               />
             </Secao>
 
