@@ -40,6 +40,19 @@ function hostDe(u: string | null) {
   }
 }
 
+// 08/11: assistentes de IA (ChatGPT manda utm_source=chatgpt.com; os outros costumam vir só pelo referrer).
+function iaDe(x: string): string | null {
+  if (/chatgpt|openai/.test(x)) return 'ChatGPT';
+  if (/perplexity/.test(x)) return 'Perplexity';
+  if (/gemini|bard\.google/.test(x)) return 'Gemini';
+  if (/copilot|bing\.com\/chat/.test(x)) return 'Copilot';
+  if (/claude\.ai|anthropic/.test(x)) return 'Claude';
+  if (/meta\.ai/.test(x)) return 'Meta AI';
+  if (/deepseek/.test(x)) return 'DeepSeek';
+  if (/grok/.test(x)) return 'Grok';
+  return null;
+}
+
 // Origem da sessão. Pago = veio de anúncio (gclid/gbraid/wbraid ou utm de mídia paga).
 function classificar(ref: string | null, u: Record<string, string | null>, clique: string | null) {
   const src = (u.source || '').toLowerCase();
@@ -56,6 +69,8 @@ function classificar(ref: string | null, u: Record<string, string | null>, cliqu
     const n = src || h || 'anúncio';
     return { origem: 'Outros anúncios', detalhe: 'Anúncio: ' + n, pago: true };
   }
+  const ia = iaDe(src) || iaDe(h);
+  if (ia) return { origem: 'Assistentes de IA', detalhe: 'IA (' + ia + ')', pago: false };
   if (src) {
     if (/instagram|facebook|meta|fb/.test(src)) return { origem: 'Redes sociais', detalhe: src.includes('insta') ? 'Instagram' : 'Facebook', pago: false };
     if (/whats|^wa$/.test(src)) return { origem: 'WhatsApp', detalhe: 'WhatsApp', pago: false };
@@ -68,7 +83,6 @@ function classificar(ref: string | null, u: Record<string, string | null>, cliqu
   if (!h) return { origem: 'Direto', detalhe: 'Sem origem (app, WhatsApp ou link salvo)', pago: false };
   if (/(^|\.)google\./.test(h)) return { origem: 'Busca orgânica', detalhe: 'Google (orgânico)', pago: false };
   if (/bing\.|yahoo\.|duckduckgo\.|ecosia\.|yandex\./.test(h)) return { origem: 'Busca orgânica', detalhe: h.split('.')[0].replace(/^\w/, (c) => c.toUpperCase()) + ' (orgânico)', pago: false };
-  if (/chatgpt|openai|perplexity|gemini|claude\.ai|copilot/.test(h)) return { origem: 'Assistentes de IA', detalhe: h, pago: false };
   if (/instagram|facebook|fb\.|t\.co|twitter|x\.com|linkedin|tiktok|youtube/.test(h)) {
     const d = /instagram/.test(h) ? 'Instagram' : /facebook|fb\./.test(h) ? 'Facebook' : /linkedin/.test(h) ? 'LinkedIn' : /youtube/.test(h) ? 'YouTube' : /tiktok/.test(h) ? 'TikTok' : 'X/Twitter';
     return { origem: 'Redes sociais', detalhe: d, pago: false };
