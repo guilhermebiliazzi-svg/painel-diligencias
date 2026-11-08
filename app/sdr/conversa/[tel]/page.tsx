@@ -149,6 +149,13 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
             destinos={[{ chave: 'parceiro', destino: 'parceiro', rotulo: 'Corretor(a) de fora', detalhe: (nomeProf || nomeOrulo || parc[0]?.parceiro_nome || 'Corretor') + ' · ' + telFmt(vs[0]), janela: (recentes ?? 0) > 0 }]} />
         </div>
       )}
+      {/* 08/11: responder qualquer contato que escreveu para a Eva (sem lead, sem ser corretor). */}
+      {gestao && !externo && !cor && bufs.length > 0 && (
+        <div className="mt-4">
+          <MensagemEva leadId="" parceiroTel={vs[0]}
+            destinos={[{ chave: 'contato', destino: 'contato', rotulo: lc[0]?.nome || 'Contato', detalhe: telFmt(vs[0]), janela: (recentes ?? 0) > 0 }]} />
+        </div>
+      )}
     </main>
   );
 }
