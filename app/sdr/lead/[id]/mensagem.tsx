@@ -11,6 +11,7 @@ const COMO: Record<DestinoTipo, [string, string]> = {
   cliente: ['Sai como texto livre da Eva.', 'Fora da janela de 24h: sai pela mensagem-modelo "eva_mensagem_cliente" (Olá, {nome}! Aqui é a Eva, da REMAX Ville. + seu texto).'],
   corretor: ['Sai como texto livre da Eva.', 'Fora da janela de 24h: sai como "Aviso da Eva: …" (modelo interno).'],
   parceiro: ['Sai como texto livre da Eva.', 'Fora da janela de 24h: sai como "Aviso da Eva: …" (modelo interno).'],
+  contato: ['Sai como texto livre da Eva.', 'Fora da janela de 24h: sai pela mensagem-modelo "eva_mensagem_cliente" (Olá! Aqui é a Eva, da REMAX Ville. + seu texto).'],
 };
 
 export default function MensagemEva({ leadId, destinos, captacaoId, parceiroTel }: { leadId: string; destinos: DestinoMsg[]; captacaoId?: string; parceiroTel?: string }) {
