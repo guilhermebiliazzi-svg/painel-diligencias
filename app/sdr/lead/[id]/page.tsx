@@ -144,7 +144,7 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
   const linhaTempo = eventos.slice(0, 40);
   // Enviar mensagem pela Eva (18/10): cliente, corretor Ville do lead e corretores parceiros dos imóveis.
   const { data: parcs } = await sb.from('sdr_imoveis_lead').select('id,ref,parceiro_nome,parceiro_telefone,parceiro_origem').eq('lead_id', id).not('parceiro_telefone', 'is', null).order('created_at', { ascending: false });
-  const destinosMsg: DestinoMsg[] = [{ chave: 'cliente', destino: 'cliente', rotulo: 'Cliente', detalhe: (l.nome ? l.nome.split(' ')[0] + ' · ' : '') + telFmt(l.telefone), janela: false }];
+  const destinosMsg: DestinoMsg[] = l.telefone.startsWith('sem-telefone') ? [] : [{ chave: 'cliente', destino: 'cliente', rotulo: 'Cliente', detalhe: (l.nome ? l.nome.split(' ')[0] + ' · ' : '') + telFmt(l.telefone), janela: false }];
   if (l.corretor_phone) destinosMsg.push({ chave: 'corretor', destino: 'corretor', rotulo: 'Corretor Ville', detalhe: nomeCor(l.corretor_phone) + ' · ' + telFmt(l.corretor_phone), janela: false });
   const vistosMsg = new Set<string>();
   for (const p of (parcs ?? []) as { id: string; ref: string | null; parceiro_nome: string | null; parceiro_telefone: string; parceiro_origem: string | null }[]) {
@@ -192,7 +192,8 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
             <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${st.c}`}>{st.t}</span>
           </div>
           <dl className="mt-3 divide-y divide-slate-100">
-            <Linha k="Telefone" v={<><a href={wa} target="_blank" className="text-blue-700 underline">{telFmt(l.telefone)}</a> · <Link href={'/sdr/conversa/' + l.telefone.replace(/\D/g, '')} className="text-blue-700 underline">conversa completa</Link></>} />
+            {/* 08/11: lead que chegou sem telefone não tem WhatsApp nem conversa */}
+            <Linha k="Telefone" v={l.telefone.startsWith('sem-telefone') ? <span className="text-slate-500">sem telefone (o portal mandou só nome/e-mail)</span> : <><a href={wa} target="_blank" className="text-blue-700 underline">{telFmt(l.telefone)}</a> · <Link href={'/sdr/conversa/' + l.telefone.replace(/\D/g, '')} className="text-blue-700 underline">conversa completa</Link></>} />
             <Linha k="Quer" v={[l.intencao ? INTENCAO[l.intencao] ?? l.intencao : null, l.tipologia, (l.bairros ?? []).join(', ')].filter(Boolean).join(' · ')} />
             <Linha k="Imóvel" v={l.imovel_anuncio_endereco ? (
               <>
@@ -263,7 +264,7 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
           </p>
         )}
 
-        <MensagemEva leadId={l.id} destinos={destinosMsg} />
+        {destinosMsg.length > 0 && <MensagemEva leadId={l.id} destinos={destinosMsg} />}
         {destinosMsg.some((d) => d.destino === 'parceiro') && (
           <p className="-mt-2 px-1 text-xs text-slate-500">
             Conversa com parceiro:{' '}
