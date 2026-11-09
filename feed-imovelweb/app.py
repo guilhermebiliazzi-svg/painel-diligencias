@@ -328,6 +328,63 @@ def gravar_config(nome_arquivo, dados):
 LOTE_CATALOGO = 500
 
 
+def carregar_primeira_vez():
+    """Registra a primeira vez que cada codigo aparece nos feeds de origem e
+    entrega as datas ao unificador (uf.PRIMEIRA_VEZ).
+
+    09/11: o iList e o Nonstop nao trazem data de publicacao. Para valer a regra
+    "quando duas sucursais publicam o mesmo imovel, fica quem publicou primeiro",
+    a data passa a ser a da primeira geracao em que o codigo apareceu. Codigo
+    novo entra com a hora de agora; codigo ja registrado mantem a data antiga.
+    Se o banco falhar, segue sem datas (vale o desempate antigo) — nunca derruba
+    a geracao.
+    """
+    uf.PRIMEIRA_VEZ = {}
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return 0
+    try:
+        base = f"{SUPABASE_URL}/rest/v1/alianca_primeira_vez"
+        cab = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
+               "Content-Type": "application/json"}
+        vistos, linhas = set(), []
+        for nome, cfg in uf.SUCURSAIS.items():
+            for origem in ("ilist", "nonstop"):
+                for bloco in uf.blocos_imovel(uf.obter(cfg[origem])):
+                    m = uf.RE_COD.search(bloco)
+                    if not m:
+                        continue
+                    codigo = m.group(1).strip()
+                    if codigo and codigo not in vistos:
+                        vistos.add(codigo)
+                        linhas.append({"codigo": codigo, "sucursal": nome, "origem": origem})
+        ins = dict(cab)
+        ins["Prefer"] = "resolution=ignore-duplicates,return=minimal"
+        for i in range(0, len(linhas), LOTE_CATALOGO):
+            r = requests.post(base + "?on_conflict=codigo", headers=ins,
+                              json=linhas[i:i + LOTE_CATALOGO], timeout=180)
+            if r.status_code >= 400:
+                raise RuntimeError(f"HTTP {r.status_code} {r.text[:200]}")
+        mapa, ini, passo = {}, 0, 1000
+        while True:
+            r = requests.get(base + "?select=codigo,primeiro_em&order=codigo",
+                             headers=dict(cab, Range=f"{ini}-{ini + passo - 1}"), timeout=120)
+            if r.status_code >= 400:
+                raise RuntimeError(f"HTTP {r.status_code} {r.text[:200]}")
+            pagina = r.json()
+            for x in pagina:
+                mapa[x["codigo"]] = x["primeiro_em"]
+            if len(pagina) < passo:
+                break
+            ini += passo
+        uf.PRIMEIRA_VEZ = mapa
+        print(f"  primeira vez: {len(linhas)} codigos nos feeds, {len(mapa)} com data")
+        return len(mapa)
+    except Exception as e:
+        print(f"  primeira vez: falhou, segue sem datas: {type(e).__name__}: {e}")
+        uf.PRIMEIRA_VEZ = {}
+        return 0
+
+
 def gravar_catalogo_no_banco(itens):
     """Espelha o catálogo do XML unificado na tabela alianca_catalogo.
 
@@ -427,6 +484,7 @@ def rodar_unificado(job_id):
                              {"HOME": [], "DESTACADO": [], "SIMPLE": []})
             for nome in uf.SUCURSAIS
         }
+        carregar_primeira_vez()  # 09/11: desempate por quem publicou primeiro
         rel = uf.processar_unificado(escolhas_por_sucursal=por_sucursal)
         arquivo = rel["arquivo"]
         caminho = os.path.join(uf.DIR_SAIDA, arquivo)
