@@ -4,7 +4,7 @@
 // Ofertar / Segurar / Descartar. Sem texto livre, sem chance de cair em outro lead.
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { ofertar, ofertarCaptacao, segurar, descartar, descartarCaptacao, referenciar, type Resultado } from './actions';
+import { ofertar, ofertarCaptacao, entregarDireto, segurar, descartar, descartarCaptacao, referenciar, type Resultado } from './actions';
 
 export type CorretorOpc = { phone: string; nome: string; apelido: string | null; foto_url: string | null };
 export type ImovelRef = { ref: string; rotulo: string; parceiro: string | null };
@@ -112,6 +112,16 @@ export default function Decisao({ modo, id, corretores, filaAtual, podeOfertar, 
             className="mt-4 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">
             {pend ? 'Gravando…' : fila.length ? `Ofertar para ${fila.map(rotulo).join(' → ')}` : 'Ofertar'}
           </button>
+          {modo === 'lead' && (
+            <>
+              <button type="button" disabled={pend || fila.length !== 1}
+                onClick={() => rodar(() => entregarDireto(id, fila[0]))}
+                className="mt-2 w-full rounded-xl border border-slate-900 px-4 py-3 text-sm font-semibold text-slate-900 disabled:opacity-40">
+                {pend ? 'Gravando…' : fila.length === 1 ? `Entregar direto a ${rotulo(fila[0])}` : 'Entregar direto (escolha um só corretor)'}
+              </button>
+              <p className="mt-1 text-xs text-slate-500">Entregar direto: sem oferta e sem os 15 minutos. O corretor recebe os dados do cliente na hora e o cliente é avisado.</p>
+            </>
+          )}
         </section>
       )}
 
