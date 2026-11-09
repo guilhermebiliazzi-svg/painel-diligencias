@@ -10,8 +10,12 @@
 
 export const EMISSOR_NACIONAL = (process.env.NFSE_EMISSOR || "nacional").toLowerCase() !== "sp";
 
-/** Série da DPS na automação (faixa 00001–49999 = aplicativo próprio). */
-export const SERIE_DPS = "1";
+/**
+ * Série da DPS na automação (faixa 00001–49999 = aplicativo próprio).
+ * Não é a 1: as notas que a Prefeitura compartilhou com o ADN até 31/10 já
+ * ocupam a série 1 (DPS nº = número da nota), e repetir o Id dá rejeição.
+ */
+export const SERIE_DPS = "2";
 
 /**
  * Série usada no "teste" (produção restrita, sem efeito fiscal). O número
