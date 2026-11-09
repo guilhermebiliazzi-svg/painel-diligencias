@@ -178,7 +178,7 @@ export default function NotasFiscais() {
     const qtd = ids.length;
     if (
       !confirm(
-        `Emitir ${qtd} nota(s) fiscal(is) na Prefeitura de São Paulo?\n\n` +
+        `Emitir ${qtd} nota(s) fiscal(is) no Emissor Nacional da NFS-e?\n\n` +
           "Isso gera documento fiscal real. Cancelar NFS-e tem prazo e regras."
       )
     )
@@ -223,7 +223,7 @@ export default function NotasFiscais() {
   async function conciliar() {
     if (conciliando || emitindo) return;
     setConciliando(true);
-    setMsgEmissao("Consultando a Prefeitura pelos RPS reservados…");
+    setMsgEmissao("Consultando o emissor pelos números reservados…");
     try {
       const res = await fetch("/api/adm/notas/conciliar", {
         method: "POST",
@@ -237,7 +237,7 @@ export default function NotasFiscais() {
         setMsgEmissao(d.mensagem);
       } else {
         let m = `Conciliação: ${d.verificadas} verificada(s) · ${d.recuperadas} recuperada(s)`;
-        if (d.sem_nota > 0) m += ` · ${d.sem_nota} sem nota na Prefeitura (RPS queimado)`;
+        if (d.sem_nota > 0) m += ` · ${d.sem_nota} sem nota no emissor (número queimado)`;
         setMsgEmissao(m);
       }
       await carregar(competencia);
@@ -339,7 +339,7 @@ export default function NotasFiscais() {
             <h1 className="vj-h1">Notas fiscais da taxa de administração</h1>
             <p className="vj-sub">
               Uma nota por contrato, sobre o que foi efetivamente recebido no mês.
-              Emita na Prefeitura e registre aqui o número e o link.
+              Emita no Emissor Nacional e registre aqui o número e o link.
             </p>
           </div>
           <label className="vj-field">
@@ -415,9 +415,9 @@ export default function NotasFiscais() {
                 className="vj-btn-status"
                 disabled={conciliando || emitindo}
                 onClick={conciliar}
-                title="Pergunta à Prefeitura se os RPS reservados já viraram nota"
+                title="Pergunta ao emissor se os números reservados já viraram nota"
               >
-                {conciliando ? "Conciliando…" : "↻ Conciliar com a Prefeitura"}
+                {conciliando ? "Conciliando…" : "↻ Conciliar com o emissor"}
               </button>
             )}
             {emitiveis.length > 0 && (
@@ -426,7 +426,7 @@ export default function NotasFiscais() {
                 disabled={emitindo || conciliando}
                 onClick={() => emitirNotas(emitiveis.map((l) => l.repasse_id))}
               >
-                {emitindo ? "Emitindo…" : `Emitir ${emitiveis.length} nota(s) na Prefeitura`}
+                {emitindo ? "Emitindo…" : `Emitir ${emitiveis.length} nota(s) no Emissor Nacional`}
               </button>
             )}
           </div>
@@ -531,7 +531,7 @@ export default function NotasFiscais() {
                               href={l.pdf_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              title="Abrir a nota no portal da Prefeitura"
+                              title="Abrir o PDF da nota"
                             >
                               ↗ Abrir nota
                             </a>
