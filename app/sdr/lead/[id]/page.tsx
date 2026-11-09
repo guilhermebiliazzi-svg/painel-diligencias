@@ -135,8 +135,8 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
   for (const m of (msgs ?? []) as Msg[]) {
     eventos.push({ k: 'm' + m.id, t: new Date(m.created_at).getTime(),
       rotulo: (m.direcao === 'in' ? 'de ' : 'para ') + m.interlocutor + (m.interlocutor === 'corretor' && m.telefone ? ' ' + nomeCor(m.telefone) : ''),
-      texto: m.template === 'comando_fila' ? 'Fila: ' + String(m.conteudo ?? '').split(',').filter(Boolean).map(nomeCor).join(' → ') : String(m.conteudo ?? ''),
-      status: m.direcao === 'in' || m.template === 'comando_fila' ? undefined : rotuloStatus(stPor, m.wa_message_id, String(m.conteudo ?? '').startsWith('[ERRO')) });
+      texto: m.template === 'comando_fila' ? 'Fila: ' + String(m.conteudo ?? '').split(',').filter(Boolean).map(nomeCor).join(' → ') : m.template === 'comando_entregar' ? 'Entregue direto a ' + nomeCor(String(m.conteudo ?? '')) : String(m.conteudo ?? ''),
+      status: m.direcao === 'in' || m.template === 'comando_fila' || m.template === 'comando_entregar' ? undefined : rotuloStatus(stPor, m.wa_message_id, String(m.conteudo ?? '').startsWith('[ERRO')) });
   }
   // 29/10: respostas da Eva gravadas no envio que não casaram com o histórico entram assim mesmo.
   for (const e of envios) if (!e.usado && !enviadosCliente.has(String(e.texto ?? '').trim())) eventos.push({ k: 'e' + e.wa_message_id, t: new Date(e.enviado_em).getTime(), rotulo: 'Eva → cliente', texto: String(e.texto ?? ''), status: rotuloStatus(stPor, e.wa_message_id) });
