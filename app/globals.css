@@ -71,6 +71,10 @@ select { max-width: 100%; }
   @layer base { button, [role="button"], input[type="submit"] { min-height: 40px; } }
 }
 
+/* barra de progresso do topo (BarraProgresso) */
+@keyframes vj-progresso { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+.barra-progresso { animation: vj-progresso 1.1s ease-in-out infinite; }
+
 @media print {
   .barra-marca { display: none !important; }
 }
