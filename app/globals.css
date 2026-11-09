@@ -1,26 +1,73 @@
 @import "tailwindcss";
 
+/* 09/11: painel no padrão visual do site (villejardins.com.br) — Montserrat, azul REMAX,
+   azul-marinho nos títulos, neutros quentes (areia/linha). Em vez de reescrever as ~100 telas,
+   a paleta "slate" e "blue" do Tailwind passa a apontar para as cores da marca. */
+@theme {
+  --color-slate-50: #F7F5EE;
+  --color-slate-100: #EFECE3;
+  --color-slate-200: #E6E3DA;
+  --color-slate-300: #D3CFC3;
+  --color-slate-400: #9A9CA3;
+  --color-slate-500: #6B6F7A;
+  --color-slate-600: #5A5F6B;
+  --color-slate-700: #3A3F4C;
+  --color-slate-800: #1C2A44;
+  --color-slate-900: #0C2749;
+  --color-slate-950: #000E35;
+
+  --color-blue-50: #EEF3FF;
+  --color-blue-100: #DCE6FF;
+  --color-blue-200: #B9CCFF;
+  --color-blue-300: #8AA9FF;
+  --color-blue-400: #4F7BFF;
+  --color-blue-500: #1F57FF;
+  --color-blue-600: #0043FF;
+  --color-blue-700: #0036CC;
+  --color-blue-800: #0C2E99;
+  --color-blue-900: #0C2749;
+  --color-blue-950: #000E35;
+
+  --color-azul: #0043FF;
+  --color-azul-escuro: #0C2749;
+  --color-marinho: #000E35;
+  --color-vermelho: #FF1200;
+  --color-areia: #F7F5EE;
+  --color-linha: #E6E3DA;
+  --color-tinta: #1d2230;
+  --color-ouro: #B8975A;
+
+  --font-sans: Montserrat, Arial, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --background: #F7F5EE;
+  --foreground: #1d2230;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* em @layer base: as classes de cada tela (ex.: text-white, font-semibold) continuam valendo */
+@layer base {
+  h1, h2, h3 { text-wrap: balance; letter-spacing: -0.015em; }
+}
+
+/* Celular */
+@media (max-width: 640px) {
+  /* tabelas largas rolam dentro de si mesmas, sem empurrar a página para o lado */
+  main table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* iPhone dá zoom em campo com fonte menor que 16px */
+  input:not([type="checkbox"]):not([type="radio"]), select, textarea { font-size: 16px !important; }
+  /* área de toque confortável */
+  @layer base { button, [role="button"], input[type="submit"] { min-height: 40px; } }
+}
+
+@media print {
+  .barra-marca { display: none !important; }
 }
