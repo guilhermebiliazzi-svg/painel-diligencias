@@ -8,6 +8,7 @@ import { logoutAction } from './actions';
 import { getNav, type ItemNav, type IconeNav, type Cor } from '@/lib/nav';
 import { AREAS, podeTela, escopoDiligencias, escopoSdr } from '@/lib/acesso';
 import { ehMonitor } from '@/lib/oficinas';
+import SetaCard from './_components/SetaCard';
 
 export const metadata = { title: 'Painel interno — REMAX Ville' };
 
@@ -62,7 +63,7 @@ function CardConteudo({ icone, cor, titulo, descricao, disponivel, emoji }: {
           {emoji ? <span className="text-2xl leading-none" aria-hidden>{emoji}</span> : <Icone nome={icone} />}
         </span>
         {disponivel ? (
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-5 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-slate-500"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
+          <SetaCard />
         ) : (
           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">definir URL</span>
         )}
@@ -74,7 +75,7 @@ function CardConteudo({ icone, cor, titulo, descricao, disponivel, emoji }: {
 }
 
 const BASE = 'group flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition';
-const HOVER = 'hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md';
+const HOVER = 'hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md active:scale-[.99] active:border-blue-600 focus-visible:border-blue-600 has-[[role=status]]:border-blue-600 has-[[role=status]]:ring-2 has-[[role=status]]:ring-blue-100';
 
 function CardTela({ item }: { item: ItemNav }) {
   const conteudo = <CardConteudo icone={item.icone} cor={item.cor} titulo={item.titulo} descricao={item.descricao} disponivel={item.disponivel} emoji={item.emoji} />;
