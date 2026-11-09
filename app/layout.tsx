@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
+import BarraProgresso from "./_components/BarraProgresso";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -41,6 +43,7 @@ export default function RootLayout({
         style={{ backgroundColor: "#F7F5EE", color: "#1d2230" }}
         className="min-h-screen antialiased"
       >
+        <Suspense fallback={null}><BarraProgresso /></Suspense>
         <div className="barra-marca border-b border-linha bg-white">
           <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5">
             <Link href="/" aria-label="Painel interno — início">
