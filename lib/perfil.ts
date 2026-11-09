@@ -39,9 +39,12 @@ const COLUNAS =
 
 export const getSessaoPerfil = cache(async (): Promise<SessaoPerfil> => {
   const sb = await supabaseServer();
-  const {
-    data: { user },
-  } = await sb.auth.getUser();
+  // 09/11: getClaims confere o token localmente (chave ES256), sem a ida ao servidor de autenticação.
+  const { data: dc } = await sb.auth.getClaims();
+  const cl = dc?.claims;
+  const user = cl?.sub && cl.email
+    ? { email: String(cl.email), user_metadata: (cl.user_metadata ?? {}) as { full_name?: string | null } }
+    : null;
   if (!user?.email) return { email: null, perfil: null };
 
   const email = user.email.toLowerCase();
