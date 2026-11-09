@@ -113,28 +113,30 @@ const desde = (dias: number | null) => (dias == null ? '1970-01-01T00:00:00Z' : 
 
 // ---------- carga ----------
 async function carregarClientes(dias: number | null): Promise<Lead[]> {
-  const { rows } = await pool.query<Lead>(
-    `select * from public.v_painel_sdr_funil
-      where ($1::int is null or created_at >= now() - make_interval(days => $1::int))
-      order by created_at desc`,
-    [dias]
-  );
+  // 09/11: as consultas que não dependem umas das outras rodam juntas (antes iam uma depois da outra).
+  const [{ rows }, { data: inds }] = await Promise.all([
+    pool.query<Lead>(
+      `select * from public.v_painel_sdr_funil
+        where ($1::int is null or created_at >= now() - make_interval(days => $1::int))
+        order by created_at desc`,
+      [dias]
+    ),
+    supabaseAdmin().from('indicacoes').select('cliente_telefone,status,criado_em')
+      .gte('criado_em', new Date(Date.now() - 180 * 864e5).toISOString()).order('criado_em', { ascending: true }).limit(2000),
+  ]);
   const ids = rows.map((r) => r.id);
   const extra = new Map<string, { feito_em: string | null; origem: string | null; motivo: string | null; corretor_phone: string | null; telefone: string | null; abertura: string | null }>();
-  for (let i = 0; i < ids.length; i += 300) {
-    const { data } = await supabaseAdmin().from('sdr_leads').select('id,feito_em,origem,motivo_arquivamento,corretor_phone,telefone,template_abertura_em').in('id', ids.slice(i, i + 300));
+  const blocos: string[][] = [];
+  for (let i = 0; i < ids.length; i += 300) blocos.push(ids.slice(i, i + 300));
+  const partes = await Promise.all(blocos.map((b) => supabaseAdmin().from('sdr_leads').select('id,feito_em,origem,motivo_arquivamento,corretor_phone,telefone,template_abertura_em').in('id', b)));
+  for (const { data } of partes)
     for (const d of (data ?? []) as { id: string; feito_em: string | null; origem: string | null; motivo_arquivamento: string | null; corretor_phone: string | null; telefone: string | null; template_abertura_em: string | null }[])
       extra.set(d.id, { feito_em: d.feito_em, origem: d.origem, motivo: d.motivo_arquivamento, corretor_phone: d.corretor_phone, telefone: d.telefone, abertura: d.template_abertura_em });
-  }
   // Situação do referenciamento de cada cliente (o mais recente pelo telefone).
   const refStatus = new Map<string, string>();
-  {
-    const { data } = await supabaseAdmin().from('indicacoes').select('cliente_telefone,status,criado_em')
-      .gte('criado_em', new Date(Date.now() - 180 * 864e5).toISOString()).order('criado_em', { ascending: true }).limit(2000);
-    for (const d of (data ?? []) as { cliente_telefone: string | null; status: string }[]) {
-      const f8 = String(d.cliente_telefone ?? '').replace(/\D/g, '').slice(-8);
-      if (f8.length === 8) refStatus.set(f8, d.status);
-    }
+  for (const d of (inds ?? []) as { cliente_telefone: string | null; status: string }[]) {
+    const f8 = String(d.cliente_telefone ?? '').replace(/\D/g, '').slice(-8);
+    if (f8.length === 8) refStatus.set(f8, d.status);
   }
   return rows
     .filter((r) => extra.get(r.id)?.origem !== 'campanha' && !/^capta/i.test(r.fonte))
@@ -739,7 +741,15 @@ export default async function FunilSdr({ searchParams }: { searchParams: Promise
     return <MeuFunil cor={cor} nome={(perfil.nome?.trim() || perfil.email).split(' ')[0]} periodo={d ?? '30'} funilK={f} />;
   }
   // "Ver como corretor": quem vê o funil completo pode abrir o "Meu funil" de um corretor.
-  const { data: corsAtivos } = await supabaseAdmin().from('corretores_associados').select('id,nome,phone').eq('status', 'ativo').order('nome');
+  // 09/11: a lista de corretores e o funil de cliente carregam ao mesmo tempo.
+  const periodoPre = PERIODOS.some((p) => p.k === d) ? (d as string) : '30';
+  const funilPre: FunilK = FUNIS.some((x) => x.k === f) ? (f as FunilK) : 'comprador';
+  const diasPre = periodoPre === 'tudo' ? null : Number(periodoPre);
+  const corsP = supabaseAdmin().from('corretores_associados').select('id,nome,phone').eq('status', 'ativo').order('nome');
+  const clientePre = !c && (funilPre === 'comprador' || funilPre === 'locatario')
+    ? FunilCliente({ dias: diasPre, intencao: funilPre === 'comprador' ? 'compra' : 'aluguel' }).then((x) => ({ ok: x }), (e: unknown) => ({ erro: e }))
+    : null;
+  const { data: corsAtivos } = await corsP;
   const corretores = ((corsAtivos ?? []) as { id: number; nome: string; phone: string | null }[]);
   if (c && /^\d+$/.test(c)) {
     const cor = corretores.find((x) => x.id === Number(c)) ?? null;
@@ -762,8 +772,11 @@ export default async function FunilSdr({ searchParams }: { searchParams: Promise
   let conteudo: React.ReactNode = null;
   let erro: string | null = null;
   try {
+    const pre = clientePre ? await clientePre : null;
+    if (pre && 'erro' in pre) throw pre.erro;
     conteudo =
-      funil === 'comprador' ? await FunilCliente({ dias, intencao: 'compra' })
+      pre ? pre.ok
+      : funil === 'comprador' ? await FunilCliente({ dias, intencao: 'compra' })
       : funil === 'locatario' ? await FunilCliente({ dias, intencao: 'aluguel' })
       : funil === 'prop_venda' ? await FunilProprietario({ dias, alugar: false })
       : funil === 'prop_locacao' ? await FunilProprietario({ dias, alugar: true })
