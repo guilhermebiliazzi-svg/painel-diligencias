@@ -1,6 +1,16 @@
 import { NextResponse } from "next/server";
 import { montarDiscriminacao, ladoDoTomador, type Operacao } from "@/lib/discriminacao-comissao";
 import { somaSplits } from "@/lib/asaas-split";
+import {
+  EMISSOR_NACIONAL,
+  SERIE_DPS,
+  SERIE_TESTE,
+  SERIE_RPS_SP,
+  numeroTeste,
+  linkDanfse,
+  headersRender as hdrRender,
+  rotaEmitir,
+} from "@/lib/nfse-nacional";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,7 +31,8 @@ export const maxDuration = 60;
  *     valor_servico, codigo_servico?, discriminacao?, teste? }
  */
 
-const SERIE = "VJ01";
+// desde 01/11/2026: Emissor Nacional, série 1 (o número vira o nDPS)
+const SERIE = EMISSOR_NACIONAL ? SERIE_DPS : SERIE_RPS_SP;
 const CODIGO_CORRETAGEM = "06297";
 
 function creds() {
@@ -88,8 +99,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "CPF/CNPJ do tomador inválido." }, { status: 400 });
   }
   const tomadorEndereco = tom.endereco || null;
-  // tomador PJ exige endereço no RPS (erros 317 e 318 da Prefeitura)
-  if (tomadorDoc.length === 14 && !(tomadorEndereco && tomadorEndereco.logradouro)) {
+  // tomador PJ exige endereço no RPS (erros 317 e 318 da Prefeitura); no
+  // Emissor Nacional o endereço do tomador é opcional
+  if (!EMISSOR_NACIONAL && tomadorDoc.length === 14 && !(tomadorEndereco && tomadorEndereco.logradouro)) {
     return NextResponse.json(
       { error: `Tomador PJ ("${tomadorNome}") exige endereço.` },
       { status: 400 }
@@ -229,19 +241,28 @@ export async function POST(req: Request) {
     /* 3. reserva o RPS (atômico no banco)                          */
     /* ---------------------------------------------------------- */
     const dataEmissao = hojeSP();
-    const rNum = await fetch(`${c.url}/rest/v1/rpc/adm_proximo_rps`, {
-      method: "POST",
-      headers: { ...c.headers, "Content-Type": "application/json" },
-      body: JSON.stringify({ p_serie: SERIE }),
-      cache: "no-store",
-    });
-    if (!rNum.ok) {
-      return NextResponse.json(
-        { error: "Falha ao reservar número de RPS", detail: await rNum.text() },
-        { status: 502 }
-      );
+    // teste no Emissor Nacional vai para a produção restrita e não consome
+    // o contador
+    const testeNacional = teste && EMISSOR_NACIONAL;
+    const serieUsada = testeNacional ? SERIE_TESTE : SERIE;
+    let numeroRps: number;
+    if (testeNacional) {
+      numeroRps = numeroTeste();
+    } else {
+      const rNum = await fetch(`${c.url}/rest/v1/rpc/adm_proximo_rps`, {
+        method: "POST",
+        headers: { ...c.headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ p_serie: SERIE }),
+        cache: "no-store",
+      });
+      if (!rNum.ok) {
+        return NextResponse.json(
+          { error: "Falha ao reservar número de RPS", detail: await rNum.text() },
+          { status: 502 }
+        );
+      }
+      numeroRps = Number(await rNum.json());
     }
-    const numeroRps = Number(await rNum.json());
     if (!numeroRps) return NextResponse.json({ error: "Número de RPS inválido." }, { status: 502 });
 
     const codigoServico = String(body?.codigo_servico || CODIGO_CORRETAGEM);
@@ -302,17 +323,16 @@ export async function POST(req: Request) {
     /* ---------------------------------------------------------- */
     /* 4. chama o Render                                            */
     /* ---------------------------------------------------------- */
-    const headersRender: Record<string, string> = { "Content-Type": "application/json" };
-    if (process.env.NFSE_SP_TOKEN) headersRender["x-nfse-token"] = process.env.NFSE_SP_TOKEN;
+    const headersRender = hdrRender();
 
     let resultado: any = null;
     let erroRede: string | null = null;
     try {
-      const rEmitir = await fetch(`${base.replace(/\/$/, "")}/nfse-sp/emitir`, {
+      const rEmitir = await fetch(`${base.replace(/\/$/, "")}${rotaEmitir()}`, {
         method: "POST",
         headers: headersRender,
         body: JSON.stringify({
-          serie: SERIE,
+          serie: serieUsada,
           numero: numeroRps,
           dataEmissao,
           valorServicos: valor,
@@ -340,12 +360,14 @@ export async function POST(req: Request) {
     if (teste) {
       return NextResponse.json({
         teste: true,
-        rps: { serie: SERIE, numero: numeroRps },
+        rps: { serie: serieUsada, numero: numeroRps },
         dataEmissao,
         discriminacao,
         codigoServico,
         resultado,
-        aviso: "Número de RPS consumido pelo contador. Ajuste adm_rps_serie se for repetir.",
+        aviso: testeNacional
+          ? "Teste na produção restrita do Emissor Nacional: sem efeito fiscal e sem consumir número."
+          : "Número de RPS consumido pelo contador. Ajuste adm_rps_serie se for repetir.",
       });
     }
 
@@ -367,11 +389,15 @@ export async function POST(req: Request) {
       );
     }
 
-    const link = linkNota(process.env.NFSE_SP_IM || "69033951", resultado.numeroNota, resultado.codigoVerificacao);
+    const chave: string | null = resultado.chaveAcesso || null;
+    const link = chave
+      ? linkDanfse(chave)
+      : linkNota(process.env.NFSE_SP_IM || "69033951", resultado.numeroNota, resultado.codigoVerificacao);
     await atualizar(nota!.id, {
       status: "emitida",
       numero_nota: resultado.numeroNota,
-      codigo_verificacao: resultado.codigoVerificacao,
+      codigo_verificacao: resultado.codigoVerificacao || null,
+      ...(chave ? { chave_acesso: chave } : {}),
       pdf_url: link,
       data_emissao: dataEmissao,
       emissao_erro: null,
@@ -382,7 +408,8 @@ export async function POST(req: Request) {
       ok: true,
       nota_id: nota!.id,
       numeroNota: resultado.numeroNota,
-      codigoVerificacao: resultado.codigoVerificacao,
+      codigoVerificacao: resultado.codigoVerificacao || null,
+      chaveAcesso: chave,
       link,
       rps: { serie: SERIE, numero: numeroRps },
       dataEmissao,
