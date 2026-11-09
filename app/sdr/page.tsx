@@ -54,6 +54,7 @@ type ItemEtapa = { id: string; href: string; nome: string; sub: string };
 type Etapa = { rotulo: string; n: number; itens?: ItemEtapa[] };
 
 const PERIODOS = [
+  { k: 'hoje', rotulo: 'Hoje' },
   { k: '7', rotulo: '7 dias' },
   { k: '30', rotulo: '30 dias' },
   { k: '90', rotulo: '90 dias' },
@@ -109,6 +110,9 @@ function fmtMin(m: number | null) {
   const h = Math.floor(m / 60);
   return h < 48 ? `${h}h${String(m % 60).padStart(2, '0')}` : `${Math.round(h / 24)} dias`;
 }
+// 09/11: "Hoje" = desde a meia-noite de São Paulo (UTC-3), em fração de dia.
+const diasHoje = () => { const agora = Date.now(); const sp = new Date(agora - 3 * 36e5); return Math.max(1 / 1440, (agora - (Date.UTC(sp.getUTCFullYear(), sp.getUTCMonth(), sp.getUTCDate()) + 3 * 36e5)) / 864e5); };
+const diasDoPeriodo = (k: string) => (k === 'tudo' ? null : k === 'hoje' ? diasHoje() : Number(k));
 const desde = (dias: number | null) => (dias == null ? '1970-01-01T00:00:00Z' : new Date(Date.now() - dias * 864e5).toISOString());
 
 // ---------- carga ----------
@@ -117,7 +121,7 @@ async function carregarClientes(dias: number | null): Promise<Lead[]> {
   const [{ rows }, { data: inds }] = await Promise.all([
     pool.query<Lead>(
       `select * from public.v_painel_sdr_funil
-        where ($1::int is null or created_at >= now() - make_interval(days => $1::int))
+        where ($1::float8 is null or created_at >= now() - $1::float8 * interval '1 day')
         order by created_at desc`,
       [dias]
     ),
@@ -744,7 +748,7 @@ export default async function FunilSdr({ searchParams }: { searchParams: Promise
   // 09/11: a lista de corretores e o funil de cliente carregam ao mesmo tempo.
   const periodoPre = PERIODOS.some((p) => p.k === d) ? (d as string) : '30';
   const funilPre: FunilK = FUNIS.some((x) => x.k === f) ? (f as FunilK) : 'comprador';
-  const diasPre = periodoPre === 'tudo' ? null : Number(periodoPre);
+  const diasPre = diasDoPeriodo(periodoPre);
   const corsP = supabaseAdmin().from('corretores_associados').select('id,nome,phone').eq('status', 'ativo').order('nome');
   const clientePre = !c && (funilPre === 'comprador' || funilPre === 'locatario')
     ? FunilCliente({ dias: diasPre, intencao: funilPre === 'comprador' ? 'compra' : 'aluguel' }).then((x) => ({ ok: x }), (e: unknown) => ({ erro: e }))
@@ -767,7 +771,7 @@ export default async function FunilSdr({ searchParams }: { searchParams: Promise
   }
   const periodo = PERIODOS.some((p) => p.k === d) ? (d as string) : '30';
   const funil: FunilK = FUNIS.some((x) => x.k === f) ? (f as FunilK) : 'comprador';
-  const dias = periodo === 'tudo' ? null : Number(periodo);
+  const dias = diasDoPeriodo(periodo);
 
   let conteudo: React.ReactNode = null;
   let erro: string | null = null;
