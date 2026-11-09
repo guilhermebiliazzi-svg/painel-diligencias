@@ -97,6 +97,50 @@ export async function ofertar(leadId: string, phones: string[]): Promise<Resulta
   return { ok: true, msg: (reabrir ? 'Lead reaberto. ' : '') + 'Fila gravada. A oferta ao primeiro corretor sai em até 10 minutos; cada um tem 15 minutos para responder.' };
 }
 
+// 09/11: entregar direto a um corretor, sem oferta e sem os 15 minutos (como "encaminhar" no C2S).
+// Vale para qualquer lead, inclusive os que foram direto ao gestor (corretor afastado, por exemplo).
+// O n8n faz o mesmo que um "SIM" do corretor: ele recebe os dados do cliente com o link de abordagem,
+// o cliente é avisado de quem vai atender e o lead passa a ele no C2S.
+export async function entregarDireto(leadId: string, phone: string): Promise<Resultado> {
+  const eu = await exigirSdrGestao();
+  const lead = await lerLead(leadId);
+  if (!lead) return { ok: false, erro: 'Lead não encontrado.' };
+  const [p] = await telefonesValidos([phone]);
+  if (!p) return { ok: false, erro: 'Escolha um corretor ativo.' };
+  if (lead.corretor_phone === p && ['atribuido', 'direto', 'visita_agendada'].includes(lead.status))
+    return { ok: false, erro: 'Esse corretor já está com o lead.' };
+  const sb = supabaseAdmin();
+  const agora = new Date().toISOString();
+  // oferta aberta de antes não pode ficar valendo
+  await sb.from('sdr_atribuicoes').update({ resposta: 'sem_resposta', respondido_em: agora }).eq('lead_id', leadId).is('resposta', null);
+  await cancelarReferenciamentosPendentes(lead.telefone, 'cancelado: lead entregue a corretor da Ville pelo painel');
+  const { data: atr, error: eAtr } = await sb.from('sdr_atribuicoes')
+    .insert({ lead_id: leadId, corretor_phone: p, posicao_fila: 1, oferecido_em: agora }).select('id').single();
+  if (eAtr || !atr) return { ok: false, erro: 'Não foi possível gravar: ' + (eAtr?.message ?? 'sem retorno') };
+  let q = sb.from('sdr_leads').update({
+    status: 'em_cascata', corretor_phone: null, fila_corretores: [p], cartao_enviado_em: agora,
+    arquivado_em: null, motivo_arquivamento: null, updated_at: agora,
+  }).eq('id', leadId).eq('status', lead.status);
+  q = lead.corretor_phone ? q.eq('corretor_phone', lead.corretor_phone) : q.is('corretor_phone', null);
+  const { data: up, error } = await q.select('id');
+  if (error || !up?.length) {
+    await sb.from('sdr_atribuicoes').update({ resposta: 'sem_resposta', respondido_em: agora }).eq('id', (atr as { id: string }).id);
+    return { ok: false, erro: error ? 'Não foi possível gravar: ' + error.message : 'O lead mudou enquanto você decidia. Recarregue a página.' };
+  }
+  await registrar(leadId, 'comando_entregar', p);
+  try {
+    const r = await fetch(WEBHOOK_ACAO, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-chave': CHAVE_ACAO },
+      body: JSON.stringify({ acao: 'entregar_direto', lead_id: leadId, atribuicao_id: (atr as { id: string }).id, corretor_phone: p, por: eu.email }),
+      cache: 'no-store',
+    });
+    const j = (await r.json().catch(() => ({}))) as { ok?: boolean; resposta?: string };
+    if (r.ok && j.ok) return { ok: true, msg: 'Entregue. O corretor recebeu os dados do cliente e o cliente foi avisado de quem vai atender.' };
+  } catch {}
+  return { ok: false, erro: 'Gravei a entrega, mas a Eva não confirmou o envio. Se o corretor não receber em 15 minutos, o lead volta para você.' };
+}
+
 // Resgatar (13/10): referenciamento sem aceite (ou recusado) — cancela o pedido pendente
 // e devolve o lead para "esperando você". Não mexe se a outra unidade já aceitou.
 export async function resgatarReferenciamento(leadId: string): Promise<Resultado> {
