@@ -416,7 +416,7 @@ function LinhaNota({ nota, onMudou }: { nota: Nota; onMudou?: () => void }) {
   async function marcarCancelada() {
     const ok = window.confirm(
       `Marcar a NFS-e nº ${nota.numero_nota} (${nota.tomador_nome}) como CANCELADA no painel?\n\n` +
-        `Isto NÃO cancela a nota na Prefeitura — faça isso antes, no portal da NFS-e.\n\n` +
+        `Isto NÃO cancela a nota no fisco — faça isso antes, no Emissor Nacional (nfse.gov.br).\n\n` +
         `Aqui a nota sai do total do mês e da DIMOB, e a cobrança volta para "A emitir".`
     );
     if (!ok) return;
@@ -623,7 +623,7 @@ function CamposTomador({
       </div>
       <div className="vj-frow">
         <label className="vj-f">
-          <span>E-mail (opcional — a Prefeitura envia a nota para ele)</span>
+          <span>E-mail (opcional — vai na nota)</span>
           <input
             value={t.email}
             onChange={(e) => set("email", e.target.value)}
@@ -654,7 +654,7 @@ function CamposTomador({
 
       {ehPJ && (
         <>
-          <div className="vj-aviso-in">Tomador PJ: a Prefeitura exige o endereço no RPS.</div>
+          <div className="vj-aviso-in">Tomador PJ: informe o endereço se tiver (no Emissor Nacional é opcional).</div>
           <div className="vj-frow">
             <label className="vj-f" style={{ maxWidth: 90 }}>
               <span>Tipo</span>
