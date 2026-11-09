@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { SERIE_RPS_SP, linkDanfse, headersRender as hdrRender } from "@/lib/nfse-nacional";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -81,30 +82,36 @@ export async function POST(req: Request) {
       });
     }
 
-    /* consulta a Prefeitura em uma chamada só */
-    const headersRender: Record<string, string> = { "Content-Type": "application/json" };
-    if (process.env.NFSE_SP_TOKEN) headersRender["x-nfse-token"] = process.env.NFSE_SP_TOKEN;
-
-    const rCons = await fetch(`${base.replace(/\/$/, "")}/nfse-sp/consultar-rps`, {
-      method: "POST",
-      headers: headersRender,
-      body: JSON.stringify({
-        chaves: candidatas.map((n) => ({ serie: n.rps_serie, numero: n.rps_numero })),
-      }),
-      cache: "no-store",
-    });
-    const cons = await rCons.json().catch(() => null);
-    if (!rCons.ok || !cons) {
-      return NextResponse.json(
-        { error: "Falha ao consultar a Prefeitura", detail: cons },
-        { status: 502 }
-      );
-    }
+    /* RPS da série antiga (VJ01) → Prefeitura; DPS (série numérica) → Emissor
+       Nacional. Cada grupo numa chamada só. */
+    const headersRender = hdrRender();
+    const raiz = base.replace(/\/$/, "");
+    const grupos = [
+      { rota: "/nfse-sp/consultar-rps", itens: candidatas.filter((n) => n.rps_serie === SERIE_RPS_SP || !/^\d+$/.test(String(n.rps_serie))) },
+      { rota: "/nfse-nacional/consultar-dps", itens: candidatas.filter((n) => n.rps_serie !== SERIE_RPS_SP && /^\d+$/.test(String(n.rps_serie))) },
+    ].filter((g) => g.itens.length > 0);
 
     /* indexa o retorno por serie|numero */
     const achadas = new Map<string, any>();
-    for (const nf of cons.notas || []) {
-      if (nf.numeroRps) achadas.set(`${nf.serie || ""}|${Number(nf.numeroRps)}`, nf);
+    for (const g of grupos) {
+      const rCons = await fetch(`${raiz}${g.rota}`, {
+        method: "POST",
+        headers: headersRender,
+        body: JSON.stringify({
+          chaves: g.itens.map((n) => ({ serie: n.rps_serie, numero: n.rps_numero })),
+        }),
+        cache: "no-store",
+      });
+      const cons = await rCons.json().catch(() => null);
+      if (!rCons.ok || !cons) {
+        return NextResponse.json(
+          { error: "Falha ao consultar o emissor", detail: cons, rota: g.rota },
+          { status: 502 }
+        );
+      }
+      for (const nf of cons.notas || []) {
+        if (nf.numeroRps) achadas.set(`${nf.serie || ""}|${Number(nf.numeroRps)}`, nf);
+      }
     }
 
     const recuperadas: any[] = [];
@@ -136,8 +143,11 @@ export async function POST(req: Request) {
           status: cancelada ? "cancelada" : "emitida",
           numero_nota: String(achou.numeroNota),
           codigo_verificacao: achou.codigoVerificacao || null,
+          ...(achou.chaveAcesso ? { chave_acesso: achou.chaveAcesso } : {}),
           data_emissao: String(achou.dataEmissao || "").slice(0, 10) || null,
-          pdf_url: linkNota(im, achou.numeroNota, achou.codigoVerificacao || ""),
+          pdf_url: achou.chaveAcesso
+            ? linkDanfse(achou.chaveAcesso)
+            : linkNota(im, achou.numeroNota, achou.codigoVerificacao || ""),
           emissao_erro: null,
           enviado_em: new Date().toISOString(),
         }),
