@@ -89,9 +89,10 @@ export default async function proxy(req: NextRequest) {
       },
     },
   });
-  const {
-    data: { user },
-  } = await sb.auth.getUser();
+  // 09/11: getClaims confere a assinatura do token aqui mesmo (chave ES256 do projeto), sem ir ao
+  // servidor de autenticação a cada clique como o getUser fazia. Sessão encerrada vale até o token vencer (1 h).
+  const { data: dc } = await sb.auth.getClaims();
+  const user = dc?.claims?.sub ? { email: (dc.claims.email as string | undefined) ?? null } : null;
 
   // /login: logado vai pra home
   if (pathname === '/login') {
