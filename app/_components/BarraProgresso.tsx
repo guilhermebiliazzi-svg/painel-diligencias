@@ -15,7 +15,8 @@ export default function BarraProgresso() {
 
   useEffect(() => {
     const clique = (e: MouseEvent) => {
-      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      // escuta na fase de captura: o Link do Next cancela o clique padrão antes de ele chegar ao documento
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       const a = (e.target as Element | null)?.closest?.('a');
       if (!a || !a.href || a.target === '_blank' || a.hasAttribute('download')) return;
       const u = new URL(a.href, location.href);
@@ -27,9 +28,9 @@ export default function BarraProgresso() {
       const f = e.target as HTMLFormElement;
       if (!e.defaultPrevented && (f.method || 'get').toLowerCase() === 'get' && f.action.startsWith(location.origin)) setAtivo(true);
     };
-    document.addEventListener('click', clique);
+    document.addEventListener('click', clique, true);
     document.addEventListener('submit', envio);
-    return () => { document.removeEventListener('click', clique); document.removeEventListener('submit', envio); };
+    return () => { document.removeEventListener('click', clique, true); document.removeEventListener('submit', envio); };
   }, []);
 
   useEffect(() => {
