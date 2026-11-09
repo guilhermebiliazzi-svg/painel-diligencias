@@ -389,5 +389,5 @@ const CSS = `
 .vj-cab b{display:block}
 .vj-bol{display:inline-block;margin-top:2px;padding:4px 10px;border-radius:999px;font-weight:700;font-size:14px}
 .vj-link-recibo{color:#003DA5;font-weight:700;text-decoration:underline}
-@media (max-width:640px){.vj-sel{flex-direction:column;align-items:stretch}.vj-vlr{width:110px}}
+@media (max-width:640px){.vj-sel{flex-direction:column;flex-wrap:nowrap;align-items:stretch}.vj-sel>*{min-width:0!important;max-width:100%}.vj-vlr{width:110px}}
 `;
