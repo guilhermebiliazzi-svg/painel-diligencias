@@ -822,6 +822,12 @@ def processar(nome, cfg, escolhas=None, compartilhados=None):
 # do titulo por sucursal: aqui o anuncio sai inteiro, com todas as fotos.
 
 DONO_ROLETA = "ROLETA"
+
+# 09/11: primeira vez que cada codigo apareceu nos feeds (tabela alianca_primeira_vez,
+# preenchida pelo app.py antes de processar). Regra do Guilherme: quando duas
+# sucursais publicam o MESMO imovel no iList, fica quem publicou primeiro. Sem as
+# duas datas (ou com datas iguais), vale o desempate pelo codigoImobiliaria.
+PRIMEIRA_VEZ = {}
 PREFIXO = {"ville": "VIL", "homemark": "HMK", "alcance": "ALC", DONO_ROLETA: "PAR"}
 
 SAIDA_UNIFICADA = os.environ.get("SAIDA_UNIFICADA", "remax_alianca.xml")
@@ -1372,6 +1378,25 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                 kf, pos = achado
                 conflitos_ilist += 1
                 antigo_nome, antigo_codigo, antigo_chave, _ = por_fato[kf][pos]
+                pa = (PRIMEIRA_VEZ.get(antigo_codigo) or "")[:19]
+                pn = (PRIMEIRA_VEZ.get(codigo) or "")[:19]
+                if pa and pn and pa != pn:
+                    if pn < pa:
+                        # o anuncio desta sucursal foi publicado antes: troca
+                        del carteira[antigo_chave]
+                        traducao[antigo_chave] = codigo
+                        carteira[chave] = (nome, bloco)
+                        traducao[chave] = codigo
+                        por_fato[kf][pos] = (nome, codigo, chave, cf)
+                        fatos_carteira[cf] = (nome, codigo)
+                        print(f"  iList x iList: {antigo_codigo} ({antigo_nome}) cede para "
+                              f"{codigo} ({nome}) — publicado primeiro ({pn[:10]} x {pa[:10]})")
+                    else:
+                        traducao[chave] = antigo_codigo
+                        print(f"  iList x iList: {codigo} ({nome}) cede para "
+                              f"{antigo_codigo} ({antigo_nome}) — publicado primeiro "
+                              f"({pa[:10]} x {pn[:10]})")
+                    continue
                 declarado = (dono_declarado(bloco)
                              or dono_declarado(carteira[antigo_chave][1]))
 
