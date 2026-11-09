@@ -1,15 +1,6 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import Link from "next/link";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "Painel de Diligências — REMAX Ville",
@@ -24,9 +15,11 @@ export const metadata: Metadata = {
 
 export const viewport = {
   colorScheme: "light" as const,
-  themeColor: "#f8fafc",
+  themeColor: "#ffffff",
 };
 
+// 09/11: mesmo padrão visual do site (villejardins.com.br): Montserrat, logo REMAX Ville no topo,
+// fundo areia e títulos em azul-marinho. As cores ficam em globals.css.
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -35,16 +28,27 @@ export default function RootLayout({
   return (
     <html
       lang="pt-BR"
-      className={`${geistSans.variable} ${geistMono.variable}`}
-      style={{ colorScheme: "light", backgroundColor: "#f8fafc" }}
+      style={{ colorScheme: "light", backgroundColor: "#F7F5EE" }}
     >
       <head>
         <meta name="color-scheme" content="light only" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" />
       </head>
       <body
-        style={{ backgroundColor: "#f8fafc", color: "#0f172a" }}
+        style={{ backgroundColor: "#F7F5EE", color: "#1d2230" }}
         className="min-h-screen antialiased"
       >
+        <div className="barra-marca border-b border-linha bg-white">
+          <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5">
+            <Link href="/" aria-label="Painel interno — início">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.svg" alt="REMAX Ville" width={150} height={66} className="h-10 w-auto" />
+            </Link>
+          </div>
+        </div>
         {children}
       </body>
     </html>
