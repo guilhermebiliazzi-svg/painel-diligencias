@@ -1,6 +1,7 @@
 // 06/11: funil de recrutamento — usado no Funil do SDR (aba Recrutamento) e na tela própria /recrutamento
 // (perfil com a tela "Recrutamento de corretores", ex.: Jessica, sem acesso ao resto do SDR).
 import Link from 'next/link';
+import { unstable_cache } from 'next/cache';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import AcoesCandidato from '@/app/sdr/recrutamento-acoes';
 import { ETAPAS_REC, foraDeSp, perfilCandidato, type EtapaRec, type PerfilRec } from '@/lib/recrutamento';
@@ -69,17 +70,27 @@ const contar = <T,>(xs: T[], f: (x: T) => string) =>
 // gravadas em public.recrutamento_candidatos. Perfil = etiqueta automática do "momento" + CRECI.
 type LinhaRec = { telefone: string; etapa: EtapaRec; motivo: string | null; entrevista_em: string | null; retomar_em: string | null; encaminhado_nome: string | null; atualizado_em: string };
 
+// 09/11: o custo vem do Google Ads pelo n8n e levava 1 a 2,5 s a cada abertura da tela (e gastava uma
+// execução do n8n por vez). Agora fica guardado por 30 min; falha não é guardada (tenta de novo na próxima).
+const custoGuardado = unstable_cache(
+  async (ini: string, fim: string): Promise<number> => {
+    const r = await fetch('https://villejds.app.n8n.cloud/webhook/monitor-ads-leitura-8s4cas1u', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store',
+      body: JSON.stringify({ query: `SELECT metrics.cost_micros FROM campaign WHERE campaign.id IN (24295426302, 24302623838) AND segments.date BETWEEN '${ini}' AND '${fim}'` }),
+    });
+    const j = (await r.json()) as { results?: { metrics?: { costMicros?: string } }[] };
+    if (!j.results) throw new Error('sem resultado do Google Ads');
+    return j.results.reduce((s, x) => s + Number(x.metrics?.costMicros ?? 0), 0) / 1e6;
+  },
+  ['custo-recrutamento-v1'],
+  { revalidate: 1800 },
+);
+
 async function custoRecrutamento(dias: number | null): Promise<number | null> {
   const dia = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(d);
   const ini = dias == null ? '2026-09-01' : dia(new Date(Date.now() - dias * 864e5));
   try {
-    const r = await fetch('https://villejds.app.n8n.cloud/webhook/monitor-ads-leitura-8s4cas1u', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store',
-      body: JSON.stringify({ query: `SELECT metrics.cost_micros FROM campaign WHERE campaign.id IN (24295426302, 24302623838) AND segments.date BETWEEN '${ini}' AND '${dia(new Date())}'` }),
-    });
-    const j = (await r.json()) as { results?: { metrics?: { costMicros?: string } }[] };
-    if (!j.results) return null;
-    return j.results.reduce((s, x) => s + Number(x.metrics?.costMicros ?? 0), 0) / 1e6;
+    return await custoGuardado(ini, dia(new Date()));
   } catch {
     return null;
   }
