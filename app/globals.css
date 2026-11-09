@@ -58,6 +58,9 @@ body {
   h1, h2, h3 { text-wrap: balance; letter-spacing: -0.015em; }
 }
 
+/* campo de seleção com opções compridas não alarga a tela (ex.: contratos no Repasse) */
+select { max-width: 100%; }
+
 /* Celular */
 @media (max-width: 640px) {
   /* tabelas largas rolam dentro de si mesmas, sem empurrar a página para o lado */
