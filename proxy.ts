@@ -32,6 +32,8 @@ const REGRAS: Regra[] = [
   { re: /^\/ligacoes(\/|$)/, perm: 'any', legacy: false },
   // 06/11: conversa da Eva também abre para quem só tem Recrutamento (a página confere se é candidato).
   { re: /^\/sdr\/conversa\//, perm: 'any', legacy: false },
+  // 09/11: oferta de lead aberta pela notificação do app; a página confere se é do corretor logado.
+  { re: /^\/oferta\//, perm: 'any', legacy: false },
   { re: /^\/sdr(\/|$)/, perm: 'sdr', legacy: false },
   { re: /^\/recrutamento(\/|$)/, perm: 'recrutamento', legacy: false },
   { re: /^\/vitrine(\/|$)/, perm: 'vitrine', legacy: false },
