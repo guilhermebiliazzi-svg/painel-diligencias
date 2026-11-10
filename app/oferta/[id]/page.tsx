@@ -26,6 +26,12 @@ export default async function Oferta({ params }: { params: Promise<{ id: string 
     .like('telefone', '%' + f8(atr.corretor_phone)).gte('created_at', desde).order('created_at', { ascending: true }).limit(1).maybeSingle();
   const texto = String(msg?.conteudo ?? '').replace(/^\[ERRO[^\]]*\]\s*/, '').replace(/\s*Responda SIM ou NÃO.*$/i, '').trim();
   const vencida = !atr.resposta && !!atr.prazo_em && passou(atr.prazo_em);
+  // 10/11: depois do SIM, os dados do cliente ficam aqui também (caso o WhatsApp do corretor não esteja recebendo).
+  const { data: cli } = atr.resposta === 'sim' && dono
+    ? await sb.from('sdr_leads').select('nome,telefone').eq('id', atr.lead_id).maybeSingle()
+    : { data: null };
+  const telCli = String(cli?.telefone ?? '').replace(/\D/g, '');
+  const telFmt = telCli.replace(/^55(\d{2})(\d{4,5})(\d{4})$/, '($1) $2-$3');
   const aberta = !atr.resposta && !vencida;
 
   return (
@@ -39,7 +45,16 @@ export default async function Oferta({ params }: { params: Promise<{ id: string 
         </div>
         {aberta && dono && <Botoes id={atr.id} />}
         {aberta && !dono && <p className="mt-6 text-sm text-slate-500">Aguardando a resposta do corretor.</p>}
-        {atr.resposta === 'sim' && <p className="mt-6 rounded-xl bg-emerald-50 p-4 text-sm text-emerald-800">Lead assumido. Os dados do cliente estão no seu WhatsApp.</p>}
+        {atr.resposta === 'sim' && !cli && <p className="mt-6 rounded-xl bg-emerald-50 p-4 text-sm text-emerald-800">Lead assumido.</p>}
+        {atr.resposta === 'sim' && cli && (
+          <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+            <p className="text-sm font-semibold text-emerald-900">Lead assumido. Fale com o cliente:</p>
+            <p className="mt-2 text-lg font-semibold text-slate-900">{cli.nome || 'Cliente'}</p>
+            {telCli && <p className="text-base text-slate-700 select-all">{telFmt}</p>}
+            {telCli && <a href={`https://wa.me/${telCli}`} target="_blank" rel="noopener" className="mt-4 inline-block rounded-xl bg-emerald-600 px-4 py-3 text-base font-semibold text-white hover:bg-emerald-700">Abrir conversa no WhatsApp</a>}
+            <p className="mt-3 text-xs text-emerald-800">Os mesmos dados também foram enviados ao seu WhatsApp.</p>
+          </div>
+        )}
         {atr.resposta && atr.resposta !== 'sim' && <p className="mt-6 rounded-xl bg-slate-100 p-4 text-sm text-slate-600">Esta oferta já foi encerrada.</p>}
         {vencida && <p className="mt-6 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">O prazo de 15 minutos acabou e o lead foi para o próximo corretor.</p>}
       </main>
