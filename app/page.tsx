@@ -9,6 +9,7 @@ import { getNav, type ItemNav, type IconeNav, type Cor } from '@/lib/nav';
 import { AREAS, podeTela, escopoDiligencias, escopoSdr } from '@/lib/acesso';
 import { ehMonitor } from '@/lib/oficinas';
 import SetaCard from './_components/SetaCard';
+import AtivarNotificacoes from './_components/AtivarNotificacoes';
 
 export const metadata = { title: 'Painel interno — REMAX Ville' };
 
@@ -140,6 +141,9 @@ export default async function Home() {
             </button>
           </form>
         </header>
+
+        {/* 09/11: notificação de lead novo no celular (corretores; admin para testar) */}
+        {(corretor || perfil.is_admin) && <AtivarNotificacoes />}
 
         {areas.map((a) => (
           <section key={a.chave} className="mt-8">
