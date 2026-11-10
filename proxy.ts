@@ -47,9 +47,59 @@ const REGRAS: Regra[] = [
   { re: /^\/$/, perm: 'any', legacy: false },
 ];
 
+// ---------------------------------------------------------------------------
+// rquatro (rquatro.com.br): painel para outras unidades REMAX, com Supabase
+// PRÓPRIO. No domínio rquatro, tudo é reescrito para /r4/... (o painel da Ville
+// não existe ali). No domínio do painel, /r4 fica acessível para testes. As
+// páginas do /r4 conferem a sessão do rquatro; aqui só renovamos o token.
+// ---------------------------------------------------------------------------
+function ehHostR4(req: NextRequest) {
+  const host = (req.headers.get('host') || '').split(':')[0].toLowerCase();
+  return host === 'rquatro.com.br' || host.endsWith('.rquatro.com.br');
+}
+
+async function proxyR4(req: NextRequest, noHost: boolean) {
+  const { pathname } = req.nextUrl;
+  let destino: URL | null = null;
+  if (noHost && !pathname.startsWith('/api/r4/')) {
+    destino = req.nextUrl.clone();
+    destino.pathname = '/r4' + (pathname === '/' ? '' : pathname);
+  }
+  const responder = () => {
+    const h = new Headers(req.headers);
+    h.set('x-r4-host', noHost ? '1' : '0');
+    return destino
+      ? NextResponse.rewrite(destino, { request: { headers: h } })
+      : NextResponse.next({ request: { headers: h } });
+  };
+  let res = responder();
+  const url = process.env.R4_SUPABASE_URL || 'https://ktzgxzzuqbixcxwguepq.supabase.co';
+  const anon = process.env.R4_SUPABASE_ANON_KEY;
+  if (!anon) return res;
+  const sb = createServerClient(url, anon, {
+    cookies: {
+      getAll() {
+        return req.cookies.getAll();
+      },
+      setAll(list: CookieParaGravar[]) {
+        list.forEach(({ name, value }) => req.cookies.set(name, value));
+        res = responder();
+        list.forEach(({ name, value, options }) => res.cookies.set(name, value, options));
+      },
+    },
+  });
+  await sb.auth.getClaims(); // renova o token quando venceu
+  return res;
+}
+
 export default async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const ehApi = pathname.startsWith('/api/');
+
+  const r4Host = ehHostR4(req);
+  if (r4Host || pathname === '/r4' || pathname.startsWith('/r4/') || pathname.startsWith('/api/r4/')) {
+    return proxyR4(req, r4Host);
+  }
 
   // Porta de emergência da senha antiga (setar/limpar cookie) segue livre.
   if (pathname === '/admin/login' || pathname === '/admin/api/login') {
