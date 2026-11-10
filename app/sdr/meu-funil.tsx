@@ -141,6 +141,19 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
   ];
   const topo = Math.max(etapas[0].n, 1);
   const lista = [...meus].sort((a, b) => (b.atribuido_em || b.created_at).localeCompare(a.atribuido_em || a.created_at));
+  // 10/11: corretor parceiro (dono do imóvel, outra unidade) de cada lead: nome, telefone e a conversa com a Eva.
+  const parceiros = new Map<string, { nome: string; tel: string; ref: string | null }[]>();
+  if (lista.length) {
+    const { data: pi } = await supabaseAdmin().from('sdr_imoveis_lead').select('lead_id,parceiro_nome,parceiro_telefone,ref')
+      .in('lead_id', lista.slice(0, 300).map((l) => l.id)).not('parceiro_telefone', 'is', null).order('created_at', { ascending: true });
+    for (const x of (pi ?? []) as { lead_id: string; parceiro_nome: string | null; parceiro_telefone: string; ref: string | null }[]) {
+      const tel = String(x.parceiro_telefone).replace(/\D/g, ''); if (tel.length < 10 || fim8(tel) === k) continue;
+      const arr = parceiros.get(x.lead_id) ?? [];
+      if (!arr.some((y) => fim8(y.tel) === fim8(tel))) arr.push({ nome: x.parceiro_nome || 'Corretor parceiro', tel, ref: x.ref });
+      parceiros.set(x.lead_id, arr);
+    }
+  }
+  const telFmt = (t: string) => { const d = t.replace(/\D/g, '').replace(/^55/, ''); return d.length >= 10 ? `(${d.slice(0, 2)}) ${d.slice(2, -4)}-${d.slice(-4)}` : t; };
 
   return (
     <div style={{ backgroundColor: '#f8fafc' }} className="min-h-screen">
@@ -247,11 +260,19 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
                                   {l.telefone}
                                 </a>
                               )}
+                              {l.telefone && <Link href={`/sdr/conversa/${String(l.telefone).replace(/\D/g, '')}`} className="block text-xs font-medium text-slate-700 underline hover:text-slate-900">Conversa da Eva com o cliente</Link>}
                             </td>
                             <td className="py-2 pr-3 text-slate-600">{INTENCAO[l.intencao ?? ''] ?? (l.intencao || '—')}</td>
                             <td className="py-2 pr-3 text-slate-600">
                               {f?.endereco || '—'}
                               {f?.valor != null && <span className="block text-xs text-slate-500">{fmtValor(f.valor)}</span>}
+                              {(parceiros.get(l.id) ?? []).map((pc) => (
+                                <span key={pc.tel} className="mt-1 block text-xs text-slate-600">
+                                  Parceiro{pc.ref ? ` (ref. ${pc.ref})` : ''}: {pc.nome} ·{' '}
+                                  <a href={`https://wa.me/${pc.tel}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{telFmt(pc.tel)}</a>{' '}·{' '}
+                                  <Link href={`/sdr/conversa/${pc.tel}`} className="font-medium text-slate-700 underline hover:text-slate-900">conversa com a Eva</Link>
+                                </span>
+                              ))}
                             </td>
                             <td className="py-2"><span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${tom}`}>{andamento}</span></td>
                           </tr>
