@@ -3,7 +3,7 @@
 // herdam o horário da mensagem que responderam) e mensagens do sistema (sdr_mensagens, com status do WhatsApp).
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { exigirPerfil, podeTela, escopoSdr } from '@/lib/perfil';
+import { exigirPerfil, podeTela, escopoSdr, corretorDaPessoa } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import MensagemEva from '@/app/sdr/lead/[id]/mensagem';
 import { statusDasMensagens, enviosDaEva, casarEnvio, rotuloStatus, mensagensAvulsas, casarAvulsa } from '@/lib/wa-status';
@@ -29,13 +29,34 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
   // 06/11: quem gerencia o SDR vê qualquer conversa; quem tem só a tela Recrutamento vê só a de candidatos.
   const perfil = await exigirPerfil();
   const gestao = podeTela(perfil, 'sdr') && escopoSdr(perfil) === 'todos';
-  if (!gestao && !podeTela(perfil, 'recrutamento')) redirect('/sem-acesso');
+  const meuFunil = !gestao && podeTela(perfil, 'sdr');
+  if (!gestao && !meuFunil && !podeTela(perfil, 'recrutamento')) redirect('/sem-acesso');
   const { tel } = await params;
   const dig = decodeURIComponent(tel).replace(/\D/g, '');
   if (dig.length < 10 || dig.length > 13) notFound();
   const vs = variantes(dig.length <= 11 ? '55' + dig : dig);
   const sb = supabaseAdmin();
-  if (!gestao) {
+  // 10/11: o corretor vê a conversa da Eva com o cliente de um lead que é dele e com o corretor parceiro desse lead
+  // (a do parceiro só a partir da chegada do lead, para não mostrar conversas de outros leads antigos).
+  let desdeCorretor: number | null = null;
+  let viaCorretor = false;
+  if (!gestao && meuFunil) {
+    const cor = await corretorDaPessoa(perfil.email);
+    const k8 = String(cor?.phone ?? '').replace(/\D/g, '').slice(-8);
+    if (k8.length === 8) {
+      const { data: meus } = await sb.from('sdr_leads').select('id,telefone,created_at').like('corretor_phone', '%' + k8).not('atribuido_em', 'is', null).limit(2000);
+      const ls = (meus ?? []) as { id: string; telefone: string | null; created_at: string }[];
+      const d8 = dig.slice(-8);
+      if (ls.some((l) => String(l.telefone ?? '').replace(/\D/g, '').slice(-8) === d8)) viaCorretor = true;
+      else if (ls.length) {
+        const { data: pi } = await sb.from('sdr_imoveis_lead').select('lead_id').like('parceiro_telefone', '%' + d8).in('lead_id', ls.map((l) => l.id).slice(0, 1000));
+        const ids = new Set(((pi ?? []) as { lead_id: string }[]).map((x) => x.lead_id));
+        const rel = ls.filter((l) => ids.has(l.id));
+        if (rel.length) { viaCorretor = true; desdeCorretor = Math.min(...rel.map((l) => new Date(l.created_at).getTime())) - 3600e3; }
+      }
+    }
+  }
+  if (!gestao && !viaCorretor) {
     const { count } = await sb.from('recrutamento_leads').select('id', { count: 'exact', head: true }).like('telefone', '%' + dig.slice(-8));
     if (!count) redirect('/sem-acesso');
   }
@@ -115,11 +136,12 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
   // 29/10: respostas da Eva gravadas no envio que não casaram com o histórico (ex.: fluxos sem memória) entram assim mesmo.
   for (const e of envios) if (!e.usado && !sistema.has(String(e.texto ?? '').trim())) eventos.push({ k: 'e' + e.wa_message_id, t: new Date(e.enviado_em).getTime(), lado: 'eva', rotulo: 'Eva', texto: String(e.texto ?? ''), status: rotuloStatus(stPor, e.wa_message_id) });
   eventos.sort((a, b) => a.t - b.t);
+  if (desdeCorretor != null) for (let i = eventos.length - 1; i >= 0; i--) if (eventos[i].t < desdeCorretor) eventos.splice(i, 1);
 
   const cor_ = { pessoa: 'bg-white border-slate-200', eva: 'bg-blue-50 border-blue-100', sistema: 'bg-amber-50 border-amber-100' };
   return (
     <main className="mx-auto max-w-3xl px-4 py-6">
-      <Link href={gestao ? '/sdr' : '/recrutamento'} className="text-sm text-blue-700 underline">{gestao ? '← SDR' : '← Recrutamento'}</Link>
+      <Link href={gestao || viaCorretor ? '/sdr' : '/recrutamento'} className="text-sm text-blue-700 underline">{gestao ? '← SDR' : viaCorretor ? '← Meu funil' : '← Recrutamento'}</Link>
       <section style={{ backgroundColor: '#ffffff' }} className="mt-3 rounded-2xl border border-slate-200 p-4 shadow-sm">
         <h1 className="text-lg font-semibold text-slate-900">Conversa com {quem}</h1>
         <p className="text-sm text-slate-600">{telFmt(vs[0])} · <a href={'https://wa.me/' + vs[0]} target="_blank" className="text-blue-700 underline">abrir no WhatsApp</a></p>
