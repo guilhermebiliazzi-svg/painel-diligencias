@@ -20,7 +20,7 @@ export function LogoUnidade({ atual, unidadeId, compacto = false }: { atual: str
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || `Falha (HTTP ${r.status}).`);
       setLogo(d.logo_url ?? null);
-      setMsg({ ok: true, t: d.logo_url ? 'Logo salvo. Já aparece no painel, no link do cliente e no PDF.' : 'Logo removido.' });
+      setMsg({ ok: true, t: d.logo_url ? 'Logo salvo. Já aparece no painel e no link do cliente.' : 'Logo removido.' });
       router.refresh();
     } catch (e) {
       setMsg({ ok: false, t: e instanceof Error ? e.message : 'Falha no envio.' });
@@ -42,7 +42,7 @@ export function LogoUnidade({ atual, unidadeId, compacto = false }: { atual: str
   }
 
   function remover() {
-    if (!window.confirm('Tirar o logo da unidade? Os documentos voltam a sair só com o nome da unidade.')) return;
+    if (!window.confirm('Tirar o logo da unidade? O painel e o link do cliente voltam a mostrar só o nome da unidade.')) return;
     const fd = new FormData();
     fd.set('acao', 'remover');
     void mandar(fd);
