@@ -7,6 +7,8 @@ type Props = {
   diligencia_id: string;
   /** Base URL do painel cliente. Default: https://painel.villejardins.com.br */
   baseUrl?: string;
+  /** Link completo (o rquatro usa o dele). Se vier, ignora baseUrl. */
+  url?: string;
 };
 
 /**
@@ -16,9 +18,10 @@ type Props = {
 export function CopiarLinkCliente({
   diligencia_id,
   baseUrl = 'https://painel.villejardins.com.br',
+  url: urlPronta,
 }: Props) {
   const [estado, setEstado] = useState<'idle' | 'ok' | 'erro'>('idle');
-  const url = `${baseUrl}/d/${diligencia_id}`;
+  const url = urlPronta || `${baseUrl}/d/${diligencia_id}`;
 
   async function copiar() {
     try {
