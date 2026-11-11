@@ -5,6 +5,7 @@
 // Arquivo grande demais para passar pela Vercel (> 4 MB) abre direto no Drive.
 import { pool } from '@/lib/db';
 import { downloadDriveFile, driveFileMeta } from '@/lib/drive';
+import { pdfDeHtml, tipoDoArquivo } from '@/lib/diligencia-pdf';
 import { r4Admin } from '@/lib/r4/supabase';
 
 export const runtime = 'nodejs';
@@ -46,10 +47,26 @@ export async function GET(_req: Request, { params }: { params: Promise<{ dil: st
       .replace(/[^a-zA-Z0-9 ._-]+/g, '')
       .trim()
       .slice(0, 80);
-    const ext = /pdf/i.test(f.mimeType) ? '.pdf' : '';
-    return new Response(Buffer.from(f.bytes), {
+    // Confere o conteúdo, não o tipo gravado no Drive: alguns sites devolvem um
+    // comprovante em HTML que foi salvo com nome .pdf (Mobiliária, SEFAZ-SP).
+    const tipo = tipoDoArquivo(f.bytes, f.mimeType);
+    let corpo: Uint8Array = f.bytes;
+    let ct = f.mimeType || 'application/octet-stream';
+    let ext = '';
+    if (tipo === 'pdf') {
+      ct = 'application/pdf';
+      ext = '.pdf';
+    } else if (tipo === 'html') {
+      corpo = await pdfDeHtml(f.bytes, String(row.nome || 'Documento'));
+      ct = 'application/pdf';
+      ext = '.pdf';
+    } else if (tipo === 'jpg' || tipo === 'png') {
+      ct = tipo === 'jpg' ? 'image/jpeg' : 'image/png';
+      ext = tipo === 'jpg' ? '.jpg' : '.png';
+    }
+    return new Response(Buffer.from(corpo), {
       headers: {
-        'content-type': f.mimeType || 'application/octet-stream',
+        'content-type': ct,
         'content-disposition': `inline; filename="${nome || 'documento'}${ext}"`,
         'cache-control': 'private, max-age=300',
         'x-robots-tag': 'noindex',
