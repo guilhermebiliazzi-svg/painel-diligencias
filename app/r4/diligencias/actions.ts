@@ -6,19 +6,30 @@ import { enviarAoMotor } from '@/lib/r4/motor';
 
 export type ResultadoNova = { ok: boolean; msg: string } | null;
 
-type PessoaPF = {
+type Pessoa = {
   nome: string;
   cpf: string;
   rg: string;
   nascimento: string;
   genero: string;
   mae: string;
-  estado_civil: string;
+  nacionalidade: string;
+  profissao: string;
+  email: string;
 };
-type PessoaPJ = { nome: string; cnpj: string };
+type Conjuge = Pessoa & { participacao: string; registro: string };
+type PF = Pessoa & { estado_civil: string; regime: string; conjuge: Conjuge };
+type Rep = Pessoa & { papel: string; certidoes: boolean; estado_civil: string };
+type PJ = { vinculo: string; nome: string; cnpj: string; reps: Rep[] };
+type Mat = { numero: string; cartorio: string; sql: string };
 
 const so = (s: unknown) => String(s ?? '').replace(/\D/g, '');
 const txt = (s: unknown) => String(s ?? '').trim();
+const up = (s: unknown) => txt(s).toUpperCase();
+const temConjuge = (ec: string) => ec === 'casado' || ec === 'uniao_estavel';
+const ESTADOS = ['solteiro', 'casado', 'uniao_estavel', 'divorciado', 'viuvo', 'separado'];
+const REGIMES = ['comunhao_parcial', 'comunhao_universal', 'separacao_total', 'participacao_final'];
+const PARTICIPACOES = ['coproprietario', 'anuente_anterior', 'anuente_gratuito', 'indeterminado'];
 
 function cpfValido(c: string) {
   if (!/^\d{11}$/.test(c) || /^(\d)\1{10}$/.test(c)) return false;
@@ -40,6 +51,16 @@ function cnpjValido(c: string) {
   return calc(12) === Number(c[12]) && calc(13) === Number(c[13]);
 }
 
+/** Dados exigidos para emitir certidões de uma pessoa (as criminais pedem mãe, nascimento e gênero). */
+function faltaParaCertidoes(p: Pessoa, n: string): string | null {
+  if (!txt(p.nome)) return `${n}: informe o nome.`;
+  if (!cpfValido(so(p.cpf))) return `${n}: CPF inválido.`;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(txt(p.nascimento))) return `${n}: informe a data de nascimento.`;
+  if (p.genero !== 'M' && p.genero !== 'F') return `${n}: informe o gênero.`;
+  if (!txt(p.mae)) return `${n}: informe o nome da mãe (exigido pelas certidões criminais).`;
+  return null;
+}
+
 /** Cria a diligência no rquatro e manda para o motor (fluxo R4-01). */
 export async function criarDiligencia(_prev: ResultadoNova, form: FormData): Promise<ResultadoNova> {
   const base = await r4Base();
@@ -57,51 +78,138 @@ export async function criarDiligencia(_prev: ResultadoNova, form: FormData): Pro
     .maybeSingle();
   if (!un || !un.ativa) return { ok: false, msg: 'Unidade inativa ou inexistente.' };
   if (!un.pasta_drive_id) {
-    return { ok: false, msg: 'A pasta do Google Drive da unidade ainda não foi configurada. Fale com a administração do rquatro.' };
+    return { ok: false, msg: 'A pasta do Google Drive da unidade ainda não foi configurada.' };
   }
 
-  let pf: PessoaPF[] = [];
-  let pj: PessoaPJ[] = [];
+  let pf: PF[] = [];
+  let pj: PJ[] = [];
+  let mat: Mat[] = [];
   try {
     pf = JSON.parse(String(form.get('pf') || '[]'));
     pj = JSON.parse(String(form.get('pj') || '[]'));
+    mat = JSON.parse(String(form.get('mat') || '[]'));
   } catch {
-    return { ok: false, msg: 'Dados dos proprietários inválidos.' };
+    return { ok: false, msg: 'Dados do formulário inválidos. Recarregue a página.' };
   }
-  const endereco = txt(form.get('endereco')).replace(/\s+/g, ' ');
-  const sql = txt(form.get('sql_iptu'))
-    .split(/[,;\s]+/)
-    .map((s) => s.replace(/[^\d.-]/g, ''))
-    .filter((s) => so(s).length >= 10)
-    .join(', ');
 
+  const endereco = txt(form.get('endereco')).replace(/\s+/g, ' ');
   if (endereco.length < 8) return { ok: false, msg: 'Informe o endereço completo do imóvel (com número e complemento).' };
+
+  mat = mat.filter((m) => txt(m.numero) || txt(m.sql) || txt(m.cartorio));
+  if (!mat.length) return { ok: false, msg: 'Informe o número da matrícula do imóvel.' };
+  for (const [i, m] of mat.entries()) {
+    if (!so(m.numero)) return { ok: false, msg: `Matrícula ${i + 1}: informe o número.` };
+    if (txt(m.sql) && so(m.sql).length < 10) return { ok: false, msg: `Matrícula ${i + 1}: SQL do IPTU incompleto.` };
+  }
+
   pf = pf.filter((p) => txt(p.nome) || so(p.cpf));
   pj = pj.filter((p) => txt(p.nome) || so(p.cnpj));
-  if (!pf.length && !pj.length) return { ok: false, msg: 'Inclua ao menos um proprietário.' };
+  if (!pf.length && !pj.some((p) => p.vinculo === 'vendedora')) {
+    return { ok: false, msg: 'Inclua ao menos um vendedor (pessoa física ou empresa vendedora).' };
+  }
 
   for (const [i, p] of pf.entries()) {
-    const n = `Pessoa física ${i + 1}`;
-    if (!txt(p.nome)) return { ok: false, msg: `${n}: informe o nome.` };
-    if (!cpfValido(so(p.cpf))) return { ok: false, msg: `${n}: CPF inválido.` };
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(txt(p.nascimento))) return { ok: false, msg: `${n}: informe a data de nascimento.` };
-    if (!txt(p.mae)) return { ok: false, msg: `${n}: informe o nome da mãe (exigido pelas certidões criminais).` };
-    if (p.genero !== 'M' && p.genero !== 'F') return { ok: false, msg: `${n}: informe o gênero.` };
+    const n = `Vendedor(a) ${i + 1}`;
+    const f = faltaParaCertidoes(p, n);
+    if (f) return { ok: false, msg: f };
+    if (!ESTADOS.includes(p.estado_civil)) return { ok: false, msg: `${n}: informe o estado civil.` };
+    if (temConjuge(p.estado_civil)) {
+      if (!REGIMES.includes(p.regime)) return { ok: false, msg: `${n}: informe o regime de bens.` };
+      if (!PARTICIPACOES.includes(p.conjuge?.participacao)) {
+        return { ok: false, msg: `${n}: informe se o cônjuge é coproprietário (parte vendedora) ou anuente.` };
+      }
+      const fc = faltaParaCertidoes(p.conjuge, `Cônjuge de ${n.toLowerCase()}`);
+      if (fc) return { ok: false, msg: fc };
+    }
   }
   for (const [i, p] of pj.entries()) {
     const n = `Empresa ${i + 1}`;
+    if (p.vinculo !== 'vendedora' && p.vinculo !== 'participacao') return { ok: false, msg: `${n}: informe o vínculo da empresa.` };
     if (!txt(p.nome)) return { ok: false, msg: `${n}: informe a razão social.` };
     if (!cnpjValido(so(p.cnpj))) return { ok: false, msg: `${n}: CNPJ inválido.` };
+    if (p.vinculo === 'vendedora') {
+      const reps = (p.reps || []).filter((r) => txt(r.nome) || so(r.cpf));
+      if (!reps.length) return { ok: false, msg: `${n}: informe quem assina pela empresa.` };
+      for (const [ri, r] of reps.entries()) {
+        const nr = `${n}, signatário ${ri + 1}`;
+        if (!['socio_adm', 'adm_nao_socio', 'procurador'].includes(r.papel)) return { ok: false, msg: `${nr}: informe o papel na empresa.` };
+        if (!txt(r.nome)) return { ok: false, msg: `${nr}: informe o nome.` };
+        if (!cpfValido(so(r.cpf))) return { ok: false, msg: `${nr}: CPF inválido.` };
+        if (r.certidoes) {
+          const f = faltaParaCertidoes(r, nr);
+          if (f) return { ok: false, msg: f };
+        }
+      }
+      p.reps = reps;
+    } else {
+      p.reps = [];
+    }
   }
-  const cpfs = pf.map((p) => so(p.cpf));
-  if (new Set(cpfs).size !== cpfs.length) return { ok: false, msg: 'Há CPF repetido entre os proprietários.' };
+  const cpfs = [
+    ...pf.map((p) => so(p.cpf)),
+    ...pf.filter((p) => temConjuge(p.estado_civil)).map((p) => so(p.conjuge.cpf)),
+  ];
+  if (new Set(cpfs).size !== cpfs.length) return { ok: false, msg: 'Há CPF repetido entre vendedores e cônjuges.' };
 
-  const dados = {
-    endereco,
-    sql_iptu: sql || null,
-    pf: pf.map((p) => ({ ...p, cpf: so(p.cpf), nome: txt(p.nome).toUpperCase(), mae: txt(p.mae).toUpperCase() })),
-    pj: pj.map((p) => ({ nome: txt(p.nome).toUpperCase(), cnpj: so(p.cnpj) })),
-  };
+  // Formato do formulário do WF-01 (o R4-01 usa o mesmo "Montar Template").
+  const pessoa = (p: Pessoa) => ({
+    nome: up(p.nome),
+    cpf: so(p.cpf),
+    rg: txt(p.rg),
+    data_nascimento: txt(p.nascimento),
+    genero: txt(p.genero),
+    nome_mae: up(p.mae),
+    nacionalidade: txt(p.nacionalidade),
+    profissao: txt(p.profissao),
+    email: txt(p.email).toLowerCase(),
+  });
+  const vendedoresPF = pf.map((p) => {
+    const b = pessoa(p);
+    const conj = temConjuge(p.estado_civil)
+      ? {
+          ...pessoa(p.conjuge),
+          participacao: p.conjuge.participacao,
+          registro_aquisicao: txt(p.conjuge.registro),
+          proprietario: p.conjuge.participacao === 'coproprietario',
+        }
+      : null;
+    return {
+      pf_nome: b.nome,
+      pf_cpf: b.cpf,
+      pf_rg: b.rg,
+      pf_data_nascimento: b.data_nascimento,
+      pf_genero: b.genero,
+      pf_nome_mae: b.nome_mae,
+      pf_estado_civil: p.estado_civil,
+      pf_regime_bens: temConjuge(p.estado_civil) ? p.regime : '',
+      pf_nacionalidade: b.nacionalidade,
+      pf_profissao: b.profissao,
+      pf_email: b.email,
+      pf_conjuge: conj,
+    };
+  });
+  const vendedoresPJ = pj.map((p) => {
+    const reps = p.reps.map((r) => ({
+      ...pessoa(r),
+      estado_civil: txt(r.estado_civil),
+      papel: r.papel,
+      emitir_certidoes: !!r.certidoes,
+    }));
+    return {
+      pj_nome: up(p.nome),
+      pj_cnpj: so(p.cnpj),
+      pj_vinculo: p.vinculo,
+      pj_representante: reps[0] || null,
+      pj_representantes: reps,
+    };
+  });
+  const matriculas = mat.map((m) => ({
+    matricula_num: so(m.numero),
+    matricula_cartorio: txt(m.cartorio),
+    matricula_iptu: txt(m.sql),
+  }));
+
+  const dados = { endereco, matriculas, vendedoresPF, vendedoresPJ };
 
   const { data: dil, error: e1 } = await adm
     .from('diligencias')
@@ -110,21 +218,11 @@ export async function criarDiligencia(_prev: ResultadoNova, form: FormData): Pro
     .single();
   if (e1 || !dil) return { ok: false, msg: `Não consegui registrar a diligência: ${e1?.message || 'erro'}` };
 
-  // Formato do formulário do WF-01 (o R4-01 usa o mesmo "Montar Template").
   const corpo = {
     endereco,
-    matriculas: [{ matricula_num: '', matricula_cartorio: '', matricula_iptu: sql }],
-    vendedoresPF: dados.pf.map((p) => ({
-      pf_nome: p.nome,
-      pf_cpf: p.cpf,
-      pf_rg: txt(p.rg),
-      pf_data_nascimento: p.nascimento,
-      pf_genero: p.genero,
-      pf_nome_mae: p.mae,
-      pf_estado_civil: txt(p.estado_civil),
-      pf_regime_bens: '',
-    })),
-    vendedoresPJ: dados.pj.map((p) => ({ pj_nome: p.nome, pj_cnpj: p.cnpj, pj_representantes: [] })),
+    matriculas,
+    vendedoresPF,
+    vendedoresPJ,
     compradoresPF: [],
     compradoresPJ: [],
     condominios: [],
