@@ -35,7 +35,7 @@ export default async function DiligenciaR4({
 }) {
   const { id } = await params;
   const sp = await searchParams;
-  const { usuario, base } = await exigirR4();
+  const { usuario, base } = await exigirR4({ ferramenta: 'diligencia' });
   if (!UUID_RE.test(id)) notFound();
   const ehSuper = usuario.papel === 'superadmin';
 
@@ -57,7 +57,7 @@ export default async function DiligenciaR4({
 
   return (
     <>
-      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} nome={usuario.nome} superadmin={ehSuper} papel={usuario.papel} />
+      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} nome={usuario.nome} superadmin={ehSuper} papel={usuario.papel} ferramentas={usuario.ferramentas} />
       <main className="mx-auto max-w-5xl px-4 py-8">
         <Link href={`${base}/diligencias`} className="text-sm text-slate-500 hover:text-slate-800">← Diligências</Link>
         {sp?.nova && dil.motor_id && (
