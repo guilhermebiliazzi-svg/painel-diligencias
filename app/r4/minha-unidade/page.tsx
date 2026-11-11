@@ -20,7 +20,7 @@ export default async function MinhaUnidadeR4() {
 
   return (
     <>
-      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} nome={usuario.nome} superadmin={false} papel={usuario.papel} />
+      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} nome={usuario.nome} superadmin={false} papel={usuario.papel} ferramentas={usuario.ferramentas} />
       <main className="mx-auto max-w-3xl px-4 py-8">
         <h1 className="text-2xl font-semibold">Minha unidade</h1>
         <p className="mt-1 text-sm text-slate-600">{un?.nome}</p>
