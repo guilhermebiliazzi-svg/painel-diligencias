@@ -26,6 +26,7 @@ export async function criarUnidade(_prev: Resultado | null, form: FormData): Pro
     const adminNome = String(form.get('admin_nome') || '').trim();
     const adminEmail = String(form.get('admin_email') || '').trim().toLowerCase();
     const pastaTxt = String(form.get('pasta_drive') || '').trim();
+    const ferramentas = form.getAll('ferramentas').map(String).filter(Boolean);
     const pasta = pastaTxt ? idDaPastaDrive(pastaTxt) : null;
     if (!nome) return { ok: false, msg: 'Informe o nome da unidade.' };
     if (pastaTxt && !pasta) return { ok: false, msg: 'Link da pasta do Google Drive inválido.' };
@@ -60,6 +61,9 @@ export async function criarUnidade(_prev: Resultado | null, form: FormData): Pro
       await adm.auth.admin.deleteUser(au.user.id);
       await adm.from('unidades').delete().eq('id', un.id);
       return { ok: false, msg: `Não vinculei o usuário: ${e3.message}` };
+    }
+    if (ferramentas.length) {
+      await adm.from('unidade_ferramentas').insert(ferramentas.map((f) => ({ unidade_id: un.id, ferramenta: f })));
     }
     revalidatePath('/r4/unidades');
     return { ok: true, msg: `Unidade "${nome}" criada.`, email: adminEmail, senha };
@@ -116,6 +120,25 @@ export async function salvarPastaDrive(_prev: Resultado | null, form: FormData):
     if (error) return { ok: false, msg: error.message };
     revalidatePath('/r4/unidades');
     return { ok: true, msg: pasta ? `Pasta "${nome}" conferida e salva.` : 'Pasta removida.' };
+  } catch (e) {
+    return { ok: false, msg: String((e as Error).message || e) };
+  }
+}
+
+/** Ferramentas que a unidade pode usar (o responsável distribui entre os corretores). */
+export async function salvarFerramentasUnidade(_prev: Resultado | null, form: FormData): Promise<Resultado> {
+  try {
+    await exigirSuper();
+    const id = String(form.get('unidade_id') || '');
+    const ferramentas = form.getAll('ferramentas').map(String).filter(Boolean);
+    const adm = r4Admin();
+    await adm.from('unidade_ferramentas').delete().eq('unidade_id', id);
+    if (ferramentas.length) {
+      const { error } = await adm.from('unidade_ferramentas').insert(ferramentas.map((f) => ({ unidade_id: id, ferramenta: f })));
+      if (error) return { ok: false, msg: error.message };
+    }
+    revalidatePath('/r4/unidades');
+    return { ok: true, msg: 'Ferramentas salvas.' };
   } catch (e) {
     return { ok: false, msg: String((e as Error).message || e) };
   }
