@@ -3,7 +3,7 @@
 import { randomBytes } from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { r4Admin, r4UsuarioAtual } from '@/lib/r4/supabase';
-import { idDaPastaDrive } from '@/lib/r4/motor';
+import { idDaPastaDrive, verificarPastaDrive } from '@/lib/r4/motor';
 
 export type Resultado = { ok: boolean; msg: string; email?: string; senha?: string };
 
@@ -106,10 +106,16 @@ export async function salvarPastaDrive(_prev: Resultado | null, form: FormData):
     const txt = String(form.get('pasta_drive') || '').trim();
     const pasta = txt ? idDaPastaDrive(txt) : null;
     if (txt && !pasta) return { ok: false, msg: 'Link da pasta do Google Drive inválido.' };
+    let nome = '';
+    if (pasta) {
+      const v = await verificarPastaDrive(pasta);
+      if (!v.ok) return { ok: false, msg: v.erro || 'Pasta sem acesso.' };
+      nome = v.nome || '';
+    }
     const { error } = await r4Admin().from('unidades').update({ pasta_drive_id: pasta }).eq('id', id);
     if (error) return { ok: false, msg: error.message };
     revalidatePath('/r4/unidades');
-    return { ok: true, msg: pasta ? 'Pasta salva.' : 'Pasta removida.' };
+    return { ok: true, msg: pasta ? `Pasta "${nome}" conferida e salva.` : 'Pasta removida.' };
   } catch (e) {
     return { ok: false, msg: String((e as Error).message || e) };
   }
