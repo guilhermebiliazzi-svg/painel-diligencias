@@ -42,7 +42,9 @@ export default async function InicioR4({ searchParams }: { searchParams: Promise
           <div className="rounded-2xl border border-slate-200 bg-white p-5">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Diligências</p>
             <p className="mt-2 text-3xl font-bold">{totalDil ?? 0}</p>
-            <p className="mt-1 text-sm text-slate-500">Em breve: nova diligência e acompanhamento.</p>
+            <p className="mt-1 text-sm text-slate-500">
+              <Link href={`${base}/diligencias`} className="font-semibold text-[#0F1B2D] underline">Ver todas</Link>
+            </p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-5">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Certidões no mês</p>
@@ -56,16 +58,22 @@ export default async function InicioR4({ searchParams }: { searchParams: Promise
           </div>
         </div>
 
+        <div className="mt-8 flex flex-wrap gap-3">
+          <Link
+            href={`${base}/diligencias/nova`}
+            className="inline-flex rounded-lg bg-[#C8102E] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#a50d26]"
+          >
+            + Nova diligência
+          </Link>
         {ehSuper && (
-          <div className="mt-8">
             <Link
               href={`${base}/unidades`}
               className="inline-flex rounded-lg bg-[#0F1B2D] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#1c2c45]"
             >
               Gerenciar unidades
             </Link>
-          </div>
         )}
+        </div>
       </main>
     </>
   );
