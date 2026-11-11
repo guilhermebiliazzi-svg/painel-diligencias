@@ -172,6 +172,7 @@ async function Nova({ beneficiarios }: { beneficiarios: Beneficiario[] }) {
       select d.id::text as id, d.endereco,
              (d.dados_completos->'negocio'->'comissao'->>'total') is not null as tem_comissao
         from diligencias d
+       where coalesce(d.dados_completos->>'origem', '') <> 'rquatro'
        order by tem_comissao desc, d.criado_em desc`),
     sb.from('diligencias_arquivo').select('diligencia_id'),
     sb.from('asaas_cobrancas').select('diligencia_id,status').not('diligencia_id', 'is', null).limit(10000),
