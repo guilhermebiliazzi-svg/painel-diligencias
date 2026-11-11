@@ -61,7 +61,27 @@ export type R4Usuario = {
   ativo: boolean;
   trocar_senha: boolean;
   unidade: { id: string; nome: string; ativa: boolean } | null;
+  /** ferramentas que a pessoa pode usar (superadmin: todas; responsável: as da unidade;
+   *  corretor: as marcadas para ele que a unidade também tem) */
+  ferramentas: string[];
 };
+
+/** Ferramentas efetivas de um usuário. */
+async function ferramentasDe(
+  adm: ReturnType<typeof r4Admin>,
+  u: { id: string; papel: string; unidade_id: string | null }
+): Promise<string[]> {
+  const { data: ativas } = await adm.from('ferramentas').select('codigo').eq('ativa', true);
+  const todas = (ativas || []).map((f) => f.codigo as string);
+  if (u.papel === 'superadmin') return todas;
+  if (!u.unidade_id) return [];
+  const { data: un } = await adm.from('unidade_ferramentas').select('ferramenta').eq('unidade_id', u.unidade_id);
+  const daUnidade = (un || []).map((f) => f.ferramenta as string).filter((c) => todas.includes(c));
+  if (u.papel === 'admin') return daUnidade;
+  const { data: us } = await adm.from('usuario_ferramentas').select('ferramenta').eq('usuario_id', u.id);
+  const minhas = new Set((us || []).map((f) => f.ferramenta as string));
+  return daUnidade.filter((c) => minhas.has(c));
+}
 
 /** Usuário logado + unidade. null se não há sessão ou não está cadastrado. */
 export async function r4UsuarioAtual(): Promise<R4Usuario | null> {
@@ -87,6 +107,7 @@ export async function r4UsuarioAtual(): Promise<R4Usuario | null> {
     ativo: u.ativo,
     trocar_senha: !!user.user_metadata?.trocar_senha,
     unidade: unidade as R4Usuario['unidade'],
+    ferramentas: await ferramentasDe(adm, { id: u.id, papel: u.papel, unidade_id: u.unidade_id }),
   };
 }
 
@@ -94,7 +115,9 @@ export async function r4UsuarioAtual(): Promise<R4Usuario | null> {
  * Exige login válido (usuário ativo, unidade ativa). Redireciona para o login,
  * para a troca de senha obrigatória ou para "sem acesso".
  */
-export async function exigirR4(opcoes: { papel?: 'superadmin' | 'admin'; permitirTrocaSenha?: boolean } = {}) {
+export async function exigirR4(
+  opcoes: { papel?: 'superadmin' | 'admin'; permitirTrocaSenha?: boolean; ferramenta?: string } = {}
+) {
   const base = await r4Base();
   if (!r4Configurado()) redirect(`${base}/login?erro=config`);
   const sb = await r4Server();
@@ -106,5 +129,6 @@ export async function exigirR4(opcoes: { papel?: 'superadmin' | 'admin'; permiti
   if (u.trocar_senha && !opcoes.permitirTrocaSenha) redirect(`${base}/senha`);
   if (opcoes.papel === 'superadmin' && u.papel !== 'superadmin') redirect(`${base}/`);
   if (opcoes.papel === 'admin' && !(u.papel === 'admin' || u.papel === 'superadmin')) redirect(`${base}/`);
+  if (opcoes.ferramenta && !u.ferramentas.includes(opcoes.ferramenta)) redirect(`${base}/?sem=ferramenta`);
   return { usuario: u, base };
 }
