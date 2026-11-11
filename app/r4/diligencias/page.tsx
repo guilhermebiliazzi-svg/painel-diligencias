@@ -28,7 +28,7 @@ export default async function DiligenciasR4() {
 
   return (
     <>
-      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} nome={usuario.nome} superadmin={ehSuper} papel={usuario.papel} ferramentas={usuario.ferramentas} />
+      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} logo={usuario.unidade?.logo_url ?? null} nome={usuario.nome} superadmin={ehSuper} papel={usuario.papel} ferramentas={usuario.ferramentas} />
       <main className="mx-auto max-w-6xl px-4 py-8">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold">Diligências</h1>
