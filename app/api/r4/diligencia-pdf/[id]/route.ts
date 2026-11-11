@@ -57,7 +57,11 @@ async function emParalelo<T, R>(lista: T[], n: number, fn: (x: T) => Promise<R>)
   return out;
 }
 
+// Desligado por decisão do Guilherme (11/11): ainda não liberado para as unidades.
+const DESLIGADO = true;
+
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  if (DESLIGADO) return erro('PDF único não disponível.', 403);
   const { id } = await params;
   let ctx;
   try {
