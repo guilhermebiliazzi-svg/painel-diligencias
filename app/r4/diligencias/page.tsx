@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Cabecalho } from '../_ui';
 import { exigirR4, r4Admin } from '@/lib/r4/supabase';
 import { resumoDoMotor } from '@/lib/r4/motor';
+import { diligenciasLiberadas } from '@/lib/r4/diligencia';
 
 export const metadata = { title: 'Diligências' };
 export const dynamic = 'force-dynamic';
@@ -22,6 +23,11 @@ export default async function DiligenciasR4() {
     .order('criado_em', { ascending: false })
     .limit(200);
   if (!ehSuper) q = q.eq('unidade_id', usuario.unidade_id);
+  // corretor: só as que ele cadastrou e as que o responsável liberou para ele
+  if (usuario.papel === 'corretor') {
+    const liberadas = await diligenciasLiberadas(usuario.id);
+    q = liberadas.length ? q.or(`criado_por.eq.${usuario.id},id.in.(${liberadas.join(',')})`) : q.eq('criado_por', usuario.id);
+  }
   const { data } = await q;
   const lista = data || [];
   const resumo = await resumoDoMotor(lista.map((d) => d.motor_id).filter(Boolean) as string[]);
