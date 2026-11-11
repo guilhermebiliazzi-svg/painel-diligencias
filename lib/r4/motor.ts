@@ -162,9 +162,27 @@ export async function resumoDoMotor(motorIds: string[]): Promise<Map<string, Res
   return out;
 }
 
-/** Certidão que o sistema emitiu (entra na cobrança): automática, com PDF. */
+/**
+ * Certidões de "nada consta" que o órgão SE RECUSA a emitir quando há débito:
+ * o resultado positivo dessas não é certidão, é só a tela/relatório de pendências
+ * (mobiliária e IPTU da Prefeitura, SEFAZ-SP, CND federal, CRF do FGTS).
+ * "Positiva com efeitos de negativa" (com_pendencias) é certidão emitida e conta.
+ */
+const NAO_EMITE_SE_POSITIVA = new Set([
+  'mobiliaria_pref_sp',
+  'iptu_pref_sp',
+  'sefaz_sp_nao_inscritos',
+  'cnd_federal',
+  'cnd_federal_pj',
+  'crf_fgts',
+]);
+
+/** Certidão que o sistema emitiu (entra na cobrança): automática, com PDF e de fato emitida. */
 export function emitidaPeloSistema(c: CertidaoMotor) {
-  return !c.manual && !!c.drive_file_id && (c.cs_status === 'concluido' || c.cs_status === 'com_pendencias');
+  if (c.manual || !c.drive_file_id) return false;
+  if (c.cs_status !== 'concluido' && c.cs_status !== 'com_pendencias') return false;
+  if (NAO_EMITE_SE_POSITIVA.has(c.tipo) && c.resultado === 'positiva') return false;
+  return true;
 }
 
 /** Mês de competência (1º dia) de uma data. */
