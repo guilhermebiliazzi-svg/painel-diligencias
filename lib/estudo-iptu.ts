@@ -67,6 +67,10 @@ export type ResultadoSql = {
   candidatos?: CandidatoSql[];
   /** falha ao consultar o CIT (site fora do ar etc.) */
   avisoCit?: string | null;
+  /** sem unidade no endereço (casa/terreno): o único SQL que as vendas desse número têm */
+  sqlUnico?: UnidadeItbi | null;
+  /** sem unidade no endereço e mais de um SQL nas vendas (vila, condomínio de casas): o corretor escolhe */
+  sqlsDoNumero?: CandidatoSql[];
 };
 
 type Linha = {
@@ -176,7 +180,28 @@ export async function sqlPorEndereco(endereco: string, unidadeExtra?: string | n
     fonte: null,
   };
   if (res.unidade) { res.fonte = 'itbi'; return res; }
-  if (!e.unidade) return res;
+  if (!e.unidade) {
+    // casa ou terreno: não há apartamento; vale o SQL do próprio número (o mais recente de cada SQL)
+    const porSql = new Map<string, Linha>();
+    for (const l of doPredio) {
+      const sql = String(l.sql11 || '').replace(/\D/g, '');
+      if (sql.length === 11 && !porSql.has(sql)) porSql.set(sql, l);
+    }
+    if (porSql.size === 1) {
+      const [sql, l] = [...porSql.entries()][0];
+      res.sqlUnico = {
+        unidade: '',
+        complemento: String(l.complemento || '').trim(),
+        sql,
+        area: l.area_construida == null ? null : Number(l.area_construida),
+        ultimaVenda: dataIso(l.data_transacao),
+      };
+      res.fonte = 'itbi';
+    } else if (porSql.size > 1 && porSql.size <= 30) {
+      res.sqlsDoNumero = [...porSql.entries()].map(([sql, l]) => ({ sql, complemento: String(l.complemento || '').trim() || 'sem complemento' }));
+    }
+    return res;
+  }
 
   // a unidade nunca foi vendida na base: procura no cadastro da Prefeitura (CIT)
   try {
