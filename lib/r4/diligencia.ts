@@ -33,14 +33,38 @@ async function usuarioComDiligencia(): Promise<R4Usuario> {
   return u;
 }
 
+/**
+ * Corretor só vê a diligência que ele cadastrou ou aquela que o responsável da
+ * unidade liberou para ele (tabela diligencia_corretores). Responsável vê todas
+ * da unidade; superadmin vê todas.
+ */
+export async function corretorPodeVer(u: R4Usuario, dil: { id: string; criado_por: string | null }): Promise<boolean> {
+  if (u.papel !== 'corretor') return true;
+  if (dil.criado_por === u.id) return true;
+  const { data } = await r4Admin()
+    .from('diligencia_corretores')
+    .select('usuario_id')
+    .eq('diligencia_id', dil.id)
+    .eq('usuario_id', u.id)
+    .maybeSingle();
+  return !!data;
+}
+
+/** Ids das diligências liberadas para o corretor (além das que ele cadastrou). */
+export async function diligenciasLiberadas(usuarioId: string): Promise<string[]> {
+  const { data } = await r4Admin().from('diligencia_corretores').select('diligencia_id').eq('usuario_id', usuarioId);
+  return (data || []).map((x) => x.diligencia_id as string);
+}
+
 /** Diligência do rquatro que a pessoa pode ver (null se não pode / não existe). */
 export async function diligenciaDoUsuario(u: R4Usuario, id: string): Promise<DilR4 | null> {
   if (!UUID_RE.test(id)) return null;
-  let q = r4Admin().from('diligencias').select('id,unidade_id,motor_id,titulo').eq('id', id);
+  let q = r4Admin().from('diligencias').select('id,unidade_id,motor_id,titulo,criado_por').eq('id', id);
   if (u.papel !== 'superadmin') q = q.eq('unidade_id', u.unidade_id);
   const { data } = await q.maybeSingle();
   if (!data || !data.motor_id) return null;
-  return data as DilR4;
+  if (!(await corretorPodeVer(u, data as { id: string; criado_por: string | null }))) return null;
+  return { id: data.id, unidade_id: data.unidade_id, motor_id: data.motor_id, titulo: data.titulo } as DilR4;
 }
 
 /** Pessoa logada + diligência do rquatro (lança SemAcesso). */
