@@ -10,8 +10,10 @@ import { useRouter } from 'next/navigation';
 
 const LIMITE = 50 * 1024 * 1024;
 
-async function post(body: unknown) {
-  const r = await fetch('/api/adm/diligencia-upload', {
+const ENDPOINT_PADRAO = '/api/adm/diligencia-upload';
+
+async function post(body: unknown, endpoint = ENDPOINT_PADRAO) {
+  const r = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -26,11 +28,16 @@ async function post(body: unknown) {
  * n8n salva na pasta do Drive do card e confere (IA) ou conclui (doc manual).
  * Usado pelo botão "Enviar arquivo" e pelo "Adicionar documento" (card extra).
  */
-export async function enviarArquivoParaCard(certidaoId: string, file: File, aoMudarEtapa?: (e: 'subindo' | 'drive') => void) {
+export async function enviarArquivoParaCard(
+  certidaoId: string,
+  file: File,
+  aoMudarEtapa?: (e: 'subindo' | 'drive') => void,
+  endpoint = ENDPOINT_PADRAO
+) {
   if (file.size > LIMITE) throw new Error('Arquivo acima de 50 MB.');
   aoMudarEtapa?.('subindo');
   const mime = file.type || (/\.pdf$/i.test(file.name) ? 'application/pdf' : '');
-  const u = await post({ acao: 'upload-url', certidao_id: certidaoId, nome: file.name, mime });
+  const u = await post({ acao: 'upload-url', certidao_id: certidaoId, nome: file.name, mime }, endpoint);
   const r = await fetch(u.signedUrl, {
     method: 'PUT',
     headers: { 'Content-Type': mime || 'application/octet-stream' },
@@ -38,10 +45,19 @@ export async function enviarArquivoParaCard(certidaoId: string, file: File, aoMu
   });
   if (!r.ok) throw new Error(`Falha no envio do arquivo (HTTP ${r.status}).`);
   aoMudarEtapa?.('drive');
-  return (await post({ acao: 'enviar', certidao_id: certidaoId, path: u.path, nome: file.name })) as { manual?: boolean };
+  return (await post({ acao: 'enviar', certidao_id: certidaoId, path: u.path, nome: file.name }, endpoint)) as { manual?: boolean };
 }
 
-export function EnviarArquivoCard({ certidaoId, temPdf }: { certidaoId: string; temPdf: boolean }) {
+export function EnviarArquivoCard({
+  certidaoId,
+  temPdf,
+  endpoint = ENDPOINT_PADRAO,
+}: {
+  certidaoId: string;
+  temPdf: boolean;
+  /** rota de envio (o rquatro usa a dele, com a conferência de unidade) */
+  endpoint?: string;
+}) {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
   const [etapa, setEtapa] = useState<'' | 'subindo' | 'drive' | 'ok'>('');
@@ -57,7 +73,7 @@ export function EnviarArquivoCard({ certidaoId, temPdf }: { certidaoId: string; 
     }
     if (temPdf && !window.confirm('Este card já tem um PDF. Substituir pelo arquivo novo?')) return;
     try {
-      const out = await enviarArquivoParaCard(certidaoId, file, setEtapa);
+      const out = await enviarArquivoParaCard(certidaoId, file, setEtapa, endpoint);
       setEtapa('ok');
       setMsg(out.manual ? 'Salvo no Drive. Card concluído.' : 'Salvo no Drive. A IA está conferindo…');
       // a conferência roda no n8n; atualiza a tela algumas vezes
