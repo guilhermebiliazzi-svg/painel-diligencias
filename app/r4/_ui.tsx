@@ -15,11 +15,13 @@ export function Cabecalho({
   unidade,
   nome,
   superadmin,
+  papel,
 }: {
   base: string;
   unidade: string | null;
   nome: string | null;
   superadmin: boolean;
+  papel?: string;
 }) {
   return (
     <header className="border-b border-slate-200 bg-white">
@@ -32,6 +34,9 @@ export function Cabecalho({
           <Link href={`${base}/diligencias`} className="hover:text-slate-900">Diligências</Link>
           {superadmin && (
             <Link href={`${base}/unidades`} className="hover:text-slate-900">Unidades</Link>
+          )}
+          {papel === 'admin' && (
+            <Link href={`${base}/minha-unidade`} className="hover:text-slate-900">Minha unidade</Link>
           )}
         </nav>
         <div className="ml-auto flex items-center gap-3 text-sm text-slate-600">
