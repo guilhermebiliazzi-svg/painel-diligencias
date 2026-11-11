@@ -36,7 +36,7 @@ export default async function SenhaR4({ searchParams }: { searchParams: Promise<
   const erro = sp?.erro ? ERROS[sp.erro] : null;
   return (
     <>
-      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} nome={usuario.nome} superadmin={usuario.papel === 'superadmin'} />
+      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} logo={usuario.unidade?.logo_url ?? null} nome={usuario.nome} superadmin={usuario.papel === 'superadmin'} />
       <main className="mx-auto max-w-md px-4 py-10">
         <form action={trocar} className="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
           <h1 className="text-lg font-semibold">{usuario.trocar_senha ? 'Crie sua senha' : 'Trocar senha'}</h1>
