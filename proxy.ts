@@ -60,8 +60,11 @@ function ehHostR4(req: NextRequest) {
 
 async function proxyR4(req: NextRequest, noHost: boolean) {
   const { pathname } = req.nextUrl;
+  // No domínio rquatro tudo vai para /r4. Se o endereço já chegou com /r4
+  // (reentrada da reescrita na Vercel), segue como está: nunca /r4/r4/...
+  const jaR4 = pathname === '/r4' || pathname.startsWith('/r4/');
   let destino: URL | null = null;
-  if (noHost && !pathname.startsWith('/api/r4/')) {
+  if (noHost && !jaR4 && !pathname.startsWith('/api/r4/')) {
     destino = req.nextUrl.clone();
     destino.pathname = '/r4' + (pathname === '/' ? '' : pathname);
   }
