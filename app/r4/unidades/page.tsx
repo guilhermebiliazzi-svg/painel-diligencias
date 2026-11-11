@@ -1,7 +1,10 @@
 import { Cabecalho } from '../_ui';
 import { exigirR4, r4Admin } from '@/lib/r4/supabase';
 import { alternarUnidade } from './actions';
-import { NovaUnidade, RedefinirSenha } from './formularios';
+import { NovaUnidade, PastaDrive, RedefinirSenha } from './formularios';
+
+// Conta Google do motor: a unidade compartilha a pasta dela com este e-mail (Editor).
+const CONTA_DRIVE_MOTOR = process.env.R4_CONTA_DRIVE || 'guilhermebiliazzi@remax.com.br';
 
 export const metadata = { title: 'Unidades' };
 export const dynamic = 'force-dynamic';
@@ -12,7 +15,7 @@ export default async function UnidadesR4() {
   const { usuario, base } = await exigirR4({ papel: 'superadmin' });
   const adm = r4Admin();
   const [{ data: unidades }, { data: usuarios }] = await Promise.all([
-    adm.from('unidades').select('id,nome,cnpj,email_cobranca,ativa,criado_em').order('criado_em', { ascending: false }),
+    adm.from('unidades').select('id,nome,cnpj,email_cobranca,ativa,criado_em,pasta_drive_id').order('criado_em', { ascending: false }),
     adm.from('usuarios').select('id,nome,email,papel,ativo,unidade_id').order('nome'),
   ]);
 
@@ -22,6 +25,10 @@ export default async function UnidadesR4() {
       <main className="mx-auto max-w-6xl px-4 py-8">
         <h1 className="text-2xl font-semibold">Unidades</h1>
         <p className="mt-1 text-sm text-slate-600">Cada unidade só vê as próprias diligências. Desligar uma unidade bloqueia o acesso de todos dela.</p>
+        <p className="mt-2 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">
+          Para liberar as diligências, a unidade cria uma pasta no Google Drive dela, compartilha como <b>Editor</b> com{' '}
+          <b>{CONTA_DRIVE_MOTOR}</b> e manda o link. Os PDFs ficam nessa pasta, separados por imóvel.
+        </p>
 
         <div className="mt-6"><NovaUnidade /></div>
 
@@ -45,6 +52,7 @@ export default async function UnidadesR4() {
                     </button>
                   </form>
                 </div>
+                <PastaDrive unidadeId={un.id} atual={un.pasta_drive_id} />
                 <ul className="mt-3 divide-y divide-slate-100 text-sm">
                   {pessoas.map((p) => (
                     <li key={p.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
