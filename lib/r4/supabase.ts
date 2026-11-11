@@ -60,7 +60,7 @@ export type R4Usuario = {
   unidade_id: string | null;
   ativo: boolean;
   trocar_senha: boolean;
-  unidade: { id: string; nome: string; ativa: boolean } | null;
+  unidade: { id: string; nome: string; ativa: boolean; logo_url: string | null } | null;
   /** ferramentas que a pessoa pode usar (superadmin: todas; responsável: as da unidade;
    *  corretor: as marcadas para ele que a unidade também tem) */
   ferramentas: string[];
@@ -93,7 +93,7 @@ export async function r4UsuarioAtual(): Promise<R4Usuario | null> {
   const adm = r4Admin();
   const { data: u } = await adm
     .from('usuarios')
-    .select('id,email,nome,papel,unidade_id,ativo,unidades(id,nome,ativa)')
+    .select('id,email,nome,papel,unidade_id,ativo,unidades(id,nome,ativa,logo_url)')
     .eq('id', user.id)
     .maybeSingle();
   if (!u) return null;
