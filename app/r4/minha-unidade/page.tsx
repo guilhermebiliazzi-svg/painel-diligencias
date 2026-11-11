@@ -3,6 +3,7 @@ import { Cabecalho } from '../_ui';
 import { exigirR4, r4Admin } from '@/lib/r4/supabase';
 import { CONTA_DRIVE_MOTOR } from '@/lib/r4/motor';
 import { FormularioPasta } from './formulario';
+import { LogoUnidade } from '../_logo';
 
 export const metadata = { title: 'Minha unidade' };
 export const dynamic = 'force-dynamic';
@@ -13,17 +14,26 @@ export default async function MinhaUnidadeR4() {
 
   const { data: un } = await r4Admin()
     .from('unidades')
-    .select('nome,pasta_drive_id')
+    .select('nome,pasta_drive_id,logo_url')
     .eq('id', usuario.unidade_id)
     .maybeSingle();
   const pasta = (un?.pasta_drive_id as string | null) ?? null;
 
   return (
     <>
-      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} nome={usuario.nome} superadmin={false} papel={usuario.papel} ferramentas={usuario.ferramentas} />
+      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} logo={usuario.unidade?.logo_url ?? null} nome={usuario.nome} superadmin={false} papel={usuario.papel} ferramentas={usuario.ferramentas} />
       <main className="mx-auto max-w-3xl px-4 py-8">
         <h1 className="text-2xl font-semibold">Minha unidade</h1>
         <p className="mt-1 text-sm text-slate-600">{un?.nome}</p>
+
+        <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
+          <h2 className="text-base font-semibold">Logo da unidade</h2>
+          <p className="mt-2 text-sm text-slate-600">
+            O logo sai no topo do painel, no link que você compartilha com o cliente e na capa do PDF das certidões. Use PNG
+            (de preferência com fundo transparente) ou JPG, até 2 MB.
+          </p>
+          <LogoUnidade atual={(un?.logo_url as string | null) ?? null} />
+        </section>
 
         <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
           <div className="flex flex-wrap items-center gap-3">
