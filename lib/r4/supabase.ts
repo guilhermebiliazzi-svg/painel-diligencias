@@ -47,7 +47,9 @@ export function r4Admin() {
  */
 export async function r4Base() {
   const h = await headers();
-  return h.get('x-r4-host') === '1' ? '' : '/r4';
+  if (h.get('x-r4-host') === '1') return '';
+  const host = (h.get('x-forwarded-host') || h.get('host') || '').split(':')[0].toLowerCase();
+  return host === 'rquatro.com.br' || host.endsWith('.rquatro.com.br') ? '' : '/r4';
 }
 
 export type R4Usuario = {
