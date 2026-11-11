@@ -26,7 +26,7 @@ export default async function EquipeR4() {
 
   return (
     <>
-      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} nome={usuario.nome} superadmin={false} papel={usuario.papel} ferramentas={usuario.ferramentas} />
+      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} logo={usuario.unidade?.logo_url ?? null} nome={usuario.nome} superadmin={false} papel={usuario.papel} ferramentas={usuario.ferramentas} />
       <main className="mx-auto max-w-5xl px-4 py-8">
         <h1 className="text-2xl font-semibold">Equipe</h1>
         <p className="mt-1 text-sm text-slate-600">
