@@ -3,6 +3,7 @@
 import { randomBytes } from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { r4Admin, r4UsuarioAtual } from '@/lib/r4/supabase';
+import { idDaPastaDrive } from '@/lib/r4/motor';
 
 export type Resultado = { ok: boolean; msg: string; email?: string; senha?: string };
 
@@ -24,7 +25,10 @@ export async function criarUnidade(_prev: Resultado | null, form: FormData): Pro
     const emailCob = String(form.get('email_cobranca') || '').trim().toLowerCase() || null;
     const adminNome = String(form.get('admin_nome') || '').trim();
     const adminEmail = String(form.get('admin_email') || '').trim().toLowerCase();
+    const pastaTxt = String(form.get('pasta_drive') || '').trim();
+    const pasta = pastaTxt ? idDaPastaDrive(pastaTxt) : null;
     if (!nome) return { ok: false, msg: 'Informe o nome da unidade.' };
+    if (pastaTxt && !pasta) return { ok: false, msg: 'Link da pasta do Google Drive inválido.' };
     if (cnpj && cnpj.length !== 14) return { ok: false, msg: 'CNPJ com 14 dígitos.' };
     if (!adminNome || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) {
       return { ok: false, msg: 'Informe nome e e-mail válidos do responsável da unidade.' };
@@ -33,7 +37,7 @@ export async function criarUnidade(_prev: Resultado | null, form: FormData): Pro
     const adm = r4Admin();
     const { data: un, error: e1 } = await adm
       .from('unidades')
-      .insert({ nome, cnpj, razao_social: razao, email_cobranca: emailCob })
+      .insert({ nome, cnpj, razao_social: razao, email_cobranca: emailCob, pasta_drive_id: pasta })
       .select('id')
       .single();
     if (e1 || !un) return { ok: false, msg: `Não criei a unidade: ${e1?.message || 'erro'}` };
@@ -92,4 +96,21 @@ export async function alternarUnidade(form: FormData) {
   const ativa = String(form.get('ativa') || '') === 'true';
   await r4Admin().from('unidades').update({ ativa: !ativa }).eq('id', id);
   revalidatePath('/r4/unidades');
+}
+
+/** Grava (ou troca) a pasta do Google Drive onde as diligências da unidade são salvas. */
+export async function salvarPastaDrive(_prev: Resultado | null, form: FormData): Promise<Resultado> {
+  try {
+    await exigirSuper();
+    const id = String(form.get('unidade_id') || '');
+    const txt = String(form.get('pasta_drive') || '').trim();
+    const pasta = txt ? idDaPastaDrive(txt) : null;
+    if (txt && !pasta) return { ok: false, msg: 'Link da pasta do Google Drive inválido.' };
+    const { error } = await r4Admin().from('unidades').update({ pasta_drive_id: pasta }).eq('id', id);
+    if (error) return { ok: false, msg: error.message };
+    revalidatePath('/r4/unidades');
+    return { ok: true, msg: pasta ? 'Pasta salva.' : 'Pasta removida.' };
+  } catch (e) {
+    return { ok: false, msg: String((e as Error).message || e) };
+  }
 }
