@@ -66,6 +66,7 @@ export async function criarDiligencia(_prev: ResultadoNova, form: FormData): Pro
   const base = await r4Base();
   const u = await r4UsuarioAtual();
   if (!u || !u.ativo) return { ok: false, msg: 'Sessão expirada. Entre de novo.' };
+  if (!u.ferramentas.includes('diligencia')) return { ok: false, msg: 'Seu acesso não inclui a diligência.' };
 
   const unidadeId = u.papel === 'superadmin' ? txt(form.get('unidade_id')) : u.unidade_id;
   if (!unidadeId) return { ok: false, msg: 'Escolha a unidade.' };
