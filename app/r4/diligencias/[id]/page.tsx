@@ -46,8 +46,10 @@ export default async function DiligenciaR4({
 
   const todas = dil.motor_id ? await certidoesDoMotor(dil.motor_id) : [];
   if (todas.length) await registrarCobranca({ id: dil.id, unidade_id: dil.unidade_id }, todas);
-  // O rquatro mostra só o que o sistema emite (os cards de upload são da Ville).
+  // Certidões que o sistema emite; os documentos que a unidade junta (matrícula,
+  // documentos pessoais, condomínio) aparecem numa lista à parte.
   const certidoes = todas.filter((c) => !c.manual);
+  const documentos = todas.filter((c) => c.manual);
   const grupos = agrupar(certidoes, dil.titulo || '');
   const prontas = certidoes.filter(emitidaPeloSistema).length;
   const andamento = certidoes.filter((c) => !emitidaPeloSistema(c) && !['Falhou', 'Nao cadastrado', 'Empresa extinta'].includes(c.situacao)).length;
@@ -119,6 +121,32 @@ export default async function DiligenciaR4({
             </section>
           ))}
         </div>
+
+        {documentos.length > 0 && (
+          <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
+            <h2 className="text-base font-semibold">Documentos a juntar pela unidade</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Não são emitidos pelo sistema nem cobrados. O envio desses documentos pelo rquatro vem numa próxima etapa.
+            </p>
+            <ul className="mt-3 divide-y divide-slate-100">
+              {documentos.map((c) => (
+                <li key={c.certidao_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm">
+                  <span className="min-w-0 flex-1">
+                    {c.certidao}
+                    {c.titular && c.tipo_documento !== 'imovel' ? <span className="text-slate-500"> — {c.titular}</span> : null}
+                  </span>
+                  {c.drive_file_id ? (
+                    <a href={`https://drive.google.com/file/d/${c.drive_file_id}/view`} target="_blank" rel="noreferrer" className="text-xs font-semibold text-[#0F1B2D] underline">
+                      PDF ↗
+                    </a>
+                  ) : (
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">a juntar</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </main>
     </>
   );
