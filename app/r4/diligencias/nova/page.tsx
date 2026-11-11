@@ -13,6 +13,18 @@ export default async function NovaDiligenciaR4() {
 
   let unidades: { id: string; nome: string }[] | null = null;
   let semPasta = false;
+  // responsável escolhe, já no cadastro, os corretores que podem ver a diligência
+  let equipe: { id: string; nome: string | null; email: string }[] | null = null;
+  if (usuario.papel === 'admin') {
+    const { data } = await r4Admin()
+      .from('usuarios')
+      .select('id,nome,email')
+      .eq('unidade_id', usuario.unidade_id)
+      .eq('papel', 'corretor')
+      .eq('ativo', true)
+      .order('nome');
+    equipe = (data || []) as { id: string; nome: string | null; email: string }[];
+  }
   if (ehSuper) {
     const { data } = await r4Admin().from('unidades').select('id,nome,pasta_drive_id').eq('ativa', true).order('nome');
     unidades = (data || []).filter((u) => u.pasta_drive_id).map((u) => ({ id: u.id, nome: u.nome }));
@@ -43,7 +55,7 @@ export default async function NovaDiligenciaR4() {
               )}
             </p>
           ) : (
-            <FormularioNova unidades={unidades} />
+            <FormularioNova unidades={unidades} base={base} equipe={equipe} />
           )}
         </div>
       </main>
