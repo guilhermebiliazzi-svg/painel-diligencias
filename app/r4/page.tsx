@@ -7,11 +7,12 @@ export const dynamic = 'force-dynamic';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-export default async function InicioR4({ searchParams }: { searchParams: Promise<{ ok?: string }> }) {
+export default async function InicioR4({ searchParams }: { searchParams: Promise<{ ok?: string; sem?: string }> }) {
   const { usuario, base } = await exigirR4();
   const sp = await searchParams;
   const adm = r4Admin();
   const ehSuper = usuario.papel === 'superadmin';
+  const temDiligencia = usuario.ferramentas.includes('diligencia');
 
   // uso do mês corrente (da unidade, ou de todas para o superadmin)
   const hoje = new Date();
@@ -28,16 +29,28 @@ export default async function InicioR4({ searchParams }: { searchParams: Promise
 
   return (
     <>
-      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} nome={usuario.nome} superadmin={ehSuper} papel={usuario.papel} />
+      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} nome={usuario.nome} superadmin={ehSuper} papel={usuario.papel} ferramentas={usuario.ferramentas} />
       <main className="mx-auto max-w-6xl px-4 py-8">
         {sp?.ok === 'senha' && (
           <p className="mb-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">Senha salva.</p>
+        )}
+        {sp?.sem === 'ferramenta' && (
+          <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Seu acesso não inclui essa ferramenta. Fale com o responsável da sua unidade.
+          </p>
         )}
         <h1 className="text-2xl font-semibold">Olá{usuario.nome ? `, ${usuario.nome.split(' ')[0]}` : ''}</h1>
         <p className="mt-1 text-sm text-slate-600">
           {ehSuper ? 'Administração do rquatro — todas as unidades.' : usuario.unidade?.nome}
         </p>
 
+        {!temDiligencia && !ehSuper && (
+          <p className="mt-6 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">
+            Você ainda não tem ferramentas liberadas. Fale com o responsável da sua unidade.
+          </p>
+        )}
+        {temDiligencia && (
+        <>
         <div className="mt-6 grid gap-4 sm:grid-cols-3">
           <div className="rounded-2xl border border-slate-200 bg-white p-5">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Diligências</p>
@@ -58,13 +71,26 @@ export default async function InicioR4({ searchParams }: { searchParams: Promise
           </div>
         </div>
 
+        </>
+        )}
+
         <div className="mt-8 flex flex-wrap gap-3">
+          {temDiligencia && (
           <Link
             href={`${base}/diligencias/nova`}
             className="inline-flex rounded-lg bg-[#C8102E] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#a50d26]"
           >
             + Nova diligência
           </Link>
+          )}
+          {usuario.papel === 'admin' && (
+            <Link
+              href={`${base}/equipe`}
+              className="inline-flex rounded-lg bg-[#0F1B2D] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#1c2c45]"
+            >
+              Equipe
+            </Link>
+          )}
         {ehSuper && (
             <Link
               href={`${base}/unidades`}
