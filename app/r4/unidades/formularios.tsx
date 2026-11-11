@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
-import { criarUnidade, redefinirSenha, type Resultado } from './actions';
+import { criarUnidade, redefinirSenha, salvarPastaDrive, type Resultado } from './actions';
 
 function Aviso({ r }: { r: Resultado | null }) {
   if (!r) return null;
@@ -34,6 +34,11 @@ export function NovaUnidade() {
         <label className="text-sm font-medium text-slate-700">E-mail de cobrança<input name="email_cobranca" type="email" className={campo} /></label>
         <label className="text-sm font-medium text-slate-700">Responsável (nome) *<input name="admin_nome" required className={campo} /></label>
         <label className="text-sm font-medium text-slate-700">Responsável (e-mail de acesso) *<input name="admin_email" type="email" required className={campo} /></label>
+        <label className="text-sm font-medium text-slate-700 sm:col-span-2">
+          Pasta do Google Drive da unidade (link)
+          <input name="pasta_drive" className={campo} placeholder="https://drive.google.com/drive/folders/…" />
+          <span className="mt-1 block text-xs font-normal text-slate-500">Pode deixar para depois. Sem a pasta, a unidade não consegue iniciar diligências.</span>
+        </label>
       </div>
       <button disabled={enviando} className="mt-4 rounded-lg bg-[#0F1B2D] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1c2c45] disabled:opacity-60">
         {enviando ? 'Criando…' : 'Criar unidade e acesso'}
@@ -52,6 +57,26 @@ export function RedefinirSenha({ usuarioId }: { usuarioId: string }) {
         {enviando ? 'gerando…' : 'nova senha provisória'}
       </button>
       <Aviso r={r} />
+    </form>
+  );
+}
+
+export function PastaDrive({ unidadeId, atual }: { unidadeId: string; atual: string | null }) {
+  const [r, acao, enviando] = useActionState(salvarPastaDrive, null);
+  return (
+    <form action={acao} className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+      <input type="hidden" name="unidade_id" value={unidadeId} />
+      <span className="font-medium text-slate-700">Pasta do Drive:</span>
+      {atual ? (
+        <a href={`https://drive.google.com/drive/folders/${atual}`} target="_blank" rel="noreferrer" className="text-xs text-[#0F1B2D] underline">abrir ↗</a>
+      ) : (
+        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">não configurada</span>
+      )}
+      <input name="pasta_drive" defaultValue={atual ? `https://drive.google.com/drive/folders/${atual}` : ''} placeholder="link da pasta" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+      <button disabled={enviando} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold hover:bg-slate-50 disabled:opacity-60">
+        {enviando ? 'salvando…' : 'Salvar'}
+      </button>
+      {r && <span className={`w-full text-xs ${r.ok ? 'text-emerald-700' : 'text-red-700'}`}>{r.msg}</span>}
     </form>
   );
 }
