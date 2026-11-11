@@ -101,6 +101,7 @@ const FORMS: Record<Tipo, { label: string; sections: Secao[] }> = {
         F('condominio', 'Condomínio / vila (nome, se houver)', { full: true }),
         num('area_terreno', 'Área do TERRENO', 'm²', { half: true, req: true }),
         num('area_construida', 'Área construída', 'm²', { half: true }),
+        F('sql', 'Nº do contribuinte (SQL)', { type: 'iptu', full: true }),
         num('testada', 'Testada', 'm', { half: true }),
         num('ano', 'Ano da construção', '', { half: true }),
         num('dorms', 'Dormitórios', '', { half: true }),
@@ -196,6 +197,7 @@ function montarMensagem(tipo: Tipo, vals: Record<string, Valor>): string {
   if (cond || g('bairro')) L.push(line([cond && '*' + (tipo === 'sala' ? 'Edifício' : 'Condomínio') + ':* ' + cond, g('bairro') && '*Bairro:* ' + g('bairro')]));
   if (tipo === 'casa') {
     L.push(line([g('area_terreno') && '*Terreno:* ' + fmtBR(g('area_terreno')!) + ' m²', g('area_construida') && '*Construída:* ' + fmtBR(g('area_construida')!) + ' m²', g('testada') && '*Testada:* ' + fmtBR(g('testada')!) + ' m']));
+    if (g('sql')) L.push('*SQL (IPTU):* ' + g('sql'));
   } else {
     L.push(line([g('area_util') && '*Área útil:* ' + fmtBR(g('area_util')!) + ' m²', g('area_iptu') && '*Área IPTU:* ' + fmtBR(g('area_iptu')!) + ' m²']));
     if (g('sql')) L.push('*SQL (IPTU):* ' + g('sql'));
@@ -478,14 +480,30 @@ function IptuBox({ tipo, get, set }: { tipo: Tipo; get: (id: string) => Valor | 
     return j;
   }
 
+  const ehCasa = tipo === 'casa';
+  // área que a certidão/ITBI preenche: na casa é a construída; no apartamento e na sala, a total do IPTU
+  const campoArea = ehCasa ? 'area_construida' : 'area_iptu';
+  const nomeArea = ehCasa ? 'área construída' : 'área total';
+
   async function acharPeloEndereco() {
-    if (!txt('endereco').trim()) { setAviso({ tom: 'alerta', texto: 'Preencha o endereço (com o número do apartamento) primeiro.' }); return; }
+    if (!txt('endereco').trim()) { setAviso({ tom: 'alerta', texto: ehCasa ? 'Preencha o endereço (rua e número) primeiro.' : 'Preencha o endereço (com o número do apartamento) primeiro.' }); return; }
     setBuscando(true); setAviso(null);
     try {
       const j = await chamar({ acao: 'sql', endereco: txt('endereco'), unidade: tipo === 'sala' ? txt('conjunto') : '' });
       setCandidatos([]);
       if (!j.predio) {
         setAviso({ tom: 'alerta', texto: `Não achei esse endereço nas vendas do ITBI nem no cadastro da Prefeitura. Confira rua e número, ou digite o SQL do carnê do IPTU.${j.avisoCit ? ' ' + j.avisoCit : ''}` });
+      } else if (!j.unidadeProcurada && j.sqlUnico) {
+        const u = j.sqlUnico;
+        set('sql', fmtSql(u.sql)); set('cert_pdf', ''); set('cert_info', '');
+        const partes = [`SQL ${fmtSql(u.sql)}`];
+        if (u.area && !soDigitos(txt(campoArea))) { set(campoArea, String(u.area).replace('.', ',')); partes.push(`${fmtM2(u.area)} m² preenchidos na ${nomeArea}`); }
+        setAviso({ tom: 'ok', texto: `Achei pelo ITBI (${j.predio.logradouro}, ${j.predio.numero}, venda de ${mesAno(u.ultimaVenda)}): ${partes.join(' · ')}. Confira no carnê do IPTU ou emita a certidão.` });
+      } else if (!j.unidadeProcurada && ehCasa && j.sqlsDoNumero?.length) {
+        setCandidatos(j.sqlsDoNumero);
+        setAviso({ tom: 'alerta', texto: `Esse número tem ${j.sqlsDoNumero.length} SQLs nas vendas do ITBI (vila ou condomínio). Escolha o do carnê:` });
+      } else if (!j.unidadeProcurada && ehCasa) {
+        setAviso({ tom: 'alerta', texto: `Achei o endereço (${j.predio.logradouro}, ${j.predio.numero}), mas sem SQL nas vendas do ITBI. Digite o SQL do carnê do IPTU.` });
       } else if (!j.unidadeProcurada) {
         setAviso({ tom: 'alerta', texto: `Achei o prédio (${j.predio.logradouro}, ${j.predio.numero}), mas falta o número da unidade no endereço (ex.: “— ap 91”).` });
       } else if (j.candidatos?.length) {
@@ -520,10 +538,14 @@ function IptuBox({ tipo, get, set }: { tipo: Tipo; get: (id: string) => Valor | 
     try {
       const j = await chamar({ acao: 'certidao', sql });
       const c = j.certidao || {};
-      if (c.areaConstruida) set('area_iptu', String(c.areaConstruida).replace('.', ','));
+      if (c.areaConstruida) set(campoArea, String(c.areaConstruida).replace('.', ','));
+      if (ehCasa && c.areaTerreno && !soDigitos(txt('area_terreno'))) set('area_terreno', String(c.areaTerreno).replace('.', ','));
+      if (ehCasa && c.anoConstrucao && !soDigitos(txt('ano'))) set('ano', String(c.anoConstrucao));
       set('cert_pdf', j.pdf || '');
-      set('cert_info', [`Certidão ${c.ano}`, c.areaConstruida && `área construída ${fmtM2(c.areaConstruida)} m²`, c.localImovel].filter(Boolean).join(' · '));
-      setAviso(c.areaConstruida ? { tom: 'ok', texto: 'Área total (IPTU) preenchida pela certidão.' } : { tom: 'alerta', texto: 'Certidão emitida, mas sem área construída — confira o PDF.' });
+      set('cert_info', [`Certidão ${c.ano}`, c.areaConstruida && `área construída ${fmtM2(c.areaConstruida)} m²`, ehCasa && c.areaTerreno && `terreno ${fmtM2(c.areaTerreno)} m²`, c.localImovel].filter(Boolean).join(' · '));
+      setAviso(c.areaConstruida
+        ? { tom: 'ok', texto: ehCasa ? 'Áreas preenchidas pela certidão (construída e, se estava vazio, terreno e ano).' : 'Área total (IPTU) preenchida pela certidão.' }
+        : { tom: 'alerta', texto: 'Certidão emitida, mas sem área construída — confira o PDF.' });
     } catch (e) {
       setAviso({ tom: 'erro', texto: (e as Error).message });
     } finally { setEmitindo(false); }
@@ -556,7 +578,7 @@ function IptuBox({ tipo, get, set }: { tipo: Tipo; get: (id: string) => Valor | 
         <div className="fe-iptu-cands">
           {candidatos.map((c) => (
             <button key={c.sql} type="button" className="fe-mini"
-              onClick={() => { set('sql', fmtSql(c.sql)); set('cert_pdf', ''); set('cert_info', ''); setCandidatos([]); setAviso({ tom: 'ok', texto: `SQL ${fmtSql(c.sql)} (${c.complemento}). Emita a certidão para conferir e preencher a área total.` }); }}>
+              onClick={() => { set('sql', fmtSql(c.sql)); set('cert_pdf', ''); set('cert_info', ''); setCandidatos([]); setAviso({ tom: 'ok', texto: `SQL ${fmtSql(c.sql)} (${c.complemento}). Emita a certidão para conferir e preencher a ${nomeArea}.` }); }}>
               {c.complemento} · {fmtSql(c.sql)}
             </button>
           ))}
