@@ -1,7 +1,7 @@
 import { Cabecalho } from '../_ui';
 import { exigirR4, r4Admin } from '@/lib/r4/supabase';
 import { alternarUnidade } from './actions';
-import { NovaUnidade, PastaDrive, RedefinirSenha } from './formularios';
+import { FerramentasUnidade, NovaUnidade, PastaDrive, RedefinirSenha } from './formularios';
 import { CONTA_DRIVE_MOTOR } from '@/lib/r4/motor';
 
 export const metadata = { title: 'Unidades' };
@@ -12,9 +12,11 @@ const PAPEL: Record<string, string> = { admin: 'Responsável', corretor: 'Corret
 export default async function UnidadesR4() {
   const { usuario, base } = await exigirR4({ papel: 'superadmin' });
   const adm = r4Admin();
-  const [{ data: unidades }, { data: usuarios }] = await Promise.all([
+  const [{ data: unidades }, { data: usuarios }, { data: ferramentas }, { data: liberadas }] = await Promise.all([
     adm.from('unidades').select('id,nome,cnpj,email_cobranca,ativa,criado_em,pasta_drive_id').order('criado_em', { ascending: false }),
     adm.from('usuarios').select('id,nome,email,papel,ativo,unidade_id').order('nome'),
+    adm.from('ferramentas').select('codigo,nome').eq('ativa', true).order('ordem'),
+    adm.from('unidade_ferramentas').select('unidade_id,ferramenta'),
   ]);
 
   return (
@@ -28,7 +30,7 @@ export default async function UnidadesR4() {
           <b>{CONTA_DRIVE_MOTOR}</b> e cola o link em <b>Minha unidade</b> (ou manda para você colar aqui). Os PDFs ficam nessa pasta, separados por imóvel.
         </p>
 
-        <div className="mt-6"><NovaUnidade /></div>
+        <div className="mt-6"><NovaUnidade ferramentas={ferramentas || []} /></div>
 
         <div className="mt-8 space-y-4">
           {(unidades || []).length === 0 && <p className="text-sm text-slate-500">Nenhuma unidade cadastrada.</p>}
@@ -51,6 +53,11 @@ export default async function UnidadesR4() {
                   </form>
                 </div>
                 <PastaDrive unidadeId={un.id} atual={un.pasta_drive_id} />
+                <FerramentasUnidade
+                  unidadeId={un.id}
+                  ferramentas={ferramentas || []}
+                  marcadas={(liberadas || []).filter((l) => l.unidade_id === un.id).map((l) => l.ferramenta)}
+                />
                 <ul className="mt-3 divide-y divide-slate-100 text-sm">
                   {pessoas.map((p) => (
                     <li key={p.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
