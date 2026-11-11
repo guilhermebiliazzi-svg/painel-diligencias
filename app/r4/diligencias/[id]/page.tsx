@@ -23,13 +23,11 @@ import { ToggleCardVisivel, TogglePessoaVisivel } from '@/app/admin/ToggleVisibi
 import { CopiarLinkCliente } from '@/app/admin/CopiarLinkCliente';
 import { CardExtraNovo, ExcluirCardExtra } from '@/app/admin/CardExtra';
 import { EnviarArquivoCard } from '@/app/admin/EnviarArquivoCard';
-import { BaixarCertidoesPdf } from '@/app/admin/BaixarCertidoesPdf';
 import { btn } from '@/app/admin/botoes';
 import { Cabecalho } from '../../_ui';
 import { exigirR4, r4Admin } from '@/lib/r4/supabase';
 import { linhasAdminDoMotor, registrarCobranca, type CertidaoMotor } from '@/lib/r4/motor';
 import {
-  r4Auditar,
   r4CriarExtra,
   r4Desvincular,
   r4ExcluirExtra,
@@ -752,21 +750,7 @@ export default async function DiligenciaR4({
             <div className="mt-5 flex flex-wrap items-start gap-x-8 gap-y-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
               <GrupoAcoes titulo="Diligência">
                 <CopiarLinkCliente diligencia_id={id} url={linkCliente} />
-                <BaixarCertidoesPdf diligenciaId={id} endpoint="/api/r4/diligencia-pdf" />
-                <form
-                  action={async () => {
-                    'use server';
-                    await r4Auditar(id);
-                  }}
-                >
-                  <SubmitButtonAsync
-                    pendingLabel="Auditando…"
-                    className={btn('neutro')}
-                    title="Procura PDFs soltos nas pastas desta diligência e liga aos cards pendentes"
-                  >
-                    Auditar diligência
-                  </SubmitButtonAsync>
-                </form>
+                {/* "Baixar certidões (PDF)" e "Auditar diligência" desligados por decisão do Guilherme (11/11). */}
                 {pastaRaiz && (
                   <a href={`https://drive.google.com/drive/folders/${pastaRaiz}`} target="_blank" rel="noreferrer" className={btn('neutro')}>
                     Abrir pasta no Drive ↗
