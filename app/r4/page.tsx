@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Cabecalho } from './_ui';
+import { diligenciasLiberadas } from '@/lib/r4/diligencia';
 import { exigirR4, r4Admin } from '@/lib/r4/supabase';
 
 export const metadata = { title: 'Início' };
@@ -25,6 +26,12 @@ export default async function InicioR4({ searchParams }: { searchParams: Promise
 
   let qDil = adm.from('diligencias').select('id', { count: 'exact', head: true });
   if (!ehSuper) qDil = qDil.eq('unidade_id', usuario.unidade_id);
+  // corretor: conta só as que ele vê (cadastrou ou foram liberadas para ele)
+  const ehCorretor = usuario.papel === 'corretor';
+  if (ehCorretor) {
+    const liberadas = await diligenciasLiberadas(usuario.id);
+    qDil = liberadas.length ? qDil.or(`criado_por.eq.${usuario.id},id.in.(${liberadas.join(',')})`) : qDil.eq('criado_por', usuario.id);
+  }
   const { count: totalDil } = await qDil;
 
   return (
@@ -51,7 +58,7 @@ export default async function InicioR4({ searchParams }: { searchParams: Promise
         )}
         {temDiligencia && (
         <>
-        <div className="mt-6 grid gap-4 sm:grid-cols-3">
+        <div className={`mt-6 grid gap-4 ${ehCorretor ? 'sm:grid-cols-1 sm:max-w-xs' : 'sm:grid-cols-3'}`}>
           <div className="rounded-2xl border border-slate-200 bg-white p-5">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Diligências</p>
             <p className="mt-2 text-3xl font-bold">{totalDil ?? 0}</p>
@@ -59,6 +66,8 @@ export default async function InicioR4({ searchParams }: { searchParams: Promise
               <Link href={`${base}/diligencias`} className="font-semibold text-[#0F1B2D] underline">Ver todas</Link>
             </p>
           </div>
+          {!ehCorretor && (
+          <>
           <div className="rounded-2xl border border-slate-200 bg-white p-5">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Certidões no mês</p>
             <p className="mt-2 text-3xl font-bold">{certidoes}</p>
@@ -69,6 +78,8 @@ export default async function InicioR4({ searchParams }: { searchParams: Promise
             <p className="mt-2 text-3xl font-bold">{brl(valor)}</p>
             <p className="mt-1 text-sm text-slate-500">R$ 2,00 por certidão emitida pelo sistema.</p>
           </div>
+          </>
+          )}
         </div>
 
         </>
