@@ -10,6 +10,7 @@ import { pool } from '@/lib/db';
 import { rotaDoTipo } from '@/lib/rota-certidao';
 import { exigirCardR4, exigirDiligenciaR4, pastasDaDiligencia } from '@/lib/r4/diligencia';
 import { registrarSemCobranca } from '@/lib/r4/motor';
+import { r4Admin } from '@/lib/r4/supabase';
 
 const N8N = (process.env.N8N_WEBHOOK_BASE || 'https://villejds.app.n8n.cloud/webhook').replace(/\/+$/, '');
 const WEBHOOKS = {
@@ -231,4 +232,33 @@ export async function r4Auditar(dilR4Id: string) {
   const r = await dispara(WEBHOOK_WF07, { diligencia_id: dil.motor_id });
   await log('auditar_diligencia', usuario, { detalhe: { diligencia_id: dil.motor_id, http_status: r.status, erro_disparo: r.erro } });
   atualizar(dilR4Id);
+}
+
+/**
+ * Corretores da equipe que podem ver esta diligência (além de quem cadastrou).
+ * Só o responsável da unidade (ou o superadmin) escolhe.
+ */
+export async function r4SalvarCorretores(dilR4Id: string, ids: string[]): Promise<{ ok: boolean; msg: string }> {
+  const { usuario, dil } = await exigirDiligenciaR4(dilR4Id);
+  if (usuario.papel !== 'admin' && usuario.papel !== 'superadmin') {
+    return { ok: false, msg: 'Só o responsável da unidade escolhe quem vê a diligência.' };
+  }
+  const adm = r4Admin();
+  const { data: equipe } = await adm
+    .from('usuarios')
+    .select('id')
+    .eq('unidade_id', dil.unidade_id)
+    .eq('papel', 'corretor');
+  const validos = new Set((equipe || []).map((x) => x.id as string));
+  const escolhidos = [...new Set(ids)].filter((x) => validos.has(x));
+  const { error: e1 } = await adm.from('diligencia_corretores').delete().eq('diligencia_id', dil.id);
+  if (e1) return { ok: false, msg: 'Não consegui salvar. Tente de novo.' };
+  if (escolhidos.length) {
+    const { error: e2 } = await adm
+      .from('diligencia_corretores')
+      .insert(escolhidos.map((u) => ({ diligencia_id: dil.id, usuario_id: u, liberado_por: usuario.id })));
+    if (e2) return { ok: false, msg: 'Não consegui salvar. Tente de novo.' };
+  }
+  atualizar(dilR4Id);
+  return { ok: true, msg: escolhidos.length ? `Liberada para ${escolhidos.length} corretor(es).` : 'Nenhum corretor além de quem cadastrou.' };
 }
