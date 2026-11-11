@@ -29,8 +29,8 @@ export default async function MinhaUnidadeR4() {
         <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
           <h2 className="text-base font-semibold">Logo da unidade</h2>
           <p className="mt-2 text-sm text-slate-600">
-            O logo sai no topo do painel, no link que você compartilha com o cliente e na capa do PDF das certidões. Use PNG
-            (de preferência com fundo transparente) ou JPG, até 2 MB.
+            O logo sai no topo do painel e no link que você compartilha com o cliente. Use PNG (de preferência com fundo
+            transparente) ou JPG, até 2 MB.
           </p>
           <LogoUnidade atual={(un?.logo_url as string | null) ?? null} />
         </section>
