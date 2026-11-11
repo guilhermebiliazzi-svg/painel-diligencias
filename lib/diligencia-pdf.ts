@@ -89,18 +89,32 @@ function corSituacao(s: string) {
   return CINZA;
 }
 
+/** Marca que sai na capa (padrão: REMAX Ville). O rquatro passa a da unidade. */
+export type MarcaPdf = { nome: string; logo?: { bytes: Uint8Array; tipo: 'png' | 'jpg' } | null };
+
 export async function montarPdfCertidoes(opts: {
   endereco: string;
   cliente: string | null;
   geradoEm: string; // "dd/mm/aaaa hh:mm"
   secoes: SecaoPdf[];
+  marca?: MarcaPdf;
 }): Promise<ResultadoPdf> {
+  const marca: MarcaPdf = opts.marca ?? { nome: 'REMAX Ville' };
   const out = await PDFDocument.create();
   out.setTitle(limparTexto(`Certidões — ${opts.endereco}`));
-  out.setAuthor('REMAX Ville');
-  out.setProducer('Painel REMAX Ville');
+  out.setAuthor(limparTexto(marca.nome));
+  out.setProducer(opts.marca ? 'rquatro' : 'Painel REMAX Ville');
   const reg = await out.embedFont(StandardFonts.Helvetica);
   const bold = await out.embedFont(StandardFonts.HelveticaBold);
+  // Logo da capa (se não der para ler a imagem, a capa sai só com o nome)
+  let logo: Awaited<ReturnType<PDFDocument['embedPng']>> | null = null;
+  if (marca.logo) {
+    try {
+      logo = marca.logo.tipo === 'jpg' ? await out.embedJpg(marca.logo.bytes) : await out.embedPng(marca.logo.bytes);
+    } catch {
+      logo = null;
+    }
+  }
 
   // 1) Carrega cada arquivo e descobre quantas páginas ele ocupa
   type Carregado = {
@@ -187,8 +201,17 @@ export async function montarPdfCertidoes(opts: {
     const p = out.addPage([W, H]);
     let y = H - M;
     if (idx === 0) {
-      p.drawText('REMAX Ville  •  Diligência', { x: M, y: y - 10, size: 9, font: bold, color: AZUL });
-      p.drawText(cortar('Certidões da diligência', bold, 20, W - 2 * M), { x: M, y: y - 38, size: 20, font: bold, color: ESCURO });
+      // logo no canto direito (até 150 x 48 pt), sem invadir o título
+      let larguraLogo = 0;
+      if (logo) {
+        const esc = Math.min(150 / logo.width, 48 / logo.height);
+        const lw = logo.width * esc;
+        const lh = logo.height * esc;
+        p.drawImage(logo, { x: W - M - lw, y: y - lh + 4, width: lw, height: lh });
+        larguraLogo = lw + 12;
+      }
+      p.drawText(cortar(`${marca.nome}  •  Diligência`, bold, 9, W - 2 * M - larguraLogo), { x: M, y: y - 10, size: 9, font: bold, color: AZUL });
+      p.drawText(cortar('Certidões da diligência', bold, 20, W - 2 * M - larguraLogo), { x: M, y: y - 38, size: 20, font: bold, color: ESCURO });
       p.drawText(cortar(opts.endereco, reg, 11, W - 2 * M), { x: M, y: y - 60, size: 11, font: reg, color: ESCURO });
       if (opts.cliente) p.drawText(cortar(`Cliente: ${opts.cliente}`, reg, 10, W - 2 * M), { x: M, y: y - 76, size: 10, font: reg, color: CINZA });
       const resumo = [
