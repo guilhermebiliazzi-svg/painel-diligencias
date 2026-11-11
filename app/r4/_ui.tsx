@@ -16,12 +16,14 @@ export function Cabecalho({
   nome,
   superadmin,
   papel,
+  ferramentas,
 }: {
   base: string;
   unidade: string | null;
   nome: string | null;
   superadmin: boolean;
   papel?: string;
+  ferramentas?: string[];
 }) {
   return (
     <header className="border-b border-slate-200 bg-white">
@@ -31,12 +33,17 @@ export function Cabecalho({
         </Link>
         <nav className="flex flex-wrap gap-4 text-sm font-medium text-slate-600">
           <Link href={`${base}/`} className="hover:text-slate-900">Início</Link>
-          <Link href={`${base}/diligencias`} className="hover:text-slate-900">Diligências</Link>
+          {(!ferramentas || ferramentas.includes('diligencia')) && (
+            <Link href={`${base}/diligencias`} className="hover:text-slate-900">Diligências</Link>
+          )}
           {superadmin && (
             <Link href={`${base}/unidades`} className="hover:text-slate-900">Unidades</Link>
           )}
           {papel === 'admin' && (
-            <Link href={`${base}/minha-unidade`} className="hover:text-slate-900">Minha unidade</Link>
+            <>
+              <Link href={`${base}/equipe`} className="hover:text-slate-900">Equipe</Link>
+              <Link href={`${base}/minha-unidade`} className="hover:text-slate-900">Minha unidade</Link>
+            </>
           )}
         </nav>
         <div className="ml-auto flex items-center gap-3 text-sm text-slate-600">
