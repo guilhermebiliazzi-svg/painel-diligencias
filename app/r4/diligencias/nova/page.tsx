@@ -23,7 +23,7 @@ export default async function NovaDiligenciaR4() {
 
   return (
     <>
-      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} nome={usuario.nome} superadmin={ehSuper} papel={usuario.papel} ferramentas={usuario.ferramentas} />
+      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} logo={usuario.unidade?.logo_url ?? null} nome={usuario.nome} superadmin={ehSuper} papel={usuario.papel} ferramentas={usuario.ferramentas} />
       <main className="mx-auto max-w-3xl px-4 py-8">
         <Link href={`${base}/diligencias`} className="text-sm text-slate-500 hover:text-slate-800">← Diligências</Link>
         <h1 className="mt-2 text-2xl font-semibold">Nova diligência</h1>
