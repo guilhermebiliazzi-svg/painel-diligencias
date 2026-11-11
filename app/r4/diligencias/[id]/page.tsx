@@ -1,30 +1,676 @@
+// app/r4/diligencias/[id]/page.tsx
+// rquatro — diligência com os MESMOS cards do painel da Ville (categorias,
+// cores, reemitir, enviar arquivo, vincular/trocar PDF, validar, mostrar/ocultar,
+// documentos extras, auditoria, link do cliente e PDF único com a marca da unidade).
+// Toda ação confere a unidade de quem está logado (app/r4/diligencias/[id]/acoes.ts).
+
 import Link from 'next/link';
+import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
+import { listPdfsInFolders, type DriveFile } from '@/lib/drive';
+import { rotaDoTipo } from '@/lib/rota-certidao';
+import {
+  agrupar,
+  categoriasFor,
+  preencherCategorias,
+  rotuloSituacao,
+  SITUACOES_ATENCAO,
+  type Group as GroupOrdem,
+  type GroupTipo,
+} from '@/lib/diligencia-ordem';
+import { SubmitButtonAsync } from '@/app/admin/SubmitButtonAsync';
+import { ToggleCardVisivel, TogglePessoaVisivel } from '@/app/admin/ToggleVisibilidade';
+import { CopiarLinkCliente } from '@/app/admin/CopiarLinkCliente';
+import { CardExtraNovo, ExcluirCardExtra } from '@/app/admin/CardExtra';
+import { EnviarArquivoCard } from '@/app/admin/EnviarArquivoCard';
+import { BaixarCertidoesPdf } from '@/app/admin/BaixarCertidoesPdf';
+import { btn } from '@/app/admin/botoes';
 import { Cabecalho } from '../../_ui';
 import { exigirR4, r4Admin } from '@/lib/r4/supabase';
-import { certidoesDoMotor, emitidaPeloSistema, registrarCobranca, type CertidaoMotor } from '@/lib/r4/motor';
-import { agrupar, categoriasFor, preencherCategorias, rotuloSituacao } from '@/lib/diligencia-ordem';
+import { linhasAdminDoMotor, registrarCobranca, type CertidaoMotor } from '@/lib/r4/motor';
+import {
+  r4Auditar,
+  r4CriarExtra,
+  r4Desvincular,
+  r4ExcluirExtra,
+  r4Reemitir,
+  r4ToggleCard,
+  r4TogglePessoa,
+  r4ValidarManual,
+  r4Vincular,
+} from './acoes';
 
 export const metadata = { title: 'Diligência' };
 export const dynamic = 'force-dynamic';
 
+type Group = GroupOrdem<AdminRow>;
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const COR: Record<string, string> = {
-  Concluida: 'bg-emerald-100 text-emerald-800',
-  Positiva: 'bg-rose-100 text-rose-800',
-  'Com pendencias': 'bg-amber-100 text-amber-800',
-  'Em revisao': 'bg-amber-100 text-amber-800',
-  Falhou: 'bg-red-100 text-red-700',
+type AdminRow = {
+  diligencia_id: string;
+  endereco: string;
+  cliente_nome: string;
+  certidao_id: string;
+  tipo: string;
+  titular: string | null;
+  tipo_documento: 'imovel' | 'pf' | 'pj' | 'outro';
+  documento_mascarado: string | null;
+  documento_normalizado: string | null;
+  certidao: string | null;
+  situacao: string;
+  resultado: string | null;
+  data_emissao: string | null;
+  link_documento: string | null;
+  emitida_em: string | null;
+  observacao_ia: string | null;
+  drive_file_id: string | null;
+  pasta_id: string | null;
+  url_pdf: string | null;
+  // v2: log de processamento
+  cs_status: string | null;
+  cs_erro: string | null;
+  cs_tentativas: number | null;
+  cs_tentativas_obter: number | null;
+  cs_atualizado_em: string | null;
+  cs_numero_pedido: string | null;
+  cs_pedido_data: string | null;
+  // visibilidade
+  card_oculto: boolean;
+  titular_oculto: boolean;
+  // extras
+  is_extra: boolean;
+  manual: boolean | null;
 };
 
-function rotulo(c: CertidaoMotor) {
-  if (c.situacao === 'Em revisao') return 'Em conferência';
-  if (c.situacao === 'Aguardando inicio' || c.situacao === 'Em processamento' || c.situacao === 'aguardando_origem') return 'Em andamento';
-  return rotuloSituacao(c.situacao);
+// Tipos de CND do TJSP obtidas via e-SAJ (as que chegam por e-mail com link de
+// download). NÃO inclui tjsp_civel_1g (eproc, 1º grau — outro fluxo).
+const TIPOS_ESAJ = new Set([
+  'tjsp_civeis',
+  'tjsp_falencia',
+  'tjsp_inventarios',
+  'tjsp_criminais',
+  'tjsp_exec_crim',
+]);
+
+function mascararDoc(raw: string): string | null {
+  const s = String(raw || '').replace(/\D/g, '');
+  if (s.length === 11) return `${s.slice(0, 3)}.${s.slice(3, 6)}.${s.slice(6, 9)}-${s.slice(9, 11)}`;
+  if (s.length === 14) return `${s.slice(0, 2)}.${s.slice(2, 5)}.${s.slice(5, 8)}/${s.slice(8, 12)}-${s.slice(12, 14)}`;
+  return null;
 }
 
-const dataBr = (s: string | null) => (s ? new Date(s).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : null);
+function dataPedidoBr(v: string | null): string | null {
+  const t = String(v || '').trim();
+  let m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  m = t.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m) return `${m[1]}/${m[2]}/${m[3]}`;
+  return null;
+}
+
+// Monta o link de download do e-SAJ (o MESMO que chega no e-mail do TJSP),
+// derivado do nº do pedido + data do pedido + documento. Independe do e-mail
+// chegar — serve para o operador abrir a CND que ainda está faltante (sem PDF
+// baixado). Formato idêntico ao WF-15 (sem encodeURIComponent).
+function linkEsaj(r: AdminRow): string | null {
+  if (!TIPOS_ESAJ.has(r.tipo)) return null;
+  const pedido = String(r.cs_numero_pedido || '').trim();
+  const dataBr = dataPedidoBr(r.cs_pedido_data);
+  const digits = String(r.documento_normalizado || '').replace(/\D/g, '');
+  const doc = mascararDoc(digits);
+  if (!pedido || !dataBr || !doc) return null;
+  const tp = digits.length === 14 ? 'J' : 'F';
+  const campoDoc = digits.length === 14 ? 'nuCnpj' : 'nuCpf';
+  return (
+    'https://esaj.tjsp.jus.br/sco/realizarDownload.do?' +
+    `entity.nuPedido=${pedido}&entity.dtPedido=${dataBr}` +
+    `&entity.tpPessoa=${tp}&entity.${campoDoc}=${doc}`
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Estilos por situacao
+// -----------------------------------------------------------------------------
+
+type Style = {
+  cardBg: string;
+  cardBorder: string;
+  badgeBg: string;
+  badgeText: string;
+  dot: string;
+};
+
+const SITUACAO_STYLES: Record<string, Style> = {
+  Concluida: {
+    cardBg: 'bg-emerald-50/50',
+    cardBorder: 'border-emerald-200',
+    badgeBg: 'bg-emerald-100',
+    badgeText: 'text-emerald-800',
+    dot: 'bg-emerald-500',
+  },
+  Positiva: {
+    cardBg: 'bg-rose-50/60',
+    cardBorder: 'border-rose-300',
+    badgeBg: 'bg-rose-100',
+    badgeText: 'text-rose-800',
+    dot: 'bg-rose-500',
+  },
+  'Em revisao': {
+    cardBg: 'bg-amber-50/50',
+    cardBorder: 'border-amber-200',
+    badgeBg: 'bg-amber-100',
+    badgeText: 'text-amber-800',
+    dot: 'bg-amber-500',
+  },
+  'Com pendencias': {
+    cardBg: 'bg-amber-50/50',
+    cardBorder: 'border-amber-200',
+    badgeBg: 'bg-amber-100',
+    badgeText: 'text-amber-800',
+    dot: 'bg-amber-500',
+  },
+  Processando: {
+    cardBg: 'bg-sky-50/50',
+    cardBorder: 'border-sky-200',
+    badgeBg: 'bg-sky-100',
+    badgeText: 'text-sky-800',
+    dot: 'bg-sky-500',
+  },
+  'Em processamento': {
+    cardBg: 'bg-sky-50/50',
+    cardBorder: 'border-sky-200',
+    badgeBg: 'bg-sky-100',
+    badgeText: 'text-sky-800',
+    dot: 'bg-sky-500',
+  },
+  // v3: certidao que falhou de vez (erro definitivo do site de origem ou
+  // tentativas esgotadas). Vem da view painel.v_painel_cliente_admin.
+  Falhou: {
+    cardBg: 'bg-red-50',
+    cardBorder: 'border-red-400',
+    badgeBg: 'bg-red-600',
+    badgeText: 'text-white',
+    dot: 'bg-red-200',
+  },
+  'Empresa extinta': {
+    cardBg: 'bg-slate-100',
+    cardBorder: 'border-slate-400',
+    badgeBg: 'bg-slate-800',
+    badgeText: 'text-white',
+    dot: 'bg-slate-300',
+  },
+  'Aguardando inicio': {
+    cardBg: 'bg-slate-50',
+    cardBorder: 'border-slate-200',
+    badgeBg: 'bg-slate-100',
+    badgeText: 'text-slate-700',
+    dot: 'bg-slate-400',
+  },
+};
+
+const DEFAULT_STYLE: Style = {
+  cardBg: 'bg-slate-50',
+  cardBorder: 'border-slate-200',
+  badgeBg: 'bg-slate-100',
+  badgeText: 'text-slate-700',
+  dot: 'bg-slate-400',
+};
+
+function styleFor(s: string): Style {
+  return SITUACAO_STYLES[s] ?? DEFAULT_STYLE;
+}
+
+function formatDate(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+
+// v2: formato data + hora pra log de processamento
+function formatDateTime(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+// v2: bloco de log de processamento. So aparece em cards sem PDF vinculado.
+function LogProcessamento({ r }: { r: AdminRow }) {
+  const tentativas = (r.cs_tentativas ?? 0) + (r.cs_tentativas_obter ?? 0);
+  const dataAtu = formatDateTime(r.cs_atualizado_em);
+  const erro = r.cs_erro?.trim();
+
+  // Caso 1: tem erro registrado
+  if (erro) {
+    return (
+      <div className="rounded-md border border-rose-200 bg-rose-50/60 px-2 py-1.5 text-xs text-rose-800">
+        <div className="font-semibold">
+          ⚠ Última tentativa: {dataAtu || 'data desconhecida'}
+        </div>
+        <div className="mt-0.5 leading-snug break-words">{erro}</div>
+      </div>
+    );
+  }
+
+  // Caso 2: já houve tentativas mas sem erro registrado (em processamento normal)
+  if (tentativas > 0) {
+    return (
+      <div className="rounded-md border border-slate-200 bg-slate-50/60 px-2 py-1.5 text-xs text-slate-600">
+        <span className="font-medium">⏳ Em processamento.</span>{' '}
+        {dataAtu && <>Última atualização: {dataAtu}</>}
+        {r.cs_numero_pedido && (
+          <> · pedido <span className="font-mono">{r.cs_numero_pedido}</span></>
+        )}
+      </div>
+    );
+  }
+
+  // Caso 3: nenhuma tentativa ainda
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50/60 px-2 py-1.5 text-xs text-slate-500">
+      Aguardando primeiro processamento.
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Componentes visuais
+// -----------------------------------------------------------------------------
+
+function CardAdmin({
+  numero,
+  r,
+  diligencia_id,
+  pdfsDisponiveis,
+  gerir,
+  precoReemissao,
+}: {
+  numero: number;
+  r: AdminRow;
+  diligencia_id: string;
+  pdfsDisponiveis: DriveFile[];
+  gerir: boolean;
+  precoReemissao: string | null;
+}) {
+  const s = styleFor(r.situacao);
+  const mostrarObs = !!r.observacao_ia && SITUACOES_ATENCAO.has(r.situacao);
+
+  return (
+    <div
+      className={`flex flex-col gap-2 rounded-lg border ${s.cardBorder} ${s.cardBg} p-3`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm font-medium leading-snug text-slate-900">
+          <span className="mr-1.5 inline-flex size-5 items-center justify-center rounded-full bg-white text-[10px] font-bold text-slate-500 ring-1 ring-slate-200">
+            {numero}
+          </span>
+          {r.certidao ?? r.tipo}
+        </p>
+        <span
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${s.badgeBg} ${s.badgeText}`}
+        >
+          <span className={`size-1.5 rounded-full ${s.dot}`} />
+          {rotuloSituacao(r.situacao)}
+        </span>
+      </div>
+
+      {mostrarObs && (
+        <p className={`text-xs leading-snug ${s.badgeText}`}>
+          <span className="font-semibold">⚠ Observação: </span>
+          {r.observacao_ia}
+        </p>
+      )}
+
+      {/* v2: Log de processamento — so aparece se nao tem PDF vinculado */}
+      {!r.drive_file_id && <LogProcessamento r={r} />}
+
+      <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+        <span>
+          {r.data_emissao
+            ? `Emitida em ${formatDate(r.data_emissao)}`
+            : '\u00A0'}
+        </span>
+        {r.link_documento ? (
+          <a
+            href={r.link_documento}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 font-medium text-blue-600 hover:text-blue-700 hover:underline"
+          >
+            Abrir PDF →
+          </a>
+        ) : linkEsaj(r) ? (
+          <a
+            href={linkEsaj(r)!}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 font-medium text-amber-600 hover:text-amber-700 hover:underline"
+            title="Baixar a certidão direto no e-SAJ (mesmo link que chega por e-mail)"
+          >
+            Abrir no e-SAJ →
+          </a>
+        ) : null}
+      </div>
+
+      <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-slate-200/70 pt-2">
+        {/* v2: Reemitir - so aparece quando nao tem PDF vinculado e o tipo tem emissao automatica
+            (card manual de upload nao tem o que reemitir) */}
+        {gerir && !r.drive_file_id && rotaDoTipo(r.tipo) && (
+          <form
+            action={async () => {
+              'use server';
+              await r4Reemitir(diligencia_id, r.certidao_id);
+            }}
+          >
+            <SubmitButtonAsync
+              pendingLabel="Disparando..."
+              className="rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+              title={`Emite esta certidão de novo agora. Quando o PDF novo chegar, conta como nova emissão${precoReemissao ? ` (${precoReemissao})` : ''}.`}
+            >
+              ↻ Reemitir
+            </SubmitButtonAsync>
+          </form>
+        )}
+        {gerir && r.drive_file_id && (
+          <form
+            action={async () => {
+              'use server';
+              await r4Desvincular(diligencia_id, r.certidao_id);
+            }}
+          >
+            <button
+              type="submit"
+              className="rounded-md border border-rose-300 bg-white px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50"
+            >
+              Desvincular PDF
+            </button>
+          </form>
+        )}
+        {/* Validar manualmente: so aparece quando ja tem PDF mas ninguem registrou
+            o veredito. Fecha o dado (resultado_certidao) em vez de so pintar o card. */}
+        {gerir && r.drive_file_id && (!r.resultado || r.situacao === 'Em revisao') && (
+          <details className="relative">
+            <summary className="cursor-pointer list-none rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50">
+              {r.situacao === 'Em revisao' ? '✓ Resolver revisão' : '✓ Validar manualmente'}
+            </summary>
+            <div className="absolute left-0 top-full z-20 mt-1 w-72 rounded-md border border-slate-200 bg-white p-3 shadow-lg">
+              <p className="mb-2 text-xs text-slate-600">
+                {r.situacao === 'Em revisao'
+                  ? 'A IA apontou divergência. Se você conferiu e está tudo certo, confirme o resultado para liberar o card.'
+                  : 'Você leu o PDF. Qual o resultado da certidão?'}
+              </p>
+              <form
+                action={async (formData: FormData) => {
+                  'use server';
+                  await r4ValidarManual(diligencia_id, r.certidao_id, formData);
+                }}
+                className="space-y-2"
+              >
+                <select
+                  name="resultado"
+                  required
+                  defaultValue={(r.resultado as string) || "negativa"}
+                  className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+                >
+                  <option value="negativa">Negativa (nada consta)</option>
+                  <option value="positiva">Positiva (consta pendência)</option>
+                  <option value="com_pendencias">Com pendências</option>
+                </select>
+                <input
+                  type="text"
+                  name="observacao"
+                  placeholder="Observação (opcional)"
+                  maxLength={400}
+                  className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+                />
+                <SubmitButtonAsync
+                  pendingLabel="Gravando..."
+                  className="w-full rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                  title="Grava o veredito e marca que a leitura foi humana"
+                >
+                  Confirmar validação
+                </SubmitButtonAsync>
+              </form>
+            </div>
+          </details>
+        )}
+        {/* Envio direto: arquivo do computador/celular -> pasta do Drive do card */}
+        {r.pasta_id && <EnviarArquivoCard certidaoId={r.certidao_id} temPdf={!!r.drive_file_id} endpoint="/api/r4/diligencia-upload" />}
+        {gerir && (
+        <details className="relative">
+          <summary className="cursor-pointer list-none rounded-md border border-blue-300 bg-white px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50">
+            {r.drive_file_id ? 'Trocar PDF' : 'Vincular PDF'}
+          </summary>
+          <div className="absolute left-0 top-full z-20 mt-1 max-h-72 w-80 overflow-y-auto rounded-md border border-slate-200 bg-white p-2 shadow-lg">
+            {pdfsDisponiveis.length === 0 ? (
+              <p className="px-2 py-3 text-xs text-slate-500">
+                Nenhum PDF encontrado na pasta deste grupo.
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {pdfsDisponiveis.map((f) => (
+                  <li key={f.id}>
+                    <form
+                      action={async () => {
+                        'use server';
+                        await r4Vincular(diligencia_id, r.certidao_id, f.id, f.webViewLink ?? '', f.name);
+                      }}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-xs text-slate-700">
+                        {f.name}
+                      </span>
+                      <button
+                        type="submit"
+                        className="shrink-0 rounded bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-blue-700"
+                      >
+                        Vincular
+                      </button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </details>
+        )}
+
+        {/* v3: toggle de visibilidade do card no painel cliente */}
+        {gerir && (
+        <div className="ml-auto flex items-center gap-2">
+          {r.is_extra && (
+            <ExcluirCardExtra
+              certidao_id={r.certidao_id}
+              diligencia_id={diligencia_id}
+              excluir={r4ExcluirExtra}
+            />
+          )}
+          <ToggleCardVisivel
+            certidao_id={r.certidao_id}
+            diligencia_id={diligencia_id}
+            oculto={r.card_oculto}
+            acao={r4ToggleCard}
+          />
+        </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function IconeTipo({ tipo }: { tipo: GroupTipo }) {
+  const cls =
+    'flex size-10 shrink-0 items-center justify-center rounded-full text-lg';
+  if (tipo === 'imovel')
+    return <div className={`${cls} bg-blue-100 text-blue-700`}>🏠</div>;
+  if (tipo === 'pj')
+    return <div className={`${cls} bg-violet-100 text-violet-700`}>🏢</div>;
+  return <div className={`${cls} bg-teal-100 text-teal-700`}>👤</div>;
+}
+
+function GrupoAdmin({
+  g,
+  diligencia_id,
+  pdfsDoGrupo,
+  gerir,
+  precoReemissao,
+}: {
+  g: Group;
+  diligencia_id: string;
+  pdfsDoGrupo: DriveFile[];
+  gerir: boolean;
+  precoReemissao: string | null;
+}) {
+  const tot = g.rows.length;
+  const concl = g.rows.filter((r) => r.situacao === 'Concluida').length;
+  const pct = tot > 0 ? Math.round((concl / tot) * 100) : 0;
+
+  const cats = preencherCategorias(g.rows, categoriasFor(g.tipo));
+
+  return (
+    <details
+      style={{ backgroundColor: '#ffffff' }}
+      className="group overflow-hidden rounded-2xl border border-slate-200 shadow-sm"
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-4 px-4 py-4 transition hover:bg-slate-50 sm:px-6">
+        <IconeTipo tipo={g.tipo} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-base font-semibold text-slate-900">
+            {g.titulo}
+          </p>
+          {g.subtitulo && (
+            <p className="truncate text-xs text-slate-500">{g.subtitulo}</p>
+          )}
+          {/* v3: toggle visibilidade da PESSOA (apenas PF/PJ) */}
+          {gerir && g.tipo !== 'imovel' && g.rows[0]?.documento_normalizado && (
+            <div className="mt-1.5">
+              <TogglePessoaVisivel
+                diligencia_id={diligencia_id}
+                documento_normalizado={g.rows[0].documento_normalizado}
+                oculta={g.rows[0].titular_oculto}
+                acao={r4TogglePessoa}
+              />
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-semibold text-slate-900">
+            {concl}/{tot}
+          </span>
+          <div className="hidden h-2 w-24 overflow-hidden rounded-full bg-slate-100 sm:block">
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-all"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="size-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180"
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </div>
+      </summary>
+
+      <div className="border-t border-slate-100 bg-slate-50/60 p-4 sm:p-5">
+        <div className="space-y-5">
+          {cats.map((cat) => {
+            const totCat = cat.rows.length;
+            const conclCat = cat.rows.filter((r) => r.situacao === 'Concluida').length;
+            return (
+              <div key={cat.titulo}>
+                <div className="mb-2 flex items-baseline justify-between border-b border-slate-200 pb-1">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+                    {cat.titulo}
+                  </h3>
+                  <span className="text-[10px] font-medium text-slate-500">
+                    {conclCat}/{totCat}
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  {cat.subgrupos.map((sg, sgIdx) => (
+                    <div key={sgIdx}>
+                      {sg.titulo && (
+                        <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                          {sg.titulo}
+                        </p>
+                      )}
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {sg.rows.map((r) => {
+                          // Numeracao continua dentro da categoria
+                          const numero = cat.rows.indexOf(r) + 1;
+                          return (
+                            <CardAdmin
+                              key={r.certidao_id}
+                              numero={numero}
+                              r={r}
+                              diligencia_id={diligencia_id}
+                              pdfsDisponiveis={pdfsDoGrupo}
+                              gerir={gerir}
+                              precoReemissao={precoReemissao}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* v3: card "+" pra adicionar documento avulso ao grupo */}
+          {gerir && (
+          <div className="border-t border-dashed border-slate-200 pt-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <CardExtraNovo
+                diligencia_id={diligencia_id}
+                pasta_id={
+                  g.rows.find((r) => r.pasta_id)?.pasta_id ?? ''
+                }
+                documento_normalizado={
+                  g.tipo === 'imovel' ? null : g.rows[0]?.documento_normalizado ?? null
+                }
+                titular={g.tipo === 'imovel' ? null : g.titulo}
+                pdfsDisponiveis={pdfsDoGrupo}
+                criar={r4CriarExtra}
+                endpointUpload="/api/r4/diligencia-upload"
+              />
+            </div>
+          </div>
+          )}
+        </div>
+      </div>
+    </details>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Página
+// -----------------------------------------------------------------------------
+
+const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 export default async function DiligenciaR4({
   params,
@@ -38,116 +684,139 @@ export default async function DiligenciaR4({
   const { usuario, base } = await exigirR4({ ferramenta: 'diligencia' });
   if (!UUID_RE.test(id)) notFound();
   const ehSuper = usuario.papel === 'superadmin';
+  const adm = r4Admin();
 
-  let q = r4Admin().from('diligencias').select('id,unidade_id,titulo,status,motor_id,erro,dados,criado_em').eq('id', id);
+  let q = adm.from('diligencias').select('id,unidade_id,titulo,status,motor_id,erro,dados,criado_em').eq('id', id);
   if (!ehSuper) q = q.eq('unidade_id', usuario.unidade_id);
   const { data: dil } = await q.maybeSingle();
   if (!dil) notFound();
 
-  const todas = dil.motor_id ? await certidoesDoMotor(dil.motor_id) : [];
-  if (todas.length) await registrarCobranca({ id: dil.id, unidade_id: dil.unidade_id }, todas);
-  // Certidões que o sistema emite; os documentos que a unidade junta (matrícula,
-  // documentos pessoais, condomínio) aparecem numa lista à parte.
-  const certidoes = todas.filter((c) => !c.manual);
-  const documentos = todas.filter((c) => c.manual);
-  const grupos = agrupar(certidoes, dil.titulo || '');
-  const prontas = certidoes.filter(emitidaPeloSistema).length;
-  const andamento = certidoes.filter((c) => !emitidaPeloSistema(c) && !['Falhou', 'Nao cadastrado', 'Empresa extinta'].includes(c.situacao)).length;
-  const pasta = (dil.dados as { pasta_drive_id?: string } | null)?.pasta_drive_id;
+  const rows = dil.motor_id ? await linhasAdminDoMotor<AdminRow>(dil.motor_id) : [];
+  // cobrança: toda certidão emitida pelo sistema (inclusive as ocultas ao cliente)
+  if (rows.length) await registrarCobranca({ id: dil.id, unidade_id: dil.unidade_id }, rows as unknown as CertidaoMotor[]);
+
+  const { data: precos } = await adm.from('precos').select('tipo,preco,cobravel').eq('tipo', '*').maybeSingle();
+  const precoReemissao = precos && precos.cobravel ? brl(Number(precos.preco)) : null;
+
+  const endereco = rows[0]?.endereco || dil.titulo || '';
+  const grupos = agrupar(rows, endereco);
+  const pastaRaiz = (dil.dados as { pasta_drive_id?: string } | null)?.pasta_drive_id;
+  const visiveis = rows.filter((r) => !r.card_oculto && !r.titular_oculto);
+  const prontas = visiveis.filter((r) => r.situacao === 'Concluida').length;
+
+  const pastaIds = Array.from(new Set(grupos.map((g) => g.pasta_id).filter((p): p is string => !!p)));
+  let pdfsTodos: DriveFile[] = [];
+  let driveErro = false;
+  if (pastaIds.length) {
+    try {
+      pdfsTodos = await listPdfsInFolders(pastaIds);
+    } catch (e) {
+      console.error('[r4 diligencia] listar PDFs', e);
+      driveErro = true;
+    }
+  }
+  const pdfsPorPasta = new Map<string, DriveFile[]>();
+  for (const f of pdfsTodos) {
+    for (const p of f.parents ?? []) {
+      const arr = pdfsPorPasta.get(p) ?? [];
+      arr.push(f);
+      pdfsPorPasta.set(p, arr);
+    }
+  }
+
+  // link público do cliente (no domínio rquatro: /c/<id>; nos testes: /r4/c/<id>)
+  const h = await headers();
+  const host = h.get('x-forwarded-host') || h.get('host') || 'rquatro.com.br';
+  const linkCliente = `https://${host}${base}/c/${id}`;
 
   return (
     <>
-      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} nome={usuario.nome} superadmin={ehSuper} papel={usuario.papel} ferramentas={usuario.ferramentas} />
-      <main className="mx-auto max-w-5xl px-4 py-8">
-        <Link href={`${base}/diligencias`} className="text-sm text-slate-500 hover:text-slate-800">← Diligências</Link>
-        {sp?.nova && dil.motor_id && (
-          <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-            Diligência iniciada. As certidões vão ficando prontas ao longo das próximas horas; algumas dependem de resposta por e-mail dos tribunais.
-          </p>
-        )}
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold">{dil.titulo}</h1>
-          {pasta && (
-            <a href={`https://drive.google.com/drive/folders/${pasta}`} target="_blank" rel="noreferrer" className="ml-auto rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold hover:bg-slate-50">
-              Abrir pasta no Drive ↗
-            </a>
+      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} logo={usuario.unidade?.logo_url ?? null} nome={usuario.nome} superadmin={ehSuper} papel={usuario.papel} ferramentas={usuario.ferramentas} />
+      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+        <header className="mb-6">
+          <Link href={`${base}/diligencias`} className="text-xs font-semibold uppercase tracking-wider text-[#0F1B2D] hover:underline">
+            ← Diligências
+          </Link>
+          {sp?.nova && dil.motor_id && (
+            <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              Diligência iniciada. As certidões vão ficando prontas ao longo das próximas horas; algumas dependem de resposta por e-mail dos tribunais.
+            </p>
           )}
-        </div>
-        <p className="mt-1 text-sm text-slate-600">
-          Criada em {new Date(dil.criado_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
-          {certidoes.length > 0 && ` · ${prontas} de ${certidoes.length} prontas${andamento ? ` · ${andamento} em andamento` : ''}`}
-        </p>
+          <h1 className="mt-3 text-2xl font-semibold leading-tight text-slate-900 sm:text-3xl">{endereco}</h1>
+          <p className="mt-1 text-sm text-slate-600">
+            Criada em {new Date(dil.criado_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
+            {visiveis.length > 0 && ` · ${prontas} de ${visiveis.length} concluídas`}
+          </p>
+
+          {dil.motor_id && (
+            <div className="mt-5 flex flex-wrap items-start gap-x-8 gap-y-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+              <GrupoAcoes titulo="Diligência">
+                <CopiarLinkCliente diligencia_id={id} url={linkCliente} />
+                <BaixarCertidoesPdf diligenciaId={id} endpoint="/api/r4/diligencia-pdf" />
+                <form
+                  action={async () => {
+                    'use server';
+                    await r4Auditar(id);
+                  }}
+                >
+                  <SubmitButtonAsync
+                    pendingLabel="Auditando…"
+                    className={btn('neutro')}
+                    title="Procura PDFs soltos nas pastas desta diligência e liga aos cards pendentes"
+                  >
+                    Auditar diligência
+                  </SubmitButtonAsync>
+                </form>
+                {pastaRaiz && (
+                  <a href={`https://drive.google.com/drive/folders/${pastaRaiz}`} target="_blank" rel="noreferrer" className={btn('neutro')}>
+                    Abrir pasta no Drive ↗
+                  </a>
+                )}
+              </GrupoAcoes>
+            </div>
+          )}
+          {precoReemissao && rows.length > 0 && (
+            <p className="mt-2 text-xs text-slate-500">
+              Reemitir uma certidão conta como nova emissão ({precoReemissao}) quando o PDF novo chegar. Arquivos que você envia ou vincula não são cobrados.
+            </p>
+          )}
+        </header>
 
         {dil.status === 'erro' && (
-          <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">Não iniciada: {dil.erro}</p>
+          <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">Não iniciada: {dil.erro}</p>
         )}
-        {dil.motor_id && certidoes.length === 0 && (
-          <p className="mt-4 text-sm text-slate-500">As certidões ainda estão sendo criadas. Atualize a página em instantes.</p>
+        {dil.motor_id && rows.length === 0 && (
+          <p className="mb-4 text-sm text-slate-500">As certidões ainda estão sendo criadas. Atualize a página em instantes.</p>
+        )}
+        {driveErro && (
+          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+            Não consegui listar os PDFs da pasta do Drive (usados em &quot;Vincular PDF&quot;). Se persistir, o responsável da
+            unidade deve salvar a pasta de novo em Minha unidade.
+          </div>
         )}
 
-        <div className="mt-6 space-y-6">
+        <section className="space-y-3">
           {grupos.map((g) => (
-            <section key={g.key} className="rounded-2xl border border-slate-200 bg-white p-5">
-              <div className="flex flex-wrap items-baseline gap-x-3">
-                <h2 className="text-base font-semibold">{g.titulo}</h2>
-                {g.subtitulo && <span className="text-xs text-slate-500">{g.subtitulo}</span>}
-              </div>
-              {preencherCategorias(g.rows, categoriasFor(g.tipo)).map((cat) => (
-                <div key={cat.titulo} className="mt-4">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{cat.titulo}</p>
-                  <ul className="mt-2 divide-y divide-slate-100">
-                    {cat.rows.map((c) => (
-                      <li key={c.certidao_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm">
-                        <span className="min-w-0 flex-1">{c.certidao}</span>
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${COR[c.situacao] || 'bg-slate-100 text-slate-700'}`}>
-                          {rotulo(c)}
-                        </span>
-                        {dataBr(c.data_emissao) && <span className="text-xs text-slate-500">{dataBr(c.data_emissao)}</span>}
-                        {c.drive_file_id ? (
-                          <a href={`https://drive.google.com/file/d/${c.drive_file_id}/view`} target="_blank" rel="noreferrer" className="text-xs font-semibold text-[#0F1B2D] underline">
-                            PDF ↗
-                          </a>
-                        ) : (
-                          <span className="w-8" />
-                        )}
-                        {c.observacao_ia && (c.situacao === 'Positiva' || c.situacao === 'Com pendencias') && (
-                          <p className="w-full text-xs text-slate-600">{c.observacao_ia}</p>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </section>
+            <GrupoAdmin
+              key={g.key}
+              g={g}
+              diligencia_id={id}
+              pdfsDoGrupo={g.pasta_id ? pdfsPorPasta.get(g.pasta_id) ?? [] : []}
+              gerir
+              precoReemissao={precoReemissao}
+            />
           ))}
-        </div>
-
-        {documentos.length > 0 && (
-          <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
-            <h2 className="text-base font-semibold">Documentos a juntar pela unidade</h2>
-            <p className="mt-1 text-xs text-slate-500">
-              Não são emitidos pelo sistema nem cobrados. O envio desses documentos pelo rquatro vem numa próxima etapa.
-            </p>
-            <ul className="mt-3 divide-y divide-slate-100">
-              {documentos.map((c) => (
-                <li key={c.certidao_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm">
-                  <span className="min-w-0 flex-1">
-                    {c.certidao}
-                    {c.titular && c.tipo_documento !== 'imovel' ? <span className="text-slate-500"> — {c.titular}</span> : null}
-                  </span>
-                  {c.drive_file_id ? (
-                    <a href={`https://drive.google.com/file/d/${c.drive_file_id}/view`} target="_blank" rel="noreferrer" className="text-xs font-semibold text-[#0F1B2D] underline">
-                      PDF ↗
-                    </a>
-                  ) : (
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">a juntar</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
+        </section>
       </main>
     </>
+  );
+}
+
+function GrupoAcoes({ titulo, children }: { titulo: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{titulo}</p>
+      <div className="flex flex-wrap items-center gap-2">{children}</div>
+    </div>
   );
 }
