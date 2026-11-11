@@ -18,6 +18,8 @@ export type RowOrdem = {
 export function rotuloSituacao(s: string): string {
   if (s === 'Positiva') return 'Constam ocorrências';
   if (s === 'Falhou') return 'Não foi possível emitir';
+  // PDF já baixado, esperando a conferência automática (WF-07)
+  if (s === 'aguardando_match') return 'Em conferência';
   return s;
 }
 
