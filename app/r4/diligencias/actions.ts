@@ -1,10 +1,11 @@
 'use server';
 
-import { redirect } from 'next/navigation';
-import { r4Admin, r4Base, r4UsuarioAtual } from '@/lib/r4/supabase';
+import { r4Admin, r4UsuarioAtual } from '@/lib/r4/supabase';
+import { pool } from '@/lib/db';
+import { exigirDiligenciaR4 } from '@/lib/r4/diligencia';
 import { enviarAoMotor } from '@/lib/r4/motor';
 
-export type ResultadoNova = { ok: boolean; msg: string } | null;
+export type ResultadoNova = { ok: boolean; msg: string; id?: string } | null;
 
 type Pessoa = {
   nome: string;
@@ -63,7 +64,6 @@ function faltaParaCertidoes(p: Pessoa, n: string): string | null {
 
 /** Cria a diligência no rquatro e manda para o motor (fluxo R4-01). */
 export async function criarDiligencia(_prev: ResultadoNova, form: FormData): Promise<ResultadoNova> {
-  const base = await r4Base();
   const u = await r4UsuarioAtual();
   if (!u || !u.ativo) return { ok: false, msg: 'Sessão expirada. Entre de novo.' };
   if (!u.ferramentas.includes('diligencia')) return { ok: false, msg: 'Seu acesso não inclui a diligência.' };
@@ -248,5 +248,42 @@ export async function criarDiligencia(_prev: ResultadoNova, form: FormData): Pro
       atualizado_em: new Date().toISOString(),
     })
     .eq('id', dil.id);
-  redirect(`${base}/diligencias/${dil.id}?nova=1`);
+
+  // Responsável escolheu corretores da equipe que podem ver esta diligência
+  if (u.papel === 'admin' || u.papel === 'superadmin') {
+    let ids: string[] = [];
+    try {
+      ids = JSON.parse(String(form.get('corretores') || '[]'));
+    } catch {
+      ids = [];
+    }
+    if (Array.isArray(ids) && ids.length) {
+      const { data: equipe } = await adm.from('usuarios').select('id').eq('unidade_id', un.id).eq('papel', 'corretor');
+      const validos = new Set((equipe || []).map((x) => x.id as string));
+      const linhas = [...new Set(ids.map(String))]
+        .filter((x) => validos.has(x))
+        .map((x) => ({ diligencia_id: dil.id, usuario_id: x, liberado_por: u.id }));
+      if (linhas.length) await adm.from('diligencia_corretores').insert(linhas);
+    }
+  }
+  // O navegador ainda envia os documentos escolhidos e depois abre a diligência.
+  return { ok: true, msg: 'Diligência iniciada.', id: dil.id };
+}
+
+export type CardDocumento = { id: string; tipo: string; documento: string };
+
+/**
+ * Cards de documentos que a unidade junta (identidade, comprovante de residência,
+ * certidão de estado civil) desta diligência — para o envio logo após o cadastro.
+ */
+export async function cardsDocumentos(dilR4Id: string): Promise<CardDocumento[]> {
+  const { dil } = await exigirDiligenciaR4(dilR4Id);
+  const r = await pool.query(
+    `SELECT id::text AS id, tipo, regexp_replace(COALESCE(documento, ''), '[^0-9]', '', 'g') AS documento
+       FROM certidoes_status
+      WHERE diligencia_id = $1 AND COALESCE(manual, false)
+        AND tipo IN ('doc_identidade', 'comp_residencia', 'cert_estado_civil')`,
+    [dil.motor_id]
+  );
+  return r.rows as CardDocumento[];
 }
