@@ -1,7 +1,9 @@
 'use client';
 
 import { useActionState } from 'react';
-import { criarUnidade, redefinirSenha, salvarPastaDrive, type Resultado } from './actions';
+import { criarUnidade, redefinirSenha, salvarFerramentasUnidade, salvarPastaDrive, type Resultado } from './actions';
+
+type Ferramenta = { codigo: string; nome: string };
 
 function Aviso({ r }: { r: Resultado | null }) {
   if (!r) return null;
@@ -22,7 +24,7 @@ function Aviso({ r }: { r: Resultado | null }) {
 
 const campo = 'mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm';
 
-export function NovaUnidade() {
+export function NovaUnidade({ ferramentas }: { ferramentas: Ferramenta[] }) {
   const [r, acao, enviando] = useActionState(criarUnidade, null);
   return (
     <form action={acao} className="rounded-2xl border border-slate-200 bg-white p-5">
@@ -39,6 +41,15 @@ export function NovaUnidade() {
           <input name="pasta_drive" className={campo} placeholder="https://drive.google.com/drive/folders/…" />
           <span className="mt-1 block text-xs font-normal text-slate-500">Pode deixar para depois. Sem a pasta, a unidade não consegue iniciar diligências.</span>
         </label>
+      </div>
+      <p className="mt-4 text-sm font-medium text-slate-700">Ferramentas liberadas para a unidade</p>
+      <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
+        {ferramentas.map((f) => (
+          <label key={f.codigo} className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" name="ferramentas" value={f.codigo} defaultChecked />
+            {f.nome}
+          </label>
+        ))}
       </div>
       <button disabled={enviando} className="mt-4 rounded-lg bg-[#0F1B2D] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1c2c45] disabled:opacity-60">
         {enviando ? 'Criando…' : 'Criar unidade e acesso'}
@@ -77,6 +88,26 @@ export function PastaDrive({ unidadeId, atual }: { unidadeId: string; atual: str
         {enviando ? 'salvando…' : 'Salvar'}
       </button>
       {r && <span className={`w-full text-xs ${r.ok ? 'text-emerald-700' : 'text-red-700'}`}>{r.msg}</span>}
+    </form>
+  );
+}
+
+export function FerramentasUnidade({ unidadeId, ferramentas, marcadas }: { unidadeId: string; ferramentas: Ferramenta[]; marcadas: string[] }) {
+  const [r, acao, enviando] = useActionState(salvarFerramentasUnidade, null);
+  return (
+    <form action={acao} className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+      <input type="hidden" name="unidade_id" value={unidadeId} />
+      <span className="font-medium text-slate-700">Ferramentas:</span>
+      {ferramentas.map((f) => (
+        <label key={f.codigo} className="flex items-center gap-2 text-slate-700">
+          <input type="checkbox" name="ferramentas" value={f.codigo} defaultChecked={marcadas.includes(f.codigo)} />
+          {f.nome}
+        </label>
+      ))}
+      <button disabled={enviando} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold hover:bg-slate-50 disabled:opacity-60">
+        {enviando ? 'salvando…' : 'Salvar'}
+      </button>
+      {r && <span className={`text-xs ${r.ok ? 'text-emerald-700' : 'text-red-700'}`}>{r.msg}</span>}
     </form>
   );
 }
