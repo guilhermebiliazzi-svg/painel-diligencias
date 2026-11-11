@@ -29,6 +29,7 @@ export function Cabecalho({
         </Link>
         <nav className="flex flex-wrap gap-4 text-sm font-medium text-slate-600">
           <Link href={`${base}/`} className="hover:text-slate-900">Início</Link>
+          <Link href={`${base}/diligencias`} className="hover:text-slate-900">Diligências</Link>
           {superadmin && (
             <Link href={`${base}/unidades`} className="hover:text-slate-900">Unidades</Link>
           )}
