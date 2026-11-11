@@ -18,6 +18,7 @@ const WEBHOOKS = {
   wf08: `${N8N}/wf08-certidoes-cadastrais`,
 };
 const WEBHOOK_WF07 = `${N8N}/wf07-auditoria-pdf`;
+const DESLIGADO = true;
 
 function atualizar(dilR4Id: string) {
   revalidatePath(`/r4/diligencias/${dilR4Id}`);
@@ -224,6 +225,8 @@ export async function r4ExcluirExtra(certidaoId: string, dilR4Id: string) {
 
 /** Auditoria: varre as pastas da diligência e liga PDFs soltos aos cards pendentes. */
 export async function r4Auditar(dilR4Id: string) {
+  // Desligado por decisão do Guilherme (11/11): ainda não liberado para as unidades.
+  if (DESLIGADO) throw new Error('Auditoria da diligência não disponível.');
   const { usuario, dil } = await exigirDiligenciaR4(dilR4Id);
   const r = await dispara(WEBHOOK_WF07, { diligencia_id: dil.motor_id });
   await log('auditar_diligencia', usuario, { detalhe: { diligencia_id: dil.motor_id, http_status: r.status, erro_disparo: r.erro } });
