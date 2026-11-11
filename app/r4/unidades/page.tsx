@@ -3,6 +3,7 @@ import { exigirR4, r4Admin } from '@/lib/r4/supabase';
 import { alternarUnidade } from './actions';
 import { FerramentasUnidade, NovaUnidade, PastaDrive, RedefinirSenha } from './formularios';
 import { CONTA_DRIVE_MOTOR } from '@/lib/r4/motor';
+import { LogoUnidade } from '../_logo';
 
 export const metadata = { title: 'Unidades' };
 export const dynamic = 'force-dynamic';
@@ -13,7 +14,7 @@ export default async function UnidadesR4() {
   const { usuario, base } = await exigirR4({ papel: 'superadmin' });
   const adm = r4Admin();
   const [{ data: unidades }, { data: usuarios }, { data: ferramentas }, { data: liberadas }] = await Promise.all([
-    adm.from('unidades').select('id,nome,cnpj,email_cobranca,ativa,criado_em,pasta_drive_id').order('criado_em', { ascending: false }),
+    adm.from('unidades').select('id,nome,cnpj,email_cobranca,ativa,criado_em,pasta_drive_id,logo_url').order('criado_em', { ascending: false }),
     adm.from('usuarios').select('id,nome,email,papel,ativo,unidade_id').order('nome'),
     adm.from('ferramentas').select('codigo,nome').eq('ativa', true).order('ordem'),
     adm.from('unidade_ferramentas').select('unidade_id,ferramenta'),
@@ -53,6 +54,10 @@ export default async function UnidadesR4() {
                   </form>
                 </div>
                 <PastaDrive unidadeId={un.id} atual={un.pasta_drive_id} />
+                <div className="mt-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Logo da unidade</p>
+                  <div className="mt-2"><LogoUnidade atual={un.logo_url} unidadeId={un.id} compacto /></div>
+                </div>
                 <FerramentasUnidade
                   unidadeId={un.id}
                   ferramentas={ferramentas || []}
