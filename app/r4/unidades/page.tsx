@@ -2,9 +2,7 @@ import { Cabecalho } from '../_ui';
 import { exigirR4, r4Admin } from '@/lib/r4/supabase';
 import { alternarUnidade } from './actions';
 import { NovaUnidade, PastaDrive, RedefinirSenha } from './formularios';
-
-// Conta Google do motor: a unidade compartilha a pasta dela com este e-mail (Editor).
-const CONTA_DRIVE_MOTOR = process.env.R4_CONTA_DRIVE || 'guilhermebiliazzi@remax.com.br';
+import { CONTA_DRIVE_MOTOR } from '@/lib/r4/motor';
 
 export const metadata = { title: 'Unidades' };
 export const dynamic = 'force-dynamic';
@@ -27,7 +25,7 @@ export default async function UnidadesR4() {
         <p className="mt-1 text-sm text-slate-600">Cada unidade só vê as próprias diligências. Desligar uma unidade bloqueia o acesso de todos dela.</p>
         <p className="mt-2 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">
           Para liberar as diligências, a unidade cria uma pasta no Google Drive dela, compartilha como <b>Editor</b> com{' '}
-          <b>{CONTA_DRIVE_MOTOR}</b> e manda o link. Os PDFs ficam nessa pasta, separados por imóvel.
+          <b>{CONTA_DRIVE_MOTOR}</b> e cola o link em <b>Minha unidade</b> (ou manda para você colar aqui). Os PDFs ficam nessa pasta, separados por imóvel.
         </p>
 
         <div className="mt-6"><NovaUnidade /></div>
