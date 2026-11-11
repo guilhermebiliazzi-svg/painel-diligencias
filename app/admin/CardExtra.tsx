@@ -19,6 +19,10 @@ type CardExtraNovoProps = {
   titular?: string | null;
   /** Lista de PDFs disponiveis na pasta do grupo (vem do server). */
   pdfsDisponiveis: DriveFile[];
+  /** Action que cria o card (padrão: a do painel da Ville). O rquatro passa a dele. */
+  criar?: (fd: FormData) => Promise<string>;
+  /** Rota de envio do arquivo (padrão: /api/adm/diligencia-upload). */
+  endpointUpload?: string;
 };
 
 /**
@@ -36,6 +40,8 @@ export function CardExtraNovo({
   documento_normalizado,
   titular,
   pdfsDisponiveis,
+  criar = criarCertidaoExtra,
+  endpointUpload,
 }: CardExtraNovoProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -79,8 +85,8 @@ export function CardExtraNovo({
     fd.set('url_pdf', '');
     try {
       setEnviando('criando');
-      const id = await criarCertidaoExtra(fd);
-      await enviarArquivoParaCard(id, arquivo, (e) => setEnviando(e));
+      const id = await criar(fd);
+      await enviarArquivoParaCard(id, arquivo, (e) => setEnviando(e), endpointUpload);
       setEnviando('');
       fechar();
       [1500, 15000, 40000].forEach((ms) => setTimeout(() => router.refresh(), ms));
@@ -104,7 +110,7 @@ export function CardExtraNovo({
     fd.set('url_pdf', escolhido.webViewLink ?? '');
     startTransition(async () => {
       try {
-        await criarCertidaoExtra(fd);
+        await criar(fd);
         fechar();
       } catch (e) {
         setErro(e instanceof Error ? e.message : 'erro desconhecido');
@@ -118,7 +124,7 @@ export function CardExtraNovo({
     fd.set('url_pdf', '');
     startTransition(async () => {
       try {
-        await criarCertidaoExtra(fd);
+        await criar(fd);
         fechar();
       } catch (e) {
         setErro(e instanceof Error ? e.message : 'erro desconhecido');
@@ -325,9 +331,11 @@ export function CardExtraNovo({
 export function ExcluirCardExtra({
   certidao_id,
   diligencia_id,
+  excluir = excluirCertidaoExtra,
 }: {
   certidao_id: string;
   diligencia_id: string;
+  excluir?: (certidao_id: string, diligencia_id: string) => Promise<void>;
 }) {
   const [pending, startTransition] = useTransition();
 
@@ -338,7 +346,7 @@ export function ExcluirCardExtra({
       onClick={() => {
         if (!confirm('Excluir este documento extra? O PDF do Drive não será removido.')) return;
         startTransition(async () => {
-          await excluirCertidaoExtra(certidao_id, diligencia_id);
+          await excluir(certidao_id, diligencia_id);
         });
       }}
       title="Excluir card extra (apenas o card; o PDF do Drive permanece)"
