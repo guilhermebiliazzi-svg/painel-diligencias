@@ -393,6 +393,39 @@ function paginarTexto(texto: string, font: PDFFont): string[][] {
 
 const mbBr = (n: number) => String(n).replace('.', ',');
 
+/**
+ * PDF de um comprovante que o site de origem salvou como HTML (ex.: Mobiliária
+ * da Prefeitura e SEFAZ-SP quando não emitem a certidão). Mesmo desenho das
+ * páginas de texto do PDF único. Usado no link do cliente do rquatro.
+ */
+export async function pdfDeHtml(bytes: Uint8Array, titulo: string): Promise<Uint8Array> {
+  const out = await PDFDocument.create();
+  out.setTitle(limparTexto(titulo));
+  const reg = await out.embedFont(StandardFonts.Helvetica);
+  const bold = await out.embedFont(StandardFonts.HelveticaBold);
+  const paginas = paginarTexto(htmlParaTexto(bytes), reg);
+  paginas.forEach((linhas, i) => {
+    const p = out.addPage([W, H]);
+    p.drawText(cortar(titulo, bold, 10, W - 2 * M), { x: M, y: H - M - 4, size: 10, font: bold, color: ESCURO });
+    p.drawText('Cópia em texto do comprovante salvo pelo sistema (o site de origem não gera PDF).', {
+      x: M,
+      y: H - M - 18,
+      size: 7.5,
+      font: reg,
+      color: CINZA,
+    });
+    p.drawLine({ start: { x: M, y: H - M - 26 }, end: { x: W - M, y: H - M - 26 }, thickness: 0.6, color: LINHA });
+    let y = H - M - 26 - TXT_TOPO;
+    for (const l of linhas) {
+      if (l) p.drawText(l, { x: M, y, size: TXT_SIZE, font: reg, color: ESCURO });
+      y -= TXT_LH;
+    }
+    if (paginas.length > 1) rodape(p, reg, `${i + 1}/${paginas.length}`);
+  });
+  return out.save();
+}
+
+
 function rodape(p: PDFPage, font: PDFFont, txt: string) {
   p.drawText(limparTexto(txt), { x: W - M - font.widthOfTextAtSize(txt, 8), y: 24, size: 8, font, color: CINZA });
 }
