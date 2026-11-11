@@ -13,6 +13,7 @@ export function Marca({ tamanho = 'md' }: { tamanho?: 'md' | 'lg' }) {
 export function Cabecalho({
   base,
   unidade,
+  logo,
   nome,
   superadmin,
   papel,
@@ -20,6 +21,8 @@ export function Cabecalho({
 }: {
   base: string;
   unidade: string | null;
+  /** logo da unidade (Minha unidade); aparece ao lado da marca */
+  logo?: string | null;
   nome: string | null;
   superadmin: boolean;
   papel?: string;
@@ -28,7 +31,14 @@ export function Cabecalho({
   return (
     <header className="border-b border-slate-200 bg-white">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-        <Link href={`${base}/`} aria-label="Início">
+        <Link href={`${base}/`} aria-label="Início" className="flex items-center gap-3">
+          {logo ? (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={logo} alt={unidade || 'Logo da unidade'} className="h-9 w-auto max-w-[140px] object-contain" />
+              <span className="h-6 w-px bg-slate-200" />
+            </>
+          ) : null}
           <Marca />
         </Link>
         <nav className="flex flex-wrap gap-4 text-sm font-medium text-slate-600">
