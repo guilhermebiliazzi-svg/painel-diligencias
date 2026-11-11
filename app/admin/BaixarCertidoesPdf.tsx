@@ -18,7 +18,14 @@ type Resultado = {
   tamanho_mb: number;
 };
 
-export function BaixarCertidoesPdf({ diligenciaId }: { diligenciaId: string }) {
+export function BaixarCertidoesPdf({
+  diligenciaId,
+  endpoint = '/api/adm/diligencia-pdf',
+}: {
+  diligenciaId: string;
+  /** prefixo da rota (o rquatro usa /api/r4/diligencia-pdf) */
+  endpoint?: string;
+}) {
   const [gerando, setGerando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [res, setRes] = useState<Resultado | null>(null);
@@ -28,7 +35,7 @@ export function BaixarCertidoesPdf({ diligenciaId }: { diligenciaId: string }) {
     setErro(null);
     setRes(null);
     try {
-      const r = await fetch(`/api/adm/diligencia-pdf/${diligenciaId}`, { method: 'POST' });
+      const r = await fetch(`${endpoint}/${diligenciaId}`, { method: 'POST' });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || `Falha (HTTP ${r.status}).`);
       setRes(d as Resultado);
