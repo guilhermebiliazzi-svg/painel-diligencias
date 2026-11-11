@@ -26,6 +26,8 @@ import { EnviarArquivoCard } from '@/app/admin/EnviarArquivoCard';
 import { btn } from '@/app/admin/botoes';
 import { Cabecalho } from '../../_ui';
 import { exigirR4, r4Admin } from '@/lib/r4/supabase';
+import { corretorPodeVer } from '@/lib/r4/diligencia';
+import { CorretoresDiligencia } from './corretores';
 import { linhasAdminDoMotor, registrarCobranca, type CertidaoMotor } from '@/lib/r4/motor';
 import {
   r4CriarExtra,
@@ -684,10 +686,23 @@ export default async function DiligenciaR4({
   const ehSuper = usuario.papel === 'superadmin';
   const adm = r4Admin();
 
-  let q = adm.from('diligencias').select('id,unidade_id,titulo,status,motor_id,erro,dados,criado_em').eq('id', id);
+  let q = adm.from('diligencias').select('id,unidade_id,titulo,status,motor_id,erro,dados,criado_em,criado_por').eq('id', id);
   if (!ehSuper) q = q.eq('unidade_id', usuario.unidade_id);
   const { data: dil } = await q.maybeSingle();
   if (!dil) notFound();
+  // corretor: só a que cadastrou ou a que o responsável liberou para ele
+  if (!(await corretorPodeVer(usuario, dil))) notFound();
+  const gerirAcesso = usuario.papel === 'admin' || ehSuper;
+  let equipe: { id: string; nome: string | null; email: string; ativo: boolean }[] = [];
+  let liberados: string[] = [];
+  if (gerirAcesso) {
+    const [{ data: eq }, { data: lib }] = await Promise.all([
+      adm.from('usuarios').select('id,nome,email,ativo').eq('unidade_id', dil.unidade_id).eq('papel', 'corretor').order('nome'),
+      adm.from('diligencia_corretores').select('usuario_id').eq('diligencia_id', dil.id),
+    ]);
+    equipe = (eq || []) as typeof equipe;
+    liberados = (lib || []).map((x) => x.usuario_id as string);
+  }
 
   const rows = dil.motor_id ? await linhasAdminDoMotor<AdminRow>(dil.motor_id) : [];
   // cobrança: toda certidão emitida pelo sistema (inclusive as ocultas ao cliente)
@@ -763,6 +778,12 @@ export default async function DiligenciaR4({
             <p className="mt-2 text-xs text-slate-500">
               Reemitir uma certidão conta como nova emissão ({precoReemissao}) quando o PDF novo chegar. Arquivos que você envia ou vincula não são cobrados.
             </p>
+          )}
+          {gerirAcesso && (
+            <div className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Corretores que podem ver esta diligência</p>
+              <CorretoresDiligencia diligenciaId={id} equipe={equipe} marcados={liberados} criadoPor={dil.criado_por ?? null} />
+            </div>
           )}
         </header>
 
