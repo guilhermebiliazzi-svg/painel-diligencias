@@ -12,6 +12,9 @@ import { r4Admin } from '@/lib/r4/supabase';
 const N8N = (process.env.N8N_WEBHOOK_BASE || 'https://villejds.app.n8n.cloud/webhook').replace(/\/+$/, '');
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Conta Google do motor: a unidade compartilha a pasta dela com este e-mail (Editor). */
+export const CONTA_DRIVE_MOTOR = process.env.R4_CONTA_DRIVE || 'guilhermebiliazzi@remax.com.br';
+
 /** Extrai o ID da pasta de um link do Google Drive (ou aceita o próprio ID). */
 export function idDaPastaDrive(texto: string): string | null {
   const t = String(texto || '').trim();
@@ -182,4 +185,26 @@ export async function registrarCobranca(
     .upsert(linhas, { onConflict: 'certidao_motor_id', ignoreDuplicates: true });
   if (error) console.error('[r4 registrarCobranca]', error.message);
   return linhas.length;
+}
+
+export type VerificacaoPasta = { ok: boolean; nome?: string; drive_compartilhado?: boolean; erro?: string };
+
+/** Pergunta ao motor (fluxo R4-02) se a conta dele consegue criar arquivos na pasta. */
+export async function verificarPastaDrive(pasta: string): Promise<VerificacaoPasta> {
+  const segredo = await segredoMotor();
+  if (!segredo) return { ok: false, erro: 'O motor do rquatro ainda não foi configurado. Avise a administração do rquatro.' };
+  try {
+    const r = await fetch(`${N8N}/r4-verificar-pasta`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-r4-secret': segredo },
+      body: JSON.stringify({ pasta }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(30_000),
+    });
+    const j = (await r.json().catch(() => null)) as VerificacaoPasta | null;
+    if (!j) return { ok: false, erro: `Não consegui conferir a pasta agora (${r.status}). Tente de novo.` };
+    return j;
+  } catch (e) {
+    return { ok: false, erro: `Não consegui conferir a pasta agora: ${(e as Error).message}` };
+  }
 }
