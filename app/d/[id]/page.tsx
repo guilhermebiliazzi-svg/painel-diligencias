@@ -199,6 +199,7 @@ function styleFor(situacao: string): Style {
 function rotuloSituacao(situacao: string): string {
   // Rotulo mais claro para "Positiva"
   if (situacao === 'Positiva') return 'Constam ocorrências';
+  if (situacao === 'aguardando_match') return 'Em conferência';
   return situacao;
 }
 
