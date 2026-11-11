@@ -23,7 +23,7 @@ export default async function NovaDiligenciaR4() {
 
   return (
     <>
-      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} nome={usuario.nome} superadmin={ehSuper} />
+      <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} nome={usuario.nome} superadmin={ehSuper} papel={usuario.papel} />
       <main className="mx-auto max-w-3xl px-4 py-8">
         <Link href={`${base}/diligencias`} className="text-sm text-slate-500 hover:text-slate-800">← Diligências</Link>
         <h1 className="mt-2 text-2xl font-semibold">Nova diligência</h1>
@@ -33,7 +33,14 @@ export default async function NovaDiligenciaR4() {
         <div className="mt-6">
           {semPasta || (unidades && unidades.length === 0) ? (
             <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              A pasta do Google Drive da unidade ainda não foi configurada. Fale com a administração do rquatro para liberar.
+              A pasta do Google Drive da unidade ainda não foi configurada.{' '}
+              {usuario.papel === 'admin' ? (
+                <Link href={`${base}/minha-unidade`} className="font-semibold underline">Configurar em Minha unidade</Link>
+              ) : ehSuper ? (
+                <Link href={`${base}/unidades`} className="font-semibold underline">Configurar em Unidades</Link>
+              ) : (
+                'Peça ao responsável da sua unidade para configurar.'
+              )}
             </p>
           ) : (
             <FormularioNova unidades={unidades} />
