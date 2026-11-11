@@ -40,6 +40,7 @@ export async function POST(req: Request) {
     .from('diligencias')
     .select('id,endereco,criado_em')
     .gte('criado_em', desde)
+    .or('dados_completos->>origem.is.null,dados_completos->>origem.neq.rquatro')
     .order('criado_em', { ascending: false })
     .limit(50);
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
