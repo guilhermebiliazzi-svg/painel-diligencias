@@ -574,14 +574,14 @@ export default function FechamentoMes() {
 
 const CSS = `
 .vj-delta{display:inline-block;margin-left:6px;font-size:11px;font-weight:700;white-space:nowrap}
-.vj-delta-up{color:#DC1C2E}
+.vj-delta-up{color:#FF1200}
 .vj-delta-down{color:#0a7d32}
 .vj-delta-eq{color:#8a93a3;font-weight:600}
 .vj-delta-forte{padding:1px 6px;border-radius:999px;background:#fdecec}
 .vj-delta-down.vj-delta-forte{background:#e9f7ee}
-.vj-destoa-dot{color:#DC1C2E;font-weight:800;margin-right:6px;cursor:help}
-.vj-destoa-resumo{display:inline-block;margin-left:10px;font-size:12px;font-weight:700;color:#DC1C2E;background:#fdecec;padding:2px 8px;border-radius:999px}
-.vj-wrap{--azul:#003DA5;--azul-esc:#00286b;--verm:#DC1C2E;--bg:#F4F6FA;--card:#fff;--linha:#E4E9F2;--txt:#16233B;--mut:#5A6B85;--ok:#0F7B4F;--wait:#B8860B;
+.vj-destoa-dot{color:#FF1200;font-weight:800;margin-right:6px;cursor:help}
+.vj-destoa-resumo{display:inline-block;margin-left:10px;font-size:12px;font-weight:700;color:#FF1200;background:#fdecec;padding:2px 8px;border-radius:999px}
+.vj-wrap{--azul:#0043FF;--azul-esc:#0C2749;--verm:#FF1200;--bg:#F7F5EE;--card:#fff;--linha:#E6E3DA;--txt:#0C2749;--mut:#5F6B7A;--ok:#0F7B4F;--wait:#B8860B;
   min-height:100vh;background:var(--bg);color:var(--txt);
   font-family:Archivo,"Segoe UI",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;}
 .vj-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 28px;background:var(--azul);color:#fff}
@@ -600,10 +600,10 @@ const CSS = `
 .vj-card{background:var(--card);border:1px solid var(--linha);border-radius:14px;padding:22px;margin-bottom:20px;box-shadow:0 1px 2px rgba(16,35,59,.04)}
 .vj-avisos{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
 .vj-aviso{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:10px;font-size:14px;border:1px solid}
-.vj-aviso-vermelho{background:#FDECEE;border-color:#F5C2C7;color:#8B1A24}
+.vj-aviso-vermelho{background:#FDECEE;border-color:#F5C2C7;color:#AA1120}
 .vj-aviso-amarelo{background:#FFF8E6;border-color:#F5E1A8;color:#7A5B00}
 .vj-aviso-tag{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:3px 9px;border-radius:20px;white-space:nowrap}
-.vj-aviso-vermelho .vj-aviso-tag{background:#DC1C2E;color:#fff}
+.vj-aviso-vermelho .vj-aviso-tag{background:#FF1200;color:#fff}
 .vj-aviso-amarelo .vj-aviso-tag{background:#B8860B;color:#fff}
 .vj-aviso-txt{flex:1;line-height:1.4}
 .vj-aviso-data{font-variant-numeric:tabular-nums;font-weight:600;font-size:13px;white-space:nowrap;opacity:.85}
@@ -670,7 +670,7 @@ const CSS = `
 .vj-msgemissao{background:#EAF0FA;border:1px solid #C9D8F5;color:var(--azul);padding:10px 14px;border-radius:9px;font-size:14px;margin:10px 0}
 .vj-msgprog{background:#FBF3E2;border-color:#F0DFB8;color:#6B5410;font-weight:600}
 .vj-erro{background:#FDECEE;border:1px solid #F6C6CC;color:#9B1420;padding:11px 14px;border-radius:9px;font-size:14px;margin-bottom:16px}
-.vj-load{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--azul);color:#fff;padding:10px 20px;border-radius:24px;font-size:14px;box-shadow:0 6px 20px rgba(0,61,165,.3);max-width:92vw;text-align:center}
+.vj-load{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--azul);color:#fff;padding:10px 20px;border-radius:24px;font-size:14px;box-shadow:0 6px 20px rgba(0,67,255,.3);max-width:92vw;text-align:center}
 @media (max-width:720px){.vj-nums{grid-template-columns:1fr 1fr}.vj-end{display:none}}
 
 /* ---- mobile: tabelas viram cartões empilhados (sem scroll lateral) ---- */
