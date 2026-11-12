@@ -3,6 +3,7 @@ import { Cabecalho } from '../_ui';
 import { exigirR4, r4Admin } from '@/lib/r4/supabase';
 import { resumoDoMotor } from '@/lib/r4/motor';
 import { diligenciasLiberadas } from '@/lib/r4/diligencia';
+import { r4Arquivar, r4Desarquivar } from './actions';
 
 export const metadata = { title: 'Diligências' };
 export const dynamic = 'force-dynamic';
@@ -13,16 +14,20 @@ const STATUS: Record<string, { t: string; c: string }> = {
   erro: { t: 'Não iniciada', c: 'bg-red-100 text-red-700' },
 };
 
-export default async function DiligenciasR4() {
+export default async function DiligenciasR4({ searchParams }: { searchParams: Promise<{ arq?: string }> }) {
   const { usuario, base } = await exigirR4({ ferramenta: 'diligencia' });
+  const arquivadas = (await searchParams)?.arq === '1';
+  // arquivar/desarquivar: só o responsável da unidade (igual ao painel da Ville)
+  const podeArquivar = usuario.papel === 'admin' || usuario.papel === 'superadmin';
   const ehSuper = usuario.papel === 'superadmin';
   const adm = r4Admin();
   let q = adm
     .from('diligencias')
-    .select('id,titulo,status,motor_id,erro,criado_em,unidade_id,unidades(nome)')
+    .select('id,titulo,status,motor_id,erro,criado_em,unidade_id,arquivada_em,unidades(nome)')
     .order('criado_em', { ascending: false })
     .limit(200);
   if (!ehSuper) q = q.eq('unidade_id', usuario.unidade_id);
+  q = arquivadas ? q.not('arquivada_em', 'is', null) : q.is('arquivada_em', null);
   // corretor: só as que ele cadastrou e as que o responsável liberou para ele
   if (usuario.papel === 'corretor') {
     const liberadas = await diligenciasLiberadas(usuario.id);
@@ -43,8 +48,23 @@ export default async function DiligenciasR4() {
           </Link>
         </div>
 
+        <div className="mt-4 flex gap-1 border-b border-slate-200 text-sm">
+          <Link
+            href={`${base}/diligencias`}
+            className={`-mb-px border-b-2 px-3 py-2 font-semibold ${!arquivadas ? 'border-[#0F1B2D] text-[#0F1B2D]' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+          >
+            Ativas
+          </Link>
+          <Link
+            href={`${base}/diligencias?arq=1`}
+            className={`-mb-px border-b-2 px-3 py-2 font-semibold ${arquivadas ? 'border-[#0F1B2D] text-[#0F1B2D]' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+          >
+            Arquivadas
+          </Link>
+        </div>
+
         {lista.length === 0 ? (
-          <p className="mt-8 text-sm text-slate-500">Nenhuma diligência ainda.</p>
+          <p className="mt-8 text-sm text-slate-500">{arquivadas ? 'Nenhuma diligência arquivada.' : 'Nenhuma diligência ainda.'}</p>
         ) : (
           <ul className="mt-6 space-y-3">
             {lista.map((d) => {
@@ -81,6 +101,14 @@ export default async function DiligenciasR4() {
                       <p className="mt-2 text-xs text-red-700">{d.erro}</p>
                     ) : null}
                   </Link>
+                  {podeArquivar && (
+                    <form action={arquivadas ? r4Desarquivar : r4Arquivar} className="mt-1 flex justify-end pr-2">
+                      <input type="hidden" name="diligencia_id" value={d.id} />
+                      <button className="text-xs font-semibold text-slate-500 underline hover:text-slate-800">
+                        {arquivadas ? '↩ Desarquivar' : 'Arquivar'}
+                      </button>
+                    </form>
+                  )}
                 </li>
               );
             })}
