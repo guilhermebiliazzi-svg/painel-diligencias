@@ -73,7 +73,7 @@ var ID=${JSON.stringify(id)};
 window.__EDIT_ID=ID; // edição: não marca o corretor como criador
 function iniciar(){
   try{var h=document.querySelector('.card h1');if(h)h.textContent='Editar diligência';
-  var sub=document.querySelector('.card .subtitle');if(sub)sub.textContent='RE/MAX Ville — confira e ajuste os dados do imóvel e dos vendedores';
+  var sub=document.querySelector('.card .subtitle');if(sub)sub.textContent='REMAX Ville — confira e ajuste os dados do imóvel e dos vendedores';
   var b=document.getElementById('busca-dilig');var n=b;while(n&&n.parentElement&&!(n.querySelector&&n.querySelector('h2')))n=n.parentElement;
   if(n&&b){for(var i=0;i<n.children.length;i++){var c=n.children[i];if(c.id!=='edit-aviso')c.style.display='none';}n.style.padding='0';n.style.border='0';n.style.background='transparent';}}catch(e){}
   if(typeof carregarDiligencia==='function')carregarDiligencia(ID);
