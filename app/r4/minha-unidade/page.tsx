@@ -48,7 +48,7 @@ export default async function MinhaUnidadeR4() {
                 href={`https://drive.google.com/drive/folders/${pasta}`}
                 target="_blank"
                 rel="noreferrer"
-                className="ml-auto text-xs font-semibold text-[#0F1B2D] underline"
+                className="ml-auto text-xs font-semibold text-[#0C2749] underline"
               >
                 Abrir pasta ↗
               </a>
