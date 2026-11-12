@@ -12,7 +12,7 @@
 //      aguardando_email / em_processamento com número de pedido, pedido nos últimos 60 dias
 //  WF-16 eproc (TJSP 1º grau) — 03, 09, 15 e 21 h UTC (00, 06, 12 e 18 h de Brasília)
 //      em_processamento / erro_infosimples com número de pedido, até 12 tentativas,
-//      criada há menos de 7 dias, espera 1 h × 2^tentativas (máx. 64 h)
+//      criada há menos de 7 dias, espera 1 h, 2 h, 4 h e depois 6 h (teto desde 12/11)
 //
 // Se algum desses agendamentos mudar no n8n, este arquivo precisa acompanhar.
 import { pool } from '@/lib/db';
@@ -88,7 +88,7 @@ export function calcularRetentativa(c: Linha, agora = new Date()): Retentativa |
     c.tipo === 'tjsp_civel_1g' && temPedido && ['em_processamento', 'erro_infosimples'].includes(st) &&
     tentObter < 12 && criado.getTime() > agora.getTime() - 7 * 24 * H && atu
   ) {
-    const espera = H * Math.pow(2, Math.min(tentObter, 6));
+    const espera = H * Math.min(Math.pow(2, Math.min(tentObter, 6)), 6); // 12/11: dobra até travar em 6 h
     const desde = max(agora, new Date(atu.getTime() + espera));
     if (desde.getTime() < criado.getTime() + 7 * 24 * H) cands.push(proximoDisparo(desde, 0, wf16Hora));
   }
