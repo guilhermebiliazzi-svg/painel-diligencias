@@ -28,6 +28,7 @@ import { Cabecalho } from '../../_ui';
 import { exigirR4, r4Admin } from '@/lib/r4/supabase';
 import { corretorPodeVer } from '@/lib/r4/diligencia';
 import { CorretoresDiligencia } from './corretores';
+import { retentativasDaDiligencia, type Retentativa } from '@/lib/retentativa';
 import { linhasAdminDoMotor, registrarCobranca, type CertidaoMotor } from '@/lib/r4/motor';
 import {
   r4CriarExtra,
@@ -81,6 +82,8 @@ type AdminRow = {
   // extras
   is_extra: boolean;
   manual: boolean | null;
+  // v3: última/próxima tentativa (calculada no servidor)
+  ret?: Retentativa;
 };
 
 // Tipos de CND do TJSP obtidas via e-SAJ (as que chegam por e-mail com link de
@@ -249,9 +252,21 @@ function formatDateTime(iso: string | null): string {
 }
 
 // v2: bloco de log de processamento. So aparece em cards sem PDF vinculado.
+// v3 (12/11): mostra a última e a próxima tentativa automática (lib/retentativa.ts).
+function ProximaTentativa({ r }: { r: AdminRow }) {
+  const ret = r.ret;
+  if (!ret) return null;
+  return (
+    <div className="mt-0.5 leading-snug">
+      <span className="font-medium">Próxima tentativa:</span>{' '}
+      {ret.proxima ? `${formatDateTime(ret.proxima)} (automática)` : ret.semProxima}
+    </div>
+  );
+}
+
 function LogProcessamento({ r }: { r: AdminRow }) {
   const tentativas = (r.cs_tentativas ?? 0) + (r.cs_tentativas_obter ?? 0);
-  const dataAtu = formatDateTime(r.cs_atualizado_em);
+  const dataAtu = formatDateTime(r.ret?.ultima ?? r.cs_atualizado_em);
   const erro = r.cs_erro?.trim();
 
   // Caso 1: tem erro registrado
@@ -262,6 +277,7 @@ function LogProcessamento({ r }: { r: AdminRow }) {
           ⚠ Última tentativa: {dataAtu || 'data desconhecida'}
         </div>
         <div className="mt-0.5 leading-snug break-words">{erro}</div>
+        <ProximaTentativa r={r} />
       </div>
     );
   }
@@ -271,10 +287,11 @@ function LogProcessamento({ r }: { r: AdminRow }) {
     return (
       <div className="rounded-md border border-slate-200 bg-slate-50/60 px-2 py-1.5 text-xs text-slate-600">
         <span className="font-medium">⏳ Em processamento.</span>{' '}
-        {dataAtu && <>Última atualização: {dataAtu}</>}
+        {dataAtu && <>Última tentativa: {dataAtu}</>}
         {r.cs_numero_pedido && (
           <> · pedido <span className="font-mono">{r.cs_numero_pedido}</span></>
         )}
+        <ProximaTentativa r={r} />
       </div>
     );
   }
@@ -283,6 +300,7 @@ function LogProcessamento({ r }: { r: AdminRow }) {
   return (
     <div className="rounded-md border border-slate-200 bg-slate-50/60 px-2 py-1.5 text-xs text-slate-500">
       Aguardando primeiro processamento.
+      <ProximaTentativa r={r} />
     </div>
   );
 }
@@ -705,6 +723,10 @@ export default async function DiligenciaR4({
   }
 
   const rows = dil.motor_id ? await linhasAdminDoMotor<AdminRow>(dil.motor_id) : [];
+  if (dil.motor_id && rows.length) {
+    const ret = await retentativasDaDiligencia(dil.motor_id);
+    rows.forEach((r) => (r.ret = ret.get(r.certidao_id)));
+  }
   // cobrança: toda certidão emitida pelo sistema (inclusive as ocultas ao cliente)
   if (rows.length) await registrarCobranca({ id: dil.id, unidade_id: dil.unidade_id }, rows as unknown as CertidaoMotor[]);
 
