@@ -40,7 +40,7 @@ type Boleto = {
 const dataBR = (d?: string | null) => (d ? d.slice(0, 10).split("-").reverse().join("/") : "");
 // Situação do boleto do inquilino: pago, a receber, em atraso, cancelado ou não emitido.
 function situacaoBoleto(b?: Boleto | null): { pago: boolean; texto: string; cor: string; fundo: string } {
-  if (!b) return { pago: false, texto: "Boleto não emitido para esta competência", cor: "#5A6B85", fundo: "#F1F4F9" };
+  if (!b) return { pago: false, texto: "Boleto não emitido para esta competência", cor: "#5F6B7A", fundo: "#F1F4F9" };
   const sit = String(b.situacao_inter || "").toUpperCase();
   const valor = Number(b.valor_recebido ?? b.valor_total_pago ?? 0);
   if (b.status_pgto === "pago" || sit === "RECEBIDO" || sit === "MARCADO_RECEBIDO") {
@@ -48,10 +48,10 @@ function situacaoBoleto(b?: Boleto | null): { pago: boolean; texto: string; cor:
     const manual = sit === "MARCADO_RECEBIDO" ? " (baixa manual)" : "";
     return { pago: true, texto: `Pago${quando ? ` em ${quando}` : ""}${valor ? ` · ${brl(valor)}` : ""}${manual}`, cor: "#0F7B4F", fundo: "#EAF7F0" };
   }
-  if (sit === "CANCELADO") return { pago: false, texto: "Boleto cancelado", cor: "#5A6B85", fundo: "#F1F4F9" };
+  if (sit === "CANCELADO") return { pago: false, texto: "Boleto cancelado", cor: "#5F6B7A", fundo: "#F1F4F9" };
   const venc = b.vencimento ? new Date(b.vencimento + "T23:59:59") : null;
   if (sit === "ATRASADO" || (venc && venc.getTime() < Date.now()))
-    return { pago: false, texto: `Em atraso · venceu ${dataBR(b.vencimento)}`, cor: "#8B1A24", fundo: "#FDECEE" };
+    return { pago: false, texto: `Em atraso · venceu ${dataBR(b.vencimento)}`, cor: "#AA1120", fundo: "#FDECEE" };
   return { pago: false, texto: `Aguardando pagamento · vence ${dataBR(b.vencimento)}`, cor: "#8A5A00", fundo: "#FFF6E0" };
 }
 
@@ -351,7 +351,7 @@ export default function Repasse() {
 }
 
 const CSS = `
-.vj-wrap{--azul:#003DA5;--verm:#DC1C2E;--bg:#F4F6FA;--card:#fff;--linha:#E4E9F2;--txt:#16233B;--mut:#5A6B85;min-height:100vh;background:var(--bg);color:var(--txt);font-family:Inter,system-ui,sans-serif}
+.vj-wrap{--azul:#0043FF;--verm:#FF1200;--bg:#F7F5EE;--card:#fff;--linha:#E6E3DA;--txt:#0C2749;--mut:#5F6B7A;min-height:100vh;background:var(--bg);color:var(--txt);font-family:Montserrat,Arial,system-ui,sans-serif}
 .vj-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 28px;background:var(--azul);color:#fff}
 .vj-mark{font-family:Archivo,sans-serif;font-weight:800;color:#fff;text-decoration:none}.vj-mark span{font-weight:400}
 .vj-crumb{font-size:14px;opacity:.9}
@@ -384,10 +384,10 @@ const CSS = `
 .vj-gerar{background:var(--verm);color:#fff;width:100%}
 .vj-gerar:disabled{opacity:.5;cursor:not-allowed}
 .vj-acoes{margin-top:4px}
-.vj-erro{border-color:#F5C2C7;background:#FDECEE;color:#8B1A24}
+.vj-erro{border-color:#F5C2C7;background:#FDECEE;color:#AA1120}
 .vj-ok{border-color:#BCE3D0;background:#EAF7F0;color:#0F7B4F}
 .vj-cab b{display:block}
 .vj-bol{display:inline-block;margin-top:2px;padding:4px 10px;border-radius:999px;font-weight:700;font-size:14px}
-.vj-link-recibo{color:#003DA5;font-weight:700;text-decoration:underline}
+.vj-link-recibo{color:#0043FF;font-weight:700;text-decoration:underline}
 @media (max-width:640px){.vj-sel{flex-direction:column;flex-wrap:nowrap;align-items:stretch}.vj-sel>*{min-width:0!important;max-width:100%}.vj-vlr{width:110px}}
 `;
