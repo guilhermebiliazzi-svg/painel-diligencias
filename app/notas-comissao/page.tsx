@@ -2022,7 +2022,7 @@ function FormOperacao({ operacoes, onCriou }: { operacoes: Operacao[]; onCriou: 
 }
 
 const CSS = `
-.vj-wrap{--azul:#003DA5;--verm:#DC1C2E;--bg:#F4F6FA;--card:#fff;--linha:#E4E9F2;--txt:#16233B;--mut:#5A6B85;min-height:100vh;background:var(--bg);color:var(--txt);font-family:Inter,system-ui,sans-serif}
+.vj-wrap{--azul:#0043FF;--verm:#FF1200;--bg:#F7F5EE;--card:#fff;--linha:#E6E3DA;--txt:#0C2749;--mut:#5F6B7A;min-height:100vh;background:var(--bg);color:var(--txt);font-family:Montserrat,Arial,system-ui,sans-serif}
 .vj-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 28px;background:var(--azul);color:#fff}
 .vj-mark{font-weight:800;color:#fff;text-decoration:none}.vj-mark span{color:#BFD3FF;font-weight:600}
 .vj-crumb{font-size:14px;opacity:.9}
@@ -2040,20 +2040,20 @@ const CSS = `
 .vj-primary{background:var(--azul);color:#fff}
 .vj-gerar{background:var(--verm);color:#fff;width:100%}
 .vj-btn:disabled{opacity:.5;cursor:not-allowed}
-.vj-erro{border-color:#F5C2C7;background:#FDECEE;color:#8B1A24}
+.vj-erro{border-color:#F5C2C7;background:#FDECEE;color:#AA1120}
 .vj-vazio{color:var(--mut);text-align:center}
 .vj-boleto-cab{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:10px}
 .vj-tag{display:inline-block;background:#EEF2FB;color:var(--azul);font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
 .vj-endereco{display:block;font-size:16px}
 .vj-sub-id{display:block;font-size:12px;color:var(--mut);margin-top:3px}
-.vj-erro-txt{display:block;font-size:12px;color:#8B1A24;margin-top:3px}
+.vj-erro-txt{display:block;font-size:12px;color:#AA1120;margin-top:3px}
 .vj-form{display:flex;flex-direction:column;gap:12px;margin-top:12px}
 .vj-f{display:flex;flex-direction:column;gap:6px;flex:1;min-width:150px}
 .vj-f>span{font-size:12px;font-weight:600;color:var(--mut)}
 .vj-f input,.vj-f select,.vj-f textarea{font:inherit;padding:9px 11px;border:1px solid var(--linha);border-radius:8px;background:#fff;width:100%;box-sizing:border-box}
 .vj-f textarea{resize:vertical;line-height:1.5}
 .vj-frow{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
-.vj-erro-in{background:#FDECEE;border:1px solid #F5C2C7;color:#8B1A24;padding:8px 11px;border-radius:8px;font-size:13px}
+.vj-erro-in{background:#FDECEE;border:1px solid #F5C2C7;color:#AA1120;padding:8px 11px;border-radius:8px;font-size:13px}
 .vj-aviso-in{background:#FFF7E6;border:1px solid #FADFA0;color:#8a6d00;padding:8px 11px;border-radius:8px;font-size:13px;font-weight:600}
 .vj-ok-in{background:#EAF7F0;border:1px solid #BCE3D0;color:#0F7B4F;padding:8px 11px;border-radius:8px;font-size:13px}
 .vj-badge{margin:0;font-weight:700;font-size:14px}
@@ -2071,7 +2071,7 @@ const CSS = `
 .vj-chip i{opacity:.7;font-style:normal}
 .vj-soma{font-weight:700;padding:9px 0}
 .vj-soma em{font-weight:500;font-style:normal;color:var(--mut);font-size:13px}
-.vj-soma.ruim{color:#8B1A24}
+.vj-soma.ruim{color:#AA1120}
 .vj-nota{display:flex;justify-content:space-between;align-items:center;gap:12px;border:1px solid var(--linha);border-radius:11px;padding:12px 14px;margin-top:10px;background:#F8FAFD}
 .vj-nota.ok{border-color:#BCE3D0;background:#F3FAF6}
 /* v18: cancelada fica cinza e riscada — nao conta no mes nem na DIMOB */
@@ -2085,7 +2085,7 @@ const CSS = `
 .vj-comp td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .vj-comp tr.ville td{font-weight:700;color:var(--azul)}
 .vj-resumo-emitidas{font-size:13px;color:var(--mut);font-weight:600;margin-bottom:10px}
-.vj-resumo-emitidas em{font-style:normal;color:#8B1A24}
+.vj-resumo-emitidas em{font-style:normal;color:#AA1120}
 .vj-lote{border:1px solid var(--linha);border-radius:12px;padding:14px;background:#F8FAFD;display:flex;flex-direction:column;gap:12px;margin-bottom:12px}
 .vj-lote-item{background:#fff;border:1px solid var(--linha);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:10px}
 .vj-lote-item.incompleto{border-color:#FADFA0;background:#FFFDF7}
