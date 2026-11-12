@@ -769,7 +769,7 @@ export default async function DiligenciaR4({
       <Cabecalho base={base} unidade={usuario.unidade?.nome ?? null} logo={usuario.unidade?.logo_url ?? null} nome={usuario.nome} superadmin={ehSuper} papel={usuario.papel} ferramentas={usuario.ferramentas} />
       <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
         <header className="mb-6">
-          <Link href={`${base}/diligencias`} className="text-xs font-semibold uppercase tracking-wider text-[#0F1B2D] hover:underline">
+          <Link href={`${base}/diligencias`} className="text-xs font-semibold uppercase tracking-wider text-[#0C2749] hover:underline">
             ← Diligências
           </Link>
           {sp?.nova && dil.motor_id && (
