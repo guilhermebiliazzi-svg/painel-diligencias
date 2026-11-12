@@ -20,7 +20,10 @@ export default async function InicioR4({ searchParams }: { searchParams: Promise
   const competencia = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-01`;
   let qUso = adm.from('uso_mensal').select('unidade_id,certidoes,valor').eq('competencia', competencia);
   if (!ehSuper) qUso = qUso.eq('unidade_id', usuario.unidade_id);
-  const { data: uso } = await qUso;
+  const [{ data: uso }, { data: precoPadrao }] = await Promise.all([
+    qUso,
+    adm.from('precos').select('preco').eq('tipo', '*').maybeSingle(),
+  ]);
   const certidoes = (uso || []).reduce((a, r) => a + Number(r.certidoes || 0), 0);
   const valor = (uso || []).reduce((a, r) => a + Number(r.valor || 0), 0);
 
@@ -76,7 +79,7 @@ export default async function InicioR4({ searchParams }: { searchParams: Promise
           <div className="rounded-2xl border border-slate-200 bg-white p-5">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valor do mês</p>
             <p className="mt-2 text-3xl font-bold">{brl(valor)}</p>
-            <p className="mt-1 text-sm text-slate-500">R$ 2,00 por certidão emitida pelo sistema.</p>
+            <p className="mt-1 text-sm text-slate-500">{precoPadrao ? `${brl(Number(precoPadrao.preco))} por certidão emitida pelo sistema.` : 'Por certidão emitida pelo sistema.'}</p>
           </div>
           </>
           )}
