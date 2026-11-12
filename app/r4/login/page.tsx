@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { BotaoEnviar } from '../_botao-enviar';
 import { Marca } from '../_ui';
 import { r4Base, r4Configurado, r4Server, r4UsuarioAtual } from '@/lib/r4/supabase';
 
@@ -66,9 +67,7 @@ export default async function LoginR4({ searchParams }: { searchParams: Promise<
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
           </label>
-          <button className="mt-6 w-full rounded-lg bg-[#0F1B2D] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#1c2c45]">
-            Entrar
-          </button>
+          <BotaoEnviar carregando="Entrando…">Entrar</BotaoEnviar>
         </form>
         <p className="mt-6 text-center text-xs text-slate-400">
           Acesso liberado pela administração do rquatro para unidades parceiras.
