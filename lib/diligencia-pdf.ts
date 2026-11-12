@@ -33,12 +33,14 @@ export type ResultadoPdf = {
 const W = 595.28;
 const H = 841.89;
 const M = 48; // margem
-const AZUL = rgb(0.0, 0.32, 0.65);
+// 12/11: cores do Guia de Marca REMAX 2026 — Bridge Blue #0C2749, Primary Red #FF1200,
+// Dark Charcoal Gray #232323. Helvetica = equivalente da Arial (fonte de apoio do guia).
+const AZUL = rgb(12 / 255, 39 / 255, 73 / 255);
 const CINZA = rgb(0.42, 0.45, 0.5);
-const ESCURO = rgb(0.1, 0.12, 0.16);
-const VERMELHO = rgb(0.75, 0.1, 0.15);
+const ESCURO = rgb(35 / 255, 35 / 255, 35 / 255);
+const VERMELHO = rgb(1, 18 / 255, 0);
 const AMBAR = rgb(0.7, 0.45, 0.0);
-const LINHA = rgb(0.86, 0.88, 0.9);
+const LINHA = rgb(230 / 255, 227 / 255, 218 / 255);
 
 // Helvetica padrão usa WinAnsi: tira o que não dá para escrever (emoji etc.)
 export function limparTexto(s: string): string {
