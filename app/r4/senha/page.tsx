@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { BotaoEnviar } from '../_botao-enviar';
 import { Cabecalho } from '../_ui';
 import { exigirR4, r4Admin, r4Base, r4Server } from '@/lib/r4/supabase';
 
@@ -52,9 +53,7 @@ export default async function SenhaR4({ searchParams }: { searchParams: Promise<
             Repita a nova senha
             <input name="confirma" type="password" required minLength={8} autoComplete="new-password" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
           </label>
-          <button className="mt-6 w-full rounded-lg bg-[#0F1B2D] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#1c2c45]">
-            Salvar senha
-          </button>
+          <BotaoEnviar carregando="Salvando…">Salvar senha</BotaoEnviar>
         </form>
       </main>
     </>
