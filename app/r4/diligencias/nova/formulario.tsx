@@ -238,9 +238,12 @@ export function FormularioNova({
   unidades,
   base,
   equipe,
+  preco,
 }: {
   unidades: { id: string; nome: string }[] | null;
   base: string;
+  /** preço por certidão (tabela precos, '*'), já formatado */
+  preco: string | null;
   /** corretores da unidade (só para o responsável escolher quem vê) */
   equipe: { id: string; nome: string | null; email: string }[] | null;
 }) {
@@ -661,7 +664,7 @@ export function FormularioNova({
         >
           {enviando ? 'Iniciando as certidões… (pode levar até 1 minuto)' : envio || r?.ok ? 'Enviando documentos…' : 'Iniciar diligência'}
         </button>
-        <p className="text-xs text-slate-500">R$ 2,00 por certidão emitida pelo sistema. Certidões que falharem não são cobradas.</p>
+        <p className="text-xs text-slate-500">{preco ? `${preco} por certidão emitida pelo sistema. ` : ''}Certidões que falharem não são cobradas.</p>
       </div>
     </form>
   );
