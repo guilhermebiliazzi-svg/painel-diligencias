@@ -364,7 +364,7 @@ export default function EditarContrato() {
 }
 
 const CSS = `
-.vj-wrap{--azul:#003DA5;--azul-esc:#00286b;--verm:#DC1C2E;--bg:#F4F6FA;--card:#fff;--linha:#E4E9F2;--txt:#16233B;--mut:#5A6B85;--ok:#0F7B4F;min-height:100vh;background:var(--bg);color:var(--txt);font-family:Inter,system-ui,sans-serif}
+.vj-wrap{--azul:#0043FF;--azul-esc:#0C2749;--verm:#FF1200;--bg:#F7F5EE;--card:#fff;--linha:#E6E3DA;--txt:#0C2749;--mut:#5F6B7A;--ok:#0F7B4F;min-height:100vh;background:var(--bg);color:var(--txt);font-family:Montserrat,Arial,system-ui,sans-serif}
 .vj-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 28px;background:var(--azul);color:#fff}
 .vj-mark{font-family:Archivo,sans-serif;font-weight:800;letter-spacing:.5px;color:#fff;text-decoration:none}
 .vj-mark span{font-weight:400}
@@ -390,7 +390,7 @@ const CSS = `
 .vj-btn-salvar:hover:not(:disabled){background:#b8121f}
 .vj-btn-salvar:disabled{opacity:.5;cursor:not-allowed}
 .vj-foot{display:flex;justify-content:flex-end;margin-top:8px}
-.vj-erro{border-color:#F5C2C7;background:#FDECEE;color:#8B1A24}
+.vj-erro{border-color:#F5C2C7;background:#FDECEE;color:#AA1120}
 .vj-ok{border-color:#BCE3D0;background:#EAF7F0;color:var(--ok)}
 @media (max-width:640px){.vj-grid{grid-template-columns:1fr}.vj-head{flex-direction:column}}
 `;
