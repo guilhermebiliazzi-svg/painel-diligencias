@@ -11,6 +11,8 @@ export default async function NovaDiligenciaR4() {
   const { usuario, base } = await exigirR4({ ferramenta: 'diligencia' });
   const ehSuper = usuario.papel === 'superadmin';
 
+  const { data: pp } = await r4Admin().from('precos').select('preco,cobravel').eq('tipo', '*').maybeSingle();
+  const preco = pp?.cobravel ? Number(pp.preco).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : null;
   let unidades: { id: string; nome: string }[] | null = null;
   let semPasta = false;
   // responsável escolhe, já no cadastro, os corretores que podem ver a diligência
@@ -55,7 +57,7 @@ export default async function NovaDiligenciaR4() {
               )}
             </p>
           ) : (
-            <FormularioNova unidades={unidades} base={base} equipe={equipe} />
+            <FormularioNova unidades={unidades} base={base} equipe={equipe} preco={preco} />
           )}
         </div>
       </main>
