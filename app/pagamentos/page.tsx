@@ -332,7 +332,7 @@ function LinhaBoleto({ item, competencia }: { item: Item; competencia: string })
 }
 
 const CSS = `
-.vj-wrap{--azul:#003DA5;--verm:#DC1C2E;--bg:#F4F6FA;--card:#fff;--linha:#E4E9F2;--txt:#16233B;--mut:#5A6B85;min-height:100vh;background:var(--bg);color:var(--txt);font-family:Inter,system-ui,sans-serif}
+.vj-wrap{--azul:#0043FF;--verm:#FF1200;--bg:#F7F5EE;--card:#fff;--linha:#E6E3DA;--txt:#0C2749;--mut:#5F6B7A;min-height:100vh;background:var(--bg);color:var(--txt);font-family:Montserrat,Arial,system-ui,sans-serif}
 .vj-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 28px;background:var(--azul);color:#fff}
 .vj-mark{font-weight:800;color:#fff;text-decoration:none}.vj-mark span{color:#BFD3FF;font-weight:600}
 .vj-crumb{font-size:14px;opacity:.9}
@@ -349,7 +349,7 @@ const CSS = `
 .vj-primary{background:var(--azul);color:#fff}
 .vj-gerar{background:var(--verm);color:#fff;width:100%}
 .vj-btn:disabled{opacity:.5;cursor:not-allowed}
-.vj-erro{border-color:#F5C2C7;background:#FDECEE;color:#8B1A24}
+.vj-erro{border-color:#F5C2C7;background:#FDECEE;color:#AA1120}
 .vj-vazio{color:var(--mut);text-align:center}
 .vj-boleto-cab{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:10px}
 .vj-tag{display:inline-block;background:#EEF2FB;color:var(--azul);font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
@@ -366,14 +366,14 @@ const CSS = `
 .vj-lida{color:#0F7B4F;font-weight:600}
 .vj-f input{font:inherit;padding:9px 11px;border:1px solid var(--linha);border-radius:8px;background:#fff}
 .vj-frow{display:flex;gap:12px;flex-wrap:wrap}
-.vj-erro-in{background:#FDECEE;border:1px solid #F5C2C7;color:#8B1A24;padding:8px 11px;border-radius:8px;font-size:13px;margin-bottom:10px}
+.vj-erro-in{background:#FDECEE;border:1px solid #F5C2C7;color:#AA1120;padding:8px 11px;border-radius:8px;font-size:13px;margin-bottom:10px}
 .vj-aviso-in{background:#FFF7E6;border:1px solid #FADFA0;color:#8a6d00;padding:8px 11px;border-radius:8px;font-size:13px;margin-bottom:10px;font-weight:600}
 .vj-ok-in{background:#EAF7F0;border:1px solid #BCE3D0;color:#0F7B4F;padding:8px 11px;border-radius:8px;font-size:13px;margin-bottom:10px}
 .vj-status{display:flex;flex-direction:column;gap:6px}
 .vj-badge{margin:0;font-weight:700;font-size:14px}
 .vj-badge.aguard{color:#8a6d00}
 .vj-badge.efet{color:#0F7B4F}
-.vj-badge.canc{color:#8B1A24}
+.vj-badge.canc{color:#AA1120}
 .vj-pago{border:1px solid var(--linha);border-radius:11px;padding:12px 14px;margin-bottom:10px;background:#F8FAFD;display:flex;flex-direction:column;gap:6px}
 .vj-add-h{font-size:13px;font-weight:700;color:var(--azul);margin-bottom:2px}
 .vj-ref-obs{font-size:11px;color:var(--mut)}
