@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 
 const CSS = `
 .barra-marca{display:none!important}
-html,body{background-color:#F4F6FA!important;color:#0F1B2D!important}
+html,body{background-color:#F7F5EE!important;color:#0C2749!important}
 .r4{font-family:Montserrat,system-ui,sans-serif}
 `;
 
