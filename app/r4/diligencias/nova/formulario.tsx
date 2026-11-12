@@ -649,7 +649,7 @@ export function FormularioNova({
               <button
                 type="button"
                 onClick={() => router.push(`${base}/diligencias/${r?.id}?nova=1`)}
-                className="mt-2 rounded-lg bg-[#0F1B2D] px-3 py-1.5 text-xs font-semibold text-white"
+                className="mt-2 rounded-lg bg-[#0C2749] px-3 py-1.5 text-xs font-semibold text-white"
               >
                 Abrir a diligência
               </button>
@@ -660,7 +660,7 @@ export function FormularioNova({
       <div className="flex flex-wrap items-center gap-3">
         <button
           disabled={enviando || !!envio || !!r?.ok || Object.values(leituras).some((l) => l.st === 'lendo')}
-          className="rounded-lg bg-[#0F1B2D] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#1c2c45] disabled:opacity-60"
+          className="rounded-lg bg-[#0C2749] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#000E35] disabled:opacity-60"
         >
           {enviando ? 'Iniciando as certidões… (pode levar até 1 minuto)' : envio || r?.ok ? 'Enviando documentos…' : 'Iniciar diligência'}
         </button>
