@@ -43,7 +43,7 @@ export default async function DiligenciasR4({ searchParams }: { searchParams: Pr
       <main className="mx-auto max-w-6xl px-4 py-8">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold">Diligências</h1>
-          <Link href={`${base}/diligencias/nova`} className="ml-auto rounded-lg bg-[#0F1B2D] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1c2c45]">
+          <Link href={`${base}/diligencias/nova`} className="ml-auto rounded-lg bg-[#0C2749] px-4 py-2 text-sm font-semibold text-white hover:bg-[#000E35]">
             + Nova diligência
           </Link>
         </div>
@@ -51,13 +51,13 @@ export default async function DiligenciasR4({ searchParams }: { searchParams: Pr
         <div className="mt-4 flex gap-1 border-b border-slate-200 text-sm">
           <Link
             href={`${base}/diligencias`}
-            className={`-mb-px border-b-2 px-3 py-2 font-semibold ${!arquivadas ? 'border-[#0F1B2D] text-[#0F1B2D]' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+            className={`-mb-px border-b-2 px-3 py-2 font-semibold ${!arquivadas ? 'border-[#0C2749] text-[#0C2749]' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
           >
             Ativas
           </Link>
           <Link
             href={`${base}/diligencias?arq=1`}
-            className={`-mb-px border-b-2 px-3 py-2 font-semibold ${arquivadas ? 'border-[#0F1B2D] text-[#0F1B2D]' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+            className={`-mb-px border-b-2 px-3 py-2 font-semibold ${arquivadas ? 'border-[#0C2749] text-[#0C2749]' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
           >
             Arquivadas
           </Link>
