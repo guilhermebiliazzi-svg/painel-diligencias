@@ -1,6 +1,7 @@
 'use server';
 
 import { r4Admin, r4UsuarioAtual } from '@/lib/r4/supabase';
+import { revalidatePath } from 'next/cache';
 import { pool } from '@/lib/db';
 import { exigirDiligenciaR4 } from '@/lib/r4/diligencia';
 import { enviarAoMotor } from '@/lib/r4/motor';
@@ -286,4 +287,26 @@ export async function cardsDocumentos(dilR4Id: string): Promise<CardDocumento[]>
     [dil.motor_id]
   );
   return r.rows as CardDocumento[];
+}
+
+/**
+ * Arquivar: tira a diligência da lista principal sem apagar nada (aba "Arquivadas").
+ * Só o responsável da unidade (ou o superadmin), igual ao painel da Ville.
+ */
+async function marcarArquivo(fd: FormData, arquivar: boolean) {
+  const { usuario, dil } = await exigirDiligenciaR4(String(fd.get('diligencia_id') || ''));
+  if (usuario.papel !== 'admin' && usuario.papel !== 'superadmin') throw new Error('Só o responsável da unidade arquiva diligências.');
+  await r4Admin()
+    .from('diligencias')
+    .update({ arquivada_em: arquivar ? new Date().toISOString() : null })
+    .eq('id', dil.id);
+  revalidatePath('/r4/diligencias');
+}
+
+export async function r4Arquivar(fd: FormData): Promise<void> {
+  await marcarArquivo(fd, true);
+}
+
+export async function r4Desarquivar(fd: FormData): Promise<void> {
+  await marcarArquivo(fd, false);
 }
