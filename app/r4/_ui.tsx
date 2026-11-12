@@ -4,7 +4,7 @@ import Link from 'next/link';
 export function Marca({ tamanho = 'md' }: { tamanho?: 'md' | 'lg' }) {
   const t = tamanho === 'lg' ? 'text-3xl' : 'text-xl';
   return (
-    <span className={`${t} font-extrabold tracking-tight text-[#0F1B2D]`}>
+    <span className={`${t} font-extrabold tracking-tight text-[#0C2749]`}>
       r<span className="text-[#C8102E]">quatro</span>
     </span>
   );
