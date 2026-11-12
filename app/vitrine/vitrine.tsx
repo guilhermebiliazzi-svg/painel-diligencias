@@ -70,7 +70,7 @@ function PreviaAnuncio({ i }: { i: Imovel }) {
   return (
     <div style={{ backgroundColor: '#ffffff' }} className="mt-3 max-w-sm overflow-hidden rounded-xl border border-slate-200 shadow-sm">
       <div className="flex items-center gap-2 px-3 py-2">
-        <span className="flex size-7 items-center justify-center rounded-full bg-[#003DA5] text-[9px] font-bold text-white">RX</span>
+        <span className="flex size-7 items-center justify-center rounded-full bg-[#0043FF] text-[9px] font-bold text-white">RX</span>
         <div className="leading-tight">
           <p className="text-sm font-semibold text-slate-900">REMAX Ville</p>
           <p className="text-[11px] text-slate-500">Patrocinado</p>
@@ -87,7 +87,7 @@ function PreviaAnuncio({ i }: { i: Imovel }) {
           <p className="truncate text-sm font-semibold text-slate-900">{t1}</p>
           <p className="truncate text-xs text-slate-600">{t2 || 'Agende sua visita'}</p>
         </div>
-        <span className="shrink-0 rounded-full bg-[#003DA5] px-3 py-1.5 text-xs font-semibold text-white">Saiba mais</span>
+        <span className="shrink-0 rounded-full bg-[#0043FF] px-3 py-1.5 text-xs font-semibold text-white">Saiba mais</span>
       </div>
     </div>
   );
