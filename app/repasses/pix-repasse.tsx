@@ -193,23 +193,23 @@ export default function PixRepasse({
       <style
         dangerouslySetInnerHTML={{
           __html: `
-.vjpix{background:#fff;border:1px solid #E4E9F2;border-radius:14px;padding:20px;margin-bottom:16px}
-.vjpix-h{font-size:16px;margin:0 0 4px;color:#003DA5;font-weight:700}
-.vjpix-sub{font-size:13px;color:#5A6B85;margin:0 0 12px;line-height:1.45}
-.vjpix-erro{background:#FDECEE;border:1px solid #F5C2C7;color:#8B1A24;padding:9px 12px;border-radius:9px;font-size:13px;margin-bottom:10px}
+.vjpix{background:#fff;border:1px solid #E6E3DA;border-radius:14px;padding:20px;margin-bottom:16px}
+.vjpix-h{font-size:16px;margin:0 0 4px;color:#0043FF;font-weight:700}
+.vjpix-sub{font-size:13px;color:#5F6B7A;margin:0 0 12px;line-height:1.45}
+.vjpix-erro{background:#FDECEE;border:1px solid #F5C2C7;color:#AA1120;padding:9px 12px;border-radius:9px;font-size:13px;margin-bottom:10px}
 .vjpix-ok{background:#EAF7F0;border:1px solid #BCE3D0;color:#0F7B4F;padding:9px 12px;border-radius:9px;font-size:13px;margin-bottom:10px}
 .vjpix-field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
-.vjpix-field>span{font-size:12px;font-weight:600;color:#5A6B85;text-transform:uppercase;letter-spacing:.4px}
-.vjpix-field select,.vjpix-field input{font:inherit;padding:10px 11px;border:1px solid #E4E9F2;border-radius:9px;background:#fff}
-.vjpix-btn{background:#003DA5;color:#fff;border:none;font:inherit;font-weight:700;padding:12px 20px;border-radius:9px;cursor:pointer;width:100%}
+.vjpix-field>span{font-size:12px;font-weight:600;color:#5F6B7A;text-transform:uppercase;letter-spacing:.4px}
+.vjpix-field select,.vjpix-field input{font:inherit;padding:10px 11px;border:1px solid #E6E3DA;border-radius:9px;background:#fff}
+.vjpix-btn{background:#0043FF;color:#fff;border:none;font:inherit;font-weight:700;padding:12px 20px;border-radius:9px;cursor:pointer;width:100%}
 .vjpix-btn:disabled{opacity:.5;cursor:not-allowed}
-.vjpix-vazio{font-size:13px;color:#8B1A24;background:#FDECEE;border:1px solid #F5C2C7;padding:9px 12px;border-radius:9px}
+.vjpix-vazio{font-size:13px;color:#AA1120;background:#FDECEE;border:1px solid #F5C2C7;padding:9px 12px;border-radius:9px}
 .vjpix-status{display:flex;flex-direction:column;gap:6px}
 .vjpix-badge{margin:0;font-weight:700;font-size:14px}
 .vjpix-badge.aguard{color:#8a6d00}
 .vjpix-badge.efet{color:#0F7B4F}
-.vjpix-cod{margin:0;font-size:13px;color:#5A6B85}
-.vjpix-link{align-self:flex-start;background:none;border:none;color:#003DA5;font:inherit;font-weight:600;font-size:13px;cursor:pointer;padding:0;text-decoration:underline}
+.vjpix-cod{margin:0;font-size:13px;color:#5F6B7A}
+.vjpix-link{align-self:flex-start;background:none;border:none;color:#0043FF;font:inherit;font-weight:600;font-size:13px;cursor:pointer;padding:0;text-decoration:underline}
 .vjpix-link:disabled{opacity:.5;cursor:default}
 `,
         }}
