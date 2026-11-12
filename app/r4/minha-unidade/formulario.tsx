@@ -19,7 +19,7 @@ export function FormularioPasta({ atual }: { atual: string | null }) {
       </label>
       <button
         disabled={enviando}
-        className="mt-3 rounded-lg bg-[#0F1B2D] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1c2c45] disabled:opacity-60"
+        className="mt-3 rounded-lg bg-[#0C2749] px-4 py-2 text-sm font-semibold text-white hover:bg-[#000E35] disabled:opacity-60"
       >
         {enviando ? 'Conferindo o acesso…' : atual ? 'Trocar pasta' : 'Conferir e salvar'}
       </button>
