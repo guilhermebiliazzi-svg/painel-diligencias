@@ -12,7 +12,7 @@ export function BotaoEnviar({ children, carregando }: { children: React.ReactNod
       type="submit"
       disabled={pending}
       aria-busy={pending}
-      className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-[#0F1B2D] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#1c2c45] disabled:cursor-wait disabled:opacity-80"
+      className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-[#0C2749] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#000E35] disabled:cursor-wait disabled:opacity-80"
     >
       {pending && (
         <svg className="size-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
