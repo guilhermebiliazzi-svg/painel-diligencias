@@ -10,6 +10,7 @@
 // Dentro de cada categoria as certidoes sao numeradas.
 
 import { pool } from '@/lib/db';
+import { retentativasDaDiligencia, type Retentativa } from '@/lib/retentativa';
 import { listPdfsInFolders, type DriveFile } from '@/lib/drive';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
@@ -76,6 +77,8 @@ type AdminRow = {
   titular_oculto: boolean;
   // extras
   is_extra: boolean;
+  // v3: última/próxima tentativa (calculada no servidor)
+  ret?: Retentativa;
 };
 
 // Tipos de CND do TJSP obtidas via e-SAJ (as que chegam por e-mail com link de
@@ -134,6 +137,10 @@ async function fetchDiligencia(id: string): Promise<AdminRow[] | null> {
     [id]
   );
   const rows = result.rows as AdminRow[];
+  if (rows.length > 0) {
+    const ret = await retentativasDaDiligencia(id);
+    rows.forEach((r) => (r.ret = ret.get(r.certidao_id)));
+  }
   return rows.length > 0 ? rows : null;
 }
 
@@ -257,9 +264,21 @@ function formatDateTime(iso: string | null): string {
 }
 
 // v2: bloco de log de processamento. So aparece em cards sem PDF vinculado.
+// v3 (12/11): mostra a última e a próxima tentativa automática (lib/retentativa.ts).
+function ProximaTentativa({ r }: { r: AdminRow }) {
+  const ret = r.ret;
+  if (!ret) return null;
+  return (
+    <div className="mt-0.5 leading-snug">
+      <span className="font-medium">Próxima tentativa:</span>{' '}
+      {ret.proxima ? `${formatDateTime(ret.proxima)} (automática)` : ret.semProxima}
+    </div>
+  );
+}
+
 function LogProcessamento({ r }: { r: AdminRow }) {
   const tentativas = (r.cs_tentativas ?? 0) + (r.cs_tentativas_obter ?? 0);
-  const dataAtu = formatDateTime(r.cs_atualizado_em);
+  const dataAtu = formatDateTime(r.ret?.ultima ?? r.cs_atualizado_em);
   const erro = r.cs_erro?.trim();
 
   // Caso 1: tem erro registrado
@@ -270,6 +289,7 @@ function LogProcessamento({ r }: { r: AdminRow }) {
           ⚠ Última tentativa: {dataAtu || 'data desconhecida'}
         </div>
         <div className="mt-0.5 leading-snug break-words">{erro}</div>
+        <ProximaTentativa r={r} />
       </div>
     );
   }
@@ -279,10 +299,11 @@ function LogProcessamento({ r }: { r: AdminRow }) {
     return (
       <div className="rounded-md border border-slate-200 bg-slate-50/60 px-2 py-1.5 text-xs text-slate-600">
         <span className="font-medium">⏳ Em processamento.</span>{' '}
-        {dataAtu && <>Última atualização: {dataAtu}</>}
+        {dataAtu && <>Última tentativa: {dataAtu}</>}
         {r.cs_numero_pedido && (
           <> · pedido <span className="font-mono">{r.cs_numero_pedido}</span></>
         )}
+        <ProximaTentativa r={r} />
       </div>
     );
   }
@@ -291,6 +312,7 @@ function LogProcessamento({ r }: { r: AdminRow }) {
   return (
     <div className="rounded-md border border-slate-200 bg-slate-50/60 px-2 py-1.5 text-xs text-slate-500">
       Aguardando primeiro processamento.
+      <ProximaTentativa r={r} />
     </div>
   );
 }
