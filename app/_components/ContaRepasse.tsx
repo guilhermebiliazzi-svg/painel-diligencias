@@ -219,22 +219,22 @@ export default function ContaRepasse({ contratoId }: { contratoId: number }) {
 }
 
 const CSS_CR = `
-.vj-cr-form{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;background:#F8FAFD;border:1px solid var(--linha,#E4E9F2);border-radius:10px;padding:14px;margin-top:6px}
-.vj-cr-form label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:600;color:var(--mut,#5A6B85);text-transform:uppercase;letter-spacing:.4px}
+.vj-cr-form{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;background:#F8FAFD;border:1px solid var(--linha,#E6E3DA);border-radius:10px;padding:14px;margin-top:6px}
+.vj-cr-form label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:600;color:var(--mut,#5F6B7A);text-transform:uppercase;letter-spacing:.4px}
 .vj-cr-form label small{text-transform:none;font-weight:400;letter-spacing:0}
-.vj-cr-form input,.vj-cr-form select{font:inherit;font-size:14px;text-transform:none;letter-spacing:0;font-weight:400;padding:9px 11px;border:1px solid var(--linha,#E4E9F2);border-radius:8px;background:#fff;color:var(--txt,#16233B)}
+.vj-cr-form input,.vj-cr-form select{font:inherit;font-size:14px;text-transform:none;letter-spacing:0;font-weight:400;padding:9px 11px;border:1px solid var(--linha,#E6E3DA);border-radius:8px;background:#fff;color:var(--txt,#0C2749)}
 .vj-cr-lista{list-style:none;margin:0 0 10px;padding:0;display:flex;flex-direction:column;gap:6px}
-.vj-cr-lista li{display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--linha,#E4E9F2);border-radius:10px;padding:10px 12px;font-size:14px;background:#fff}
+.vj-cr-lista li{display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--linha,#E6E3DA);border-radius:10px;padding:10px 12px;font-size:14px;background:#fff}
 .vj-cr-lista li.vj-cr-outra{border-style:dashed;background:#FBFCFE}
-.vj-cr-lista li small{display:block;color:var(--mut,#5A6B85);font-size:12px;margin-top:2px}
+.vj-cr-lista li small{display:block;color:var(--mut,#5F6B7A);font-size:12px;margin-top:2px}
 .vj-cr-acoes{display:flex;gap:10px}
-.vj-cr-acoes button,.vj-cr-link{border:none;background:none;color:var(--azul,#003DA5);cursor:pointer;font:inherit;font-size:13px;padding:0;text-decoration:underline}
-.vj-cr-btn{background:var(--azul,#003DA5);color:#fff;border:none;border-radius:8px;padding:8px 16px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.vj-cr-acoes button,.vj-cr-link{border:none;background:none;color:var(--azul,#0043FF);cursor:pointer;font:inherit;font-size:13px;padding:0;text-decoration:underline}
+.vj-cr-btn{background:var(--azul,#0043FF);color:#fff;border:none;border-radius:8px;padding:8px 16px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
 .vj-cr-btn:disabled{opacity:.5}
-.vj-cr-btn-sec{background:#fff;color:var(--azul,#003DA5);border:1px dashed var(--azul,#003DA5)}
+.vj-cr-btn-sec{background:#fff;color:var(--azul,#0043FF);border:1px dashed var(--azul,#0043FF)}
 .vj-cr-botoes{display:flex;gap:14px;align-items:center;margin-top:12px}
 .vj-cr-aviso{font-size:13px;color:#7A5B00;background:#FFF8E6;border-radius:8px;padding:8px 12px;margin:0 0 10px}
-.vj-cr-erro{border:1px solid #F5C2C7;background:#FDECEE;color:#8B1A24;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:13px}
+.vj-cr-erro{border:1px solid #F5C2C7;background:#FDECEE;color:#AA1120;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:13px}
 .vj-cr-ok{border:1px solid #BCE3D0;background:#EAF7F0;color:#0F7B4F;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:13px}
 @media (max-width:640px){.vj-cr-form{grid-template-columns:1fr}}
 `;
