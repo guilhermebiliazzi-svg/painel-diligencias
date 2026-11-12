@@ -831,7 +831,7 @@ export default function NovoContrato() {
 }
 
 const CSS = `
-.vj-wrap{--azul:#003DA5;--azul-esc:#00286b;--verm:#DC1C2E;--bg:#F4F6FA;--card:#fff;--linha:#E4E9F2;--txt:#16233B;--mut:#5A6B85;--ok:#0F7B4F;min-height:100vh;background:var(--bg);color:var(--txt);font-family:Inter,system-ui,sans-serif}
+.vj-wrap{--azul:#0043FF;--azul-esc:#0C2749;--verm:#FF1200;--bg:#F7F5EE;--card:#fff;--linha:#E6E3DA;--txt:#0C2749;--mut:#5F6B7A;--ok:#0F7B4F;min-height:100vh;background:var(--bg);color:var(--txt);font-family:Montserrat,Arial,system-ui,sans-serif}
 .vj-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 28px;background:var(--azul);color:#fff}
 .vj-mark{font-family:Archivo,sans-serif;font-weight:800;letter-spacing:.5px;color:#fff;text-decoration:none}
 .vj-mark span{font-weight:400}
@@ -869,6 +869,6 @@ const CSS = `
 .vj-btn-link{background:none;border:none;color:var(--mut);font:inherit;font-size:13px;text-decoration:underline;cursor:pointer;margin-right:auto}
 .vj-info{background:#EEF3FC;border-color:#C9D8F2;font-size:14px;line-height:1.5}
 .vj-okmsg{border:1px solid #BCE3D0;background:#EAF7F0;color:var(--ok);border-radius:10px;padding:9px 12px;margin-bottom:16px;font-size:14px}
-.vj-erro{border-color:#F5C2C7;background:#FDECEE;color:#8B1A24}
+.vj-erro{border-color:#F5C2C7;background:#FDECEE;color:#AA1120}
 @media (max-width:640px){.vj-grid{grid-template-columns:1fr}.vj-head{flex-direction:column}}
 `;
