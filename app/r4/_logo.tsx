@@ -71,7 +71,7 @@ export function LogoUnidade({ atual, unidadeId, compacto = false }: { atual: str
             type="button"
             disabled={enviando}
             onClick={() => input.current?.click()}
-            className="rounded-lg bg-[#0F1B2D] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1c2c45] disabled:opacity-60"
+            className="rounded-lg bg-[#0C2749] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#000E35] disabled:opacity-60"
           >
             {enviando ? 'Enviando…' : logo ? 'Trocar logo' : 'Enviar logo'}
           </button>
