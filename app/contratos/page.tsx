@@ -149,7 +149,7 @@ export default function Contratos() {
 }
 
 const CSS = `
-.vj-wrap{--azul:#003DA5;--verm:#DC1C2E;--bg:#F4F6FA;--card:#fff;--linha:#E4E9F2;--txt:#16233B;--mut:#5A6B85;--ok:#0F7B4F;min-height:100vh;background:var(--bg);color:var(--txt);font-family:Inter,system-ui,sans-serif}
+.vj-wrap{--azul:#0043FF;--verm:#FF1200;--bg:#F7F5EE;--card:#fff;--linha:#E6E3DA;--txt:#0C2749;--mut:#5F6B7A;--ok:#0F7B4F;min-height:100vh;background:var(--bg);color:var(--txt);font-family:Montserrat,Arial,system-ui,sans-serif}
 .vj-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 28px;background:var(--azul);color:#fff;flex-wrap:wrap}
 .vj-mark{font-family:Archivo,sans-serif;font-weight:800;letter-spacing:.5px;color:#fff;text-decoration:none}
 .vj-mark span{font-weight:400}
@@ -162,11 +162,11 @@ const CSS = `
 .vj-sub{color:var(--mut);margin:4px 0 0}
 .vj-card{background:var(--card);border:1px solid var(--linha);border-radius:14px;padding:20px;margin-bottom:16px}
 .vj-h2{font-family:Archivo,sans-serif;font-size:17px;margin:0 0 14px;color:var(--azul)}
-.vj-h2 small{font-family:Inter,system-ui,sans-serif;font-weight:400;font-size:12px;color:var(--mut);margin-left:8px}
+.vj-h2 small{font-family:Montserrat,Arial,system-ui,sans-serif;font-weight:400;font-size:12px;color:var(--mut);margin-left:8px}
 .vj-mut{color:var(--mut);font-size:14px;margin:0}
 .vj-btn-salvar{background:var(--verm);color:#fff;font-weight:600;font-size:15px;padding:11px 20px;border-radius:10px;text-decoration:none;white-space:nowrap}
 .vj-btn-salvar:hover{background:#b8121f}
-.vj-erro{border-color:#F5C2C7;background:#FDECEE;color:#8B1A24}
+.vj-erro{border-color:#F5C2C7;background:#FDECEE;color:#AA1120}
 .vj-filtros{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
 .vj-filtros input{flex:1;min-width:220px;font:inherit;padding:9px 11px;border:1px solid var(--linha);border-radius:8px}
 .vj-filtros select{font:inherit;padding:9px 11px;border:1px solid var(--linha);border-radius:8px;background:#fff}
