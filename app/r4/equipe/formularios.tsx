@@ -52,7 +52,7 @@ export function NovoCorretor({ ferramentas }: { ferramentas: Ferramenta[] }) {
       <div className="mt-2">
         <Marcar ferramentas={ferramentas} marcadas={ferramentas.map((f) => f.codigo)} />
       </div>
-      <button disabled={enviando} className="mt-4 rounded-lg bg-[#0F1B2D] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1c2c45] disabled:opacity-60">
+      <button disabled={enviando} className="mt-4 rounded-lg bg-[#0C2749] px-4 py-2 text-sm font-semibold text-white hover:bg-[#000E35] disabled:opacity-60">
         {enviando ? 'Cadastrando…' : 'Cadastrar e gerar senha'}
       </button>
       <Aviso r={r} />
