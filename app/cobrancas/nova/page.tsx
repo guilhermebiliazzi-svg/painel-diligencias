@@ -723,9 +723,9 @@ export default function ConferenciaCobranca() {
   );
 }
 
-/* ---------- estilo (REMAX Ville: azul #003DA5, vermelho #DC1C2E) ---------- */
+/* ---------- estilo (REMAX Ville: azul #0043FF, vermelho #FF1200) ---------- */
 const CSS = `
-.vj-wrap{--azul:#003DA5;--azul-esc:#00286b;--verm:#DC1C2E;--bg:#F4F6FA;--card:#fff;--linha:#E4E9F2;--txt:#16233B;--mut:#5A6B85;--ok:#0F7B4F;
+.vj-wrap{--azul:#0043FF;--azul-esc:#0C2749;--verm:#FF1200;--bg:#F7F5EE;--card:#fff;--linha:#E6E3DA;--txt:#0C2749;--mut:#5F6B7A;--ok:#0F7B4F;
   min-height:100vh;background:var(--bg);color:var(--txt);
   font-family:Archivo,"Segoe UI",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;}
 .vj-top{display:flex;align-items:center;justify-content:space-between;gap:16px;
@@ -746,7 +746,7 @@ const CSS = `
 .vj-field.vj-grow{flex:1;min-width:260px}
 .vj-editlink{align-self:flex-start;margin-top:6px;font-size:13px;font-weight:600;color:var(--azul);text-decoration:none}
 .vj-editlink:hover{text-decoration:underline}
-.vj-bloqueio{grid-column:1 / -1;background:#FDECEE;border:1px solid #F5C2C7;color:#8B1A24;padding:13px 16px;border-radius:11px;font-size:14px;line-height:1.5}
+.vj-bloqueio{grid-column:1 / -1;background:#FDECEE;border:1px solid #F5C2C7;color:#AA1120;padding:13px 16px;border-radius:11px;font-size:14px;line-height:1.5}
 .vj-bloqlista{margin:8px 0 0;padding-left:20px}
 .vj-bloqlista li{margin:2px 0}
 .vj-field>span{font-size:12px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
@@ -819,7 +819,7 @@ const CSS = `
 .vj-okgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:12px}
 .vj-okgrid span{display:block;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
 .vj-okgrid b{font-size:17px}
-.vj-load{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--azul);color:#fff;padding:10px 20px;border-radius:24px;font-size:14px;box-shadow:0 6px 20px rgba(0,61,165,.3)}
+.vj-load{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--azul);color:#fff;padding:10px 20px;border-radius:24px;font-size:14px;box-shadow:0 6px 20px rgba(0,67,255,.3)}
 @media (max-width:720px){.vj-grid{grid-template-columns:1fr}.vj-okgrid{grid-template-columns:1fr 1fr}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 `;
