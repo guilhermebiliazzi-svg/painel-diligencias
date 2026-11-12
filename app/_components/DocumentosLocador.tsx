@@ -230,24 +230,24 @@ export default function DocumentosLocador({
       <style
         dangerouslySetInnerHTML={{
           __html: `
-.vjdoc{background:#fff;border:1px solid #E4E9F2;border-radius:14px;padding:20px;margin-bottom:16px}
-.vjdoc-h{font-size:16px;margin:0 0 4px;color:#003DA5;font-weight:700}
-.vjdoc-sub{font-size:13px;color:#5A6B85;margin:0 0 14px;line-height:1.45}
-.vjdoc-erro{background:#FDECEE;border:1px solid #F5C2C7;color:#8B1A24;padding:9px 12px;border-radius:9px;font-size:13px;margin-bottom:12px}
+.vjdoc{background:#fff;border:1px solid #E6E3DA;border-radius:14px;padding:20px;margin-bottom:16px}
+.vjdoc-h{font-size:16px;margin:0 0 4px;color:#0043FF;font-weight:700}
+.vjdoc-sub{font-size:13px;color:#5F6B7A;margin:0 0 14px;line-height:1.45}
+.vjdoc-erro{background:#FDECEE;border:1px solid #F5C2C7;color:#AA1120;padding:9px 12px;border-radius:9px;font-size:13px;margin-bottom:12px}
 .vjdoc-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.vjdoc-slot{border:1px solid #E4E9F2;border-radius:11px;padding:12px 14px;background:#F8FAFD}
+.vjdoc-slot{border:1px solid #E6E3DA;border-radius:11px;padding:12px 14px;background:#F8FAFD}
 .vjdoc-slot.tem{background:#EAF7F0;border-color:#BCE3D0}
-.vjdoc-slabel{font-size:12px;font-weight:700;color:#16233B;margin-bottom:8px}
+.vjdoc-slabel{font-size:12px;font-weight:700;color:#0C2749;margin-bottom:8px}
 .vjdoc-aviso{margin-top:8px;background:#FFF7E6;border:1px solid #FADFA0;color:#8a6d00;padding:6px 9px;border-radius:8px;font-size:12px;font-weight:600}
 .vjdoc-file{display:flex;flex-direction:column;gap:6px}
-.vjdoc-open{color:#003DA5;font-weight:600;font-size:13px;text-decoration:none;word-break:break-word}
+.vjdoc-open{color:#0043FF;font-weight:600;font-size:13px;text-decoration:none;word-break:break-word}
 .vjdoc-open:hover{text-decoration:underline}
 .vjdoc-acts{display:flex;gap:14px}
-.vjdoc-link{background:none;border:none;color:#003DA5;font:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:0}
+.vjdoc-link{background:none;border:none;color:#0043FF;font:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:0}
 .vjdoc-link:hover{text-decoration:underline}
 .vjdoc-link:disabled{opacity:.5;cursor:default}
-.vjdoc-del{color:#DC1C2E}
-.vjdoc-up{width:100%;background:none;border:1px dashed #003DA5;color:#003DA5;font:inherit;font-weight:600;font-size:13px;padding:9px;border-radius:9px;cursor:pointer}
+.vjdoc-del{color:#FF1200}
+.vjdoc-up{width:100%;background:none;border:1px dashed #0043FF;color:#0043FF;font:inherit;font-weight:600;font-size:13px;padding:9px;border-radius:9px;cursor:pointer}
 .vjdoc-up:disabled{opacity:.5;cursor:default}
 @media (max-width:640px){.vjdoc-grid{grid-template-columns:1fr}}
 `,
