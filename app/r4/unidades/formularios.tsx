@@ -51,7 +51,7 @@ export function NovaUnidade({ ferramentas }: { ferramentas: Ferramenta[] }) {
           </label>
         ))}
       </div>
-      <button disabled={enviando} className="mt-4 rounded-lg bg-[#0F1B2D] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1c2c45] disabled:opacity-60">
+      <button disabled={enviando} className="mt-4 rounded-lg bg-[#0C2749] px-4 py-2 text-sm font-semibold text-white hover:bg-[#000E35] disabled:opacity-60">
         {enviando ? 'Criando…' : 'Criar unidade e acesso'}
       </button>
       <Aviso r={r} />
@@ -79,7 +79,7 @@ export function PastaDrive({ unidadeId, atual }: { unidadeId: string; atual: str
       <input type="hidden" name="unidade_id" value={unidadeId} />
       <span className="font-medium text-slate-700">Pasta do Drive:</span>
       {atual ? (
-        <a href={`https://drive.google.com/drive/folders/${atual}`} target="_blank" rel="noreferrer" className="text-xs text-[#0F1B2D] underline">abrir ↗</a>
+        <a href={`https://drive.google.com/drive/folders/${atual}`} target="_blank" rel="noreferrer" className="text-xs text-[#0C2749] underline">abrir ↗</a>
       ) : (
         <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">não configurada</span>
       )}
