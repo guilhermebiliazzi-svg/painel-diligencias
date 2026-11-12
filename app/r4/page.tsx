@@ -66,7 +66,7 @@ export default async function InicioR4({ searchParams }: { searchParams: Promise
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Diligências</p>
             <p className="mt-2 text-3xl font-bold">{totalDil ?? 0}</p>
             <p className="mt-1 text-sm text-slate-500">
-              <Link href={`${base}/diligencias`} className="font-semibold text-[#0F1B2D] underline">Ver todas</Link>
+              <Link href={`${base}/diligencias`} className="font-semibold text-[#0C2749] underline">Ver todas</Link>
             </p>
           </div>
           {!ehCorretor && (
@@ -100,7 +100,7 @@ export default async function InicioR4({ searchParams }: { searchParams: Promise
           {usuario.papel === 'admin' && (
             <Link
               href={`${base}/equipe`}
-              className="inline-flex rounded-lg bg-[#0F1B2D] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#1c2c45]"
+              className="inline-flex rounded-lg bg-[#0C2749] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#000E35]"
             >
               Equipe
             </Link>
@@ -108,7 +108,7 @@ export default async function InicioR4({ searchParams }: { searchParams: Promise
         {ehSuper && (
             <Link
               href={`${base}/unidades`}
-              className="inline-flex rounded-lg bg-[#0F1B2D] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#1c2c45]"
+              className="inline-flex rounded-lg bg-[#0C2749] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#000E35]"
             >
               Gerenciar unidades
             </Link>
