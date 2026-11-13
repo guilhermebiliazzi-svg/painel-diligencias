@@ -200,6 +200,7 @@ const NAO_EMITE_SE_POSITIVA = new Set([
   'cnd_federal',
   'cnd_federal_pj',
   'crf_fgts',
+  'sefaz_ce_cnd',
 ]);
 
 /** Certidão que o sistema emitiu (entra na cobrança): automática, com PDF e de fato emitida. */
