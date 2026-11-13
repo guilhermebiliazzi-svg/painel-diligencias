@@ -44,11 +44,12 @@ Campos a extrair:
 - rg: número do RG (null se não encontrado ou se for CIN)
 - data_nascimento: data de nascimento no formato DD/MM/AAAA
 - nome_mae: nome completo da mãe
+- nome_pai: nome completo do pai (null se não aparecer)
 - genero: "Masculino" ou "Feminino"
 - tipo_documento: "RG", "CIN" ou "CNH"
 
 Retorne APENAS o JSON sem explicações, sem markdown, sem texto adicional:
-{"nome":"FULANO DE TAL","cpf":"000.000.000-00","rg":null,"data_nascimento":"DD/MM/AAAA","nome_mae":"NOME DA MAE","genero":"Feminino","tipo_documento":"RG"}`;
+{"nome":"FULANO DE TAL","cpf":"000.000.000-00","rg":null,"data_nascimento":"DD/MM/AAAA","nome_mae":"NOME DA MAE","nome_pai":"NOME DO PAI","genero":"Feminino","tipo_documento":"RG"}`;
 
 function dataIso(v: unknown): string | null {
   const m = String(v || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
@@ -137,6 +138,7 @@ export async function POST(req: Request) {
     rg: d.rg ? String(d.rg).trim() : null,
     nascimento: dataIso(d.data_nascimento),
     mae: d.nome_mae ? String(d.nome_mae).toUpperCase().trim() : null,
+    pai: d.nome_pai ? String(d.nome_pai).toUpperCase().trim() : null,
     genero: g.startsWith('f') ? 'F' : g.startsWith('m') ? 'M' : null,
     tipo_documento: d.tipo_documento ? String(d.tipo_documento) : null,
   };
