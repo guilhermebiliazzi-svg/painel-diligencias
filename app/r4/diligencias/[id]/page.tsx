@@ -695,7 +695,7 @@ export default async function DiligenciaR4({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ nova?: string }>;
+  searchParams: Promise<{ nova?: string; editada?: string }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
@@ -711,6 +711,8 @@ export default async function DiligenciaR4({
   // corretor: só a que cadastrou ou a que o responsável liberou para ele
   if (!(await corretorPodeVer(usuario, dil))) notFound();
   const gerirAcesso = usuario.papel === 'admin' || ehSuper;
+  // 13/11: editar a diligência (responsável, superadmin e quem cadastrou)
+  const podeEditar = gerirAcesso || dil.criado_por === usuario.id;
   let equipe: { id: string; nome: string | null; email: string; ativo: boolean }[] = [];
   let liberados: string[] = [];
   if (gerirAcesso) {
@@ -777,6 +779,11 @@ export default async function DiligenciaR4({
               Diligência iniciada. As certidões vão ficando prontas ao longo das próximas horas; algumas dependem de resposta por e-mail dos tribunais.
             </p>
           )}
+          {sp?.editada && dil.motor_id && (
+            <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              Alterações salvas. As certidões de quem ou do que entrou agora aparecem em alguns instantes; atualize a página.
+            </p>
+          )}
           <h1 className="mt-3 text-2xl font-semibold leading-tight text-slate-900 sm:text-3xl">{endereco}</h1>
           <p className="mt-1 text-sm text-slate-600">
             Criada em {new Date(dil.criado_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
@@ -786,6 +793,11 @@ export default async function DiligenciaR4({
           {dil.motor_id && (
             <div className="mt-5 flex flex-wrap items-start gap-x-8 gap-y-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
               <GrupoAcoes titulo="Diligência">
+                {podeEditar && (
+                  <Link href={`${base}/diligencias/${id}/editar`} className={btn('neutro')}>
+                    Editar diligência
+                  </Link>
+                )}
                 <CopiarLinkCliente diligencia_id={id} url={linkCliente} />
                 {/* "Baixar certidões (PDF)" e "Auditar diligência" desligados por decisão do Guilherme (11/11). */}
                 {pastaRaiz && (
