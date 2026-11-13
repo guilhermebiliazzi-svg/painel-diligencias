@@ -71,6 +71,7 @@ type Montado =
       matriculas: Record<string, unknown>[];
       vendedoresPF: Record<string, unknown>[];
       vendedoresPJ: Record<string, unknown>[];
+      estados_extras: string[];
     };
 
 /** Lê e confere o formulário (criar e editar) e devolve os dados no formato do WF-01. */
@@ -203,7 +204,16 @@ function montarDados(form: FormData): Montado {
     matricula_iptu: txt(m.sql),
   }));
 
-  return { ok: true, endereco, matriculas, vendedoresPF, vendedoresPJ };
+  // 13/11: estados além de SP (hoje só Ceará)
+  let estados_extras: string[] = [];
+  try {
+    const e = JSON.parse(String(form.get('estados') || '[]'));
+    estados_extras = Array.isArray(e) ? [...new Set(e.map(String))].filter((x) => ['CE'].includes(x)) : [];
+  } catch {
+    estados_extras = [];
+  }
+
+  return { ok: true, endereco, matriculas, vendedoresPF, vendedoresPJ, estados_extras };
 }
 
 /** Cria a diligência no rquatro e manda para o motor (fluxo R4-01). */
@@ -228,9 +238,9 @@ export async function criarDiligencia(_prev: ResultadoNova, form: FormData): Pro
 
   const m = montarDados(form);
   if (!m.ok) return { ok: false, msg: m.msg };
-  const { endereco, matriculas, vendedoresPF, vendedoresPJ } = m;
+  const { endereco, matriculas, vendedoresPF, vendedoresPJ, estados_extras } = m;
 
-  const dados = { endereco, matriculas, vendedoresPF, vendedoresPJ };
+  const dados = { endereco, matriculas, vendedoresPF, vendedoresPJ, estados_extras };
 
   const { data: dil, error: e1 } = await adm
     .from('diligencias')
@@ -250,6 +260,7 @@ export async function criarDiligencia(_prev: ResultadoNova, form: FormData): Pro
     consumos: [],
     negocio: null,
     endereco_estruturado: null,
+    estados_extras,
     r4: { unidade_id: un.id, unidade_nome: un.nome, diligencia_r4_id: dil.id, pasta_raiz: un.pasta_drive_id },
   };
 
@@ -359,7 +370,7 @@ export async function editarDiligencia(_prev: ResultadoNova, form: FormData): Pr
 
   const m = montarDados(form);
   if (!m.ok) return { ok: false, msg: m.msg };
-  const { endereco, matriculas, vendedoresPF, vendedoresPJ } = m;
+  const { endereco, matriculas, vendedoresPF, vendedoresPJ, estados_extras } = m;
 
   const r = await editarNoMotor({
     id: dil.motor_id,
@@ -367,6 +378,7 @@ export async function editarDiligencia(_prev: ResultadoNova, form: FormData): Pr
     matriculas,
     vendedoresPF,
     vendedoresPJ,
+    estados_extras,
     r4: { unidade_id: dil.unidade_id, diligencia_r4_id: dil.id },
   });
   if (!r.ok) return { ok: false, msg: `Não consegui salvar: ${r.erro}` };
@@ -376,7 +388,7 @@ export async function editarDiligencia(_prev: ResultadoNova, form: FormData): Pr
     .from('diligencias')
     .update({
       titulo: endereco,
-      dados: { ...antes, endereco, matriculas, vendedoresPF, vendedoresPJ },
+      dados: { ...antes, endereco, matriculas, vendedoresPF, vendedoresPJ, estados_extras },
       atualizado_em: new Date().toISOString(),
     })
     .eq('id', dil.id);
