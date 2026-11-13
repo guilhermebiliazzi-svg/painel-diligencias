@@ -117,6 +117,11 @@ export const CATEGORIAS_PF: Categoria[] = [
       'cenprot_pf',
     ],
   },
+  {
+    // 13/11: certidões do Ceará (marcado na diligência, além de SP)
+    titulo: 'Ceará (CE)',
+    tipos: ['tjce_pf', 'trt7_ceat_digital', 'trt7_ceat_fisico', 'sefaz_ce_cnd'],
+  },
 ];
 
 export const CATEGORIAS_PJ: Categoria[] = [
@@ -172,6 +177,11 @@ export const CATEGORIAS_PJ: Categoria[] = [
       'mobiliaria_pref_sp',
       'cenprot_pj',
     ],
+  },
+  {
+    // 13/11: certidões do Ceará (marcado na diligência, além de SP)
+    titulo: 'Ceará (CE)',
+    tipos: ['jucec_simplificada', 'tjce_pj', 'trt7_ceat_digital', 'trt7_ceat_fisico', 'sefaz_ce_cnd'],
   },
 ];
 
