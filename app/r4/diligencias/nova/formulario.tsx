@@ -12,10 +12,10 @@
 // (mesmo envio do botão "Enviar arquivo" do card), na pasta do Drive da unidade.
 import { useActionState, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { cardsDocumentos, criarDiligencia, type CardDocumento } from '../actions';
+import { cardsDocumentos, criarDiligencia, editarDiligencia, type CardDocumento } from '../actions';
 import { enviarArquivoParaCard } from '@/app/admin/EnviarArquivoCard';
 
-type Conjuge = {
+export type Conjuge = {
   participacao: string;
   registro: string;
   nome: string;
@@ -28,7 +28,7 @@ type Conjuge = {
   profissao: string;
   email: string;
 };
-type PF = {
+export type PF = {
   nome: string;
   cpf: string;
   rg: string;
@@ -42,7 +42,7 @@ type PF = {
   regime: string;
   conjuge: Conjuge;
 };
-type Rep = {
+export type Rep = {
   papel: string;
   certidoes: boolean;
   nome: string;
@@ -56,8 +56,8 @@ type Rep = {
   estado_civil: string;
   email: string;
 };
-type PJ = { vinculo: string; nome: string; cnpj: string; reps: Rep[] };
-type Mat = { numero: string; cartorio: string; sql: string };
+export type PJ = { vinculo: string; nome: string; cnpj: string; reps: Rep[] };
+export type Mat = { numero: string; cartorio: string; sql: string };
 
 const conjVazio = (): Conjuge => ({
   participacao: '', registro: '', nome: '', cpf: '', rg: '', nascimento: '', genero: '', mae: '',
@@ -239,6 +239,7 @@ export function FormularioNova({
   base,
   equipe,
   preco,
+  edicao,
 }: {
   unidades: { id: string; nome: string }[] | null;
   base: string;
@@ -246,11 +247,13 @@ export function FormularioNova({
   preco: string | null;
   /** corretores da unidade (só para o responsável escolher quem vê) */
   equipe: { id: string; nome: string | null; email: string }[] | null;
+  /** 13/11: editar uma diligência que já existe (formulário já preenchido) */
+  edicao?: { id: string; endereco: string; pf: PF[]; pj: PJ[]; mat: Mat[] };
 }) {
   const router = useRouter();
-  const [r, acao, enviando] = useActionState(criarDiligencia, null);
-  const [pf, setPf] = useState<PF[]>([pfVazia()]);
-  const [docs, setDocs] = useState<Docs[]>([{}]);
+  const [r, acao, enviando] = useActionState(edicao ? editarDiligencia : criarDiligencia, null);
+  const [pf, setPf] = useState<PF[]>(edicao?.pf.length ? edicao.pf : [pfVazia()]);
+  const [docs, setDocs] = useState<Docs[]>(edicao?.pf.length ? edicao.pf.map(() => ({})) : [{}]);
   const [leituras, setLeituras] = useState<Record<string, Leitura>>({});
   const [corretores, setCorretores] = useState<string[]>([]);
   const [envio, setEnvio] = useState<{ fase: 'docs' | 'fim'; msg: string; erros: string[] } | null>(null);
@@ -300,7 +303,7 @@ export function FormularioNova({
     if (!r?.ok || !r.id || enviouDocs.current === r.id) return;
     const id = r.id;
     enviouDocs.current = id;
-    const destino = `${base}/diligencias/${id}?nova=1`;
+    const destino = `${base}/diligencias/${id}?${edicao ? 'editada' : 'nova'}=1`;
     const fila: { card: { tipo: string; cpf: string }; arquivo: File; nome: string }[] = [];
     pf.forEach((p, i) => {
       const d = docs[i] || {};
@@ -324,14 +327,16 @@ export function FormularioNova({
     (async () => {
       const erros: string[] = [];
       let cards: CardDocumento[] = [];
-      for (let t = 0; t < 5 && !cards.length; t++) {
+      // na edição, os cards de quem é novo são criados alguns segundos depois de salvar
+      const faltaCard = () => fila.some((it) => !cards.some((c) => c.tipo === it.card.tipo && c.documento === it.card.cpf));
+      for (let t = 0; t < (edicao ? 12 : 5) && (!cards.length || (edicao && faltaCard())); t++) {
         setEnvio({ fase: 'docs', msg: 'Preparando o envio dos documentos…', erros });
         try {
           cards = await cardsDocumentos(id);
         } catch {
           cards = [];
         }
-        if (!cards.length) await new Promise((ok) => setTimeout(ok, 3000));
+        if (!cards.length || (edicao && faltaCard())) await new Promise((ok) => setTimeout(ok, 3000));
       }
       for (const [k, item] of fila.entries()) {
         setEnvio({ fase: 'docs', msg: `Enviando documentos (${k + 1} de ${fila.length})…`, erros });
@@ -347,15 +352,15 @@ export function FormularioNova({
         }
       }
       if (erros.length) {
-        setEnvio({ fase: 'fim', msg: 'Diligência criada. Alguns documentos não foram enviados:', erros });
+        setEnvio({ fase: 'fim', msg: (edicao ? 'Alterações salvas.' : 'Diligência criada.') + ' Alguns documentos não foram enviados:', erros });
       } else {
         router.push(destino);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [r]);
-  const [pj, setPj] = useState<PJ[]>([]);
-  const [mat, setMat] = useState<Mat[]>([matVazia()]);
+  const [pj, setPj] = useState<PJ[]>(edicao?.pj ?? []);
+  const [mat, setMat] = useState<Mat[]>(edicao?.mat.length ? edicao.mat : [matVazia()]);
   const mudaMat = (i: number, k: keyof Mat, v: string) => setMat((a) => a.map((m, j) => (j === i ? { ...m, [k]: v } : m)));
 
   const mudaPf = (i: number, k: keyof PF, v: string) => setPf((a) => a.map((p, j) => (j === i ? { ...p, [k]: v } : p)));
@@ -382,8 +387,9 @@ export function FormularioNova({
       <input type="hidden" name="pj" value={JSON.stringify(pj)} />
       <input type="hidden" name="mat" value={JSON.stringify(mat)} />
       <input type="hidden" name="corretores" value={JSON.stringify(corretores)} />
+      {edicao && <input type="hidden" name="r4_id" value={edicao.id} />}
 
-      {unidades && (
+      {unidades && !edicao && (
         <section className="rounded-2xl border border-slate-200 bg-white p-5">
           <label className={rotulo}>
             Unidade *
@@ -402,7 +408,7 @@ export function FormularioNova({
         <div className="mt-3 grid gap-3">
           <label className={rotulo}>
             Endereço completo *
-            <input name="endereco" required className={campo} placeholder="Rua Exemplo, 123, apto 45 — Bairro, São Paulo/SP" />
+            <input name="endereco" required defaultValue={edicao?.endereco} className={campo} placeholder="Rua Exemplo, 123, apto 45 — Bairro, São Paulo/SP" />
           </label>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -605,7 +611,7 @@ export function FormularioNova({
         ))}
       </section>
 
-      {equipe && (
+      {equipe && !edicao && (
         <section className="rounded-2xl border border-slate-200 bg-white p-5">
           <h2 className="text-base font-semibold">Corretores que podem ver esta diligência</h2>
           <p className="mt-1 text-xs text-slate-500">
@@ -648,7 +654,7 @@ export function FormularioNova({
               </ul>
               <button
                 type="button"
-                onClick={() => router.push(`${base}/diligencias/${r?.id}?nova=1`)}
+                onClick={() => router.push(`${base}/diligencias/${r?.id}?${edicao ? 'editada' : 'nova'}=1`)}
                 className="mt-2 rounded-lg bg-[#0C2749] px-3 py-1.5 text-xs font-semibold text-white"
               >
                 Abrir a diligência
@@ -662,9 +668,14 @@ export function FormularioNova({
           disabled={enviando || !!envio || !!r?.ok || Object.values(leituras).some((l) => l.st === 'lendo')}
           className="rounded-lg bg-[#0C2749] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#000E35] disabled:opacity-60"
         >
-          {enviando ? 'Iniciando as certidões… (pode levar até 1 minuto)' : envio || r?.ok ? 'Enviando documentos…' : 'Iniciar diligência'}
+          {edicao
+            ? enviando ? 'Salvando…' : envio || r?.ok ? 'Enviando documentos…' : 'Salvar alterações'
+            : enviando ? 'Iniciando as certidões… (pode levar até 1 minuto)' : envio || r?.ok ? 'Enviando documentos…' : 'Iniciar diligência'}
         </button>
-        <p className="text-xs text-slate-500">{preco ? `${preco} por certidão emitida pelo sistema. ` : ''}Certidões que falharem não são cobradas.</p>
+        <p className="text-xs text-slate-500">
+          {edicao ? 'Pessoas, matrículas e SQL novos ganham certidões automáticas. ' : ''}
+          {preco ? `${preco} por certidão emitida pelo sistema. ` : ''}Certidões que falharem não são cobradas.
+        </p>
       </div>
     </form>
   );
