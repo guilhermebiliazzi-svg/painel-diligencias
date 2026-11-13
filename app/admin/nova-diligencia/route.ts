@@ -10,6 +10,7 @@
 // Acesso: /admin/* exige login + pode_diligencias (proxy.ts).
 import { NextResponse } from 'next/server';
 import { acessoDiligencias, podeVerDiligencia } from '@/lib/diligencia-acesso';
+import { pool } from '@/lib/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -87,6 +88,14 @@ export async function GET(req: Request) {
   const editar = new URL(req.url).searchParams.get('editar') || '';
   // Editar: quem gerencia todas OU o corretor ligado a esta diligência.
   const editId = UUID_RE.test(editar) && acesso && (await podeVerDiligencia(editar)) ? editar : '';
+  // 13/11: diligência do rquatro não se edita por aqui: este formulário regrava os dados e
+  // apagaria a marca "rquatro" (ela sumiria do rquatro). Edição só pelo próprio rquatro.
+  if (editId) {
+    const o = await pool.query(`SELECT dados_completos ->> 'origem' AS origem FROM diligencias WHERE id = $1::uuid`, [editId]);
+    if (o.rows[0]?.origem === 'rquatro') {
+      return pagina(409, 'Diligência do rquatro', 'Esta diligência é de uma unidade do rquatro. Para editar, use o botão "Editar diligência" no próprio rquatro.');
+    }
+  }
   let html: string;
   try {
     const r = await fetch(`${N8N}/nova-diligencia`, { cache: 'no-store', signal: AbortSignal.timeout(20000) });
