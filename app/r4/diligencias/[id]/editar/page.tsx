@@ -117,7 +117,7 @@ export default async function EditarDiligenciaR4({ params }: { params: Promise<{
                 base={base}
                 equipe={null}
                 preco={preco}
-                edicao={{ id: dil.id, endereco: t(dados.endereco) || t(dil.titulo), pf: ini.pf, pj: ini.pj, mat: ini.mat }}
+                edicao={{ id: dil.id, endereco: t(dados.endereco) || t(dil.titulo), pf: ini.pf, pj: ini.pj, mat: ini.mat, estados: Array.isArray(dados.estados_extras) ? (dados.estados_extras as string[]) : [] }}
               />
             </div>
           </>
