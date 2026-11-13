@@ -180,6 +180,12 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
   }
   const anunc = imoveisRef[0];
   if (anunc && anunc.parceiro == null) anunc.parceiro = ((imvs ?? []) as { ref: string; parceiro_nome: string | null }[]).find((i) => i.ref === anunc.ref)?.parceiro_nome ?? null;
+  // 13/11: "Lembrar mais tarde" do corretor — lead pausado (sem mensagem ao cliente) até a data
+  const { data: lemb } = await supabaseAdmin().from('sdr_lembretes').select('lembrar_em,motivo,definido_em,token_expira_em')
+    .eq('lead_id', l.id).is('enviado_em', null).is('cancelado_em', null).order('criado_em', { ascending: false }).limit(1);
+  const lb = (lemb ?? [])[0] as { lembrar_em: string | null; motivo: string | null; definido_em: string | null; token_expira_em: string } | undefined;
+  const pausa = lb ? (lb.lembrar_em ? 'até ' + fmt.format(new Date(lb.lembrar_em)).slice(0, 5) + (lb.motivo ? ' · ' + lb.motivo : '') + ' (corretor é lembrado; cliente não recebe mensagens)'
+    : new Date(lb.token_expira_em).getTime() > Date.now() ? 'corretor pediu para lembrar mais tarde e ainda não escolheu a data' : null) : null;
 
   return (
     <main style={{ backgroundColor: '#f8fafc' }} className="min-h-screen px-4 py-6">
@@ -210,6 +216,7 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
             <Linha k="Captação" v={(etapasCap ?? []).length ? (etapasCap as { etapa: string; quando: string | null; created_at: string }[]).map((e) =>
               (ETAPA_CAP[e.etapa] ?? e.etapa) + (e.quando ? ' ' + fmt.format(new Date(e.quando)) : '') + ' (' + fmt.format(new Date(e.created_at)).slice(0, 5) + ')').join(' → ') : null} />
             <Linha k={l.status === 'encerrado' ? 'Encerrado' : 'Arquivado'} v={['arquivado', 'encerrado'].includes(l.status) ? l.motivo_arquivamento : null} />
+            <Linha k="Pausado" v={pausa} />
             <Linha k="Entrou" v={fmt.format(new Date(l.created_at))} />
           </dl>
         </header>
