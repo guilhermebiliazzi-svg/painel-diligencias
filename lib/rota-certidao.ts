@@ -16,7 +16,11 @@ export function rotaDoTipo(tipo: string | null | undefined): RotaCertidao | null
     tipo.startsWith('cenprot_') ||
     tipo === 'iptu_pref_sp' ||
     tipo === 'dados_cadastrais_imovel' || // automática desde 11/10/2026 (WF-08, Infosimples)
-    tipo === 'prefeitura_iss'
+    tipo === 'prefeitura_iss' ||
+    // 13/11: outros estados (Ceará), rota genérica do WF-08 (Infosimples)
+    tipo.startsWith('sefaz_ce_') ||
+    tipo.startsWith('trt7_') ||
+    tipo === 'tjce_pf'
   )
     return 'wf08';
   return null;
