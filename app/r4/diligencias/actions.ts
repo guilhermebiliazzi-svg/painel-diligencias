@@ -15,6 +15,7 @@ type Pessoa = {
   nascimento: string;
   genero: string;
   mae: string;
+  pai: string;
   nacionalidade: string;
   profissao: string;
   email: string;
@@ -154,6 +155,7 @@ function montarDados(form: FormData): Montado {
     data_nascimento: txt(p.nascimento),
     genero: txt(p.genero),
     nome_mae: up(p.mae),
+    nome_pai: up(p.pai),
     nacionalidade: txt(p.nacionalidade),
     profissao: txt(p.profissao),
     email: txt(p.email).toLowerCase(),
@@ -175,6 +177,7 @@ function montarDados(form: FormData): Montado {
       pf_data_nascimento: b.data_nascimento,
       pf_genero: b.genero,
       pf_nome_mae: b.nome_mae,
+      pf_nome_pai: b.nome_pai,
       pf_estado_civil: p.estado_civil,
       pf_regime_bens: temConjuge(p.estado_civil) ? p.regime : '',
       pf_nacionalidade: b.nacionalidade,
@@ -211,6 +214,20 @@ function montarDados(form: FormData): Montado {
     estados_extras = Array.isArray(e) ? [...new Set(e.map(String))].filter((x) => ['CE'].includes(x)) : [];
   } catch {
     estados_extras = [];
+  }
+  // O TJCE (Ceará) só emite com o nome do pai de cada pessoa que tira certidão.
+  if (estados_extras.includes('CE')) {
+    for (const [i, p] of pf.entries()) {
+      if (!txt(p.pai)) return { ok: false as const, msg: `Vendedor(a) ${i + 1}: informe o nome do pai (o TJCE exige para o Ceará).` };
+      if (temConjuge(p.estado_civil) && so(p.conjuge?.cpf).length === 11 && !txt(p.conjuge?.pai)) {
+        return { ok: false as const, msg: `Cônjuge do(a) vendedor(a) ${i + 1}: informe o nome do pai (o TJCE exige para o Ceará).` };
+      }
+    }
+    for (const [i, p] of pj.entries()) {
+      for (const [ri, r] of (p.reps || []).entries()) {
+        if (r.certidoes && !txt(r.pai)) return { ok: false as const, msg: `Empresa ${i + 1}, signatário ${ri + 1}: informe o nome do pai (o TJCE exige para o Ceará).` };
+      }
+    }
   }
 
   return { ok: true, endereco, matriculas, vendedoresPF, vendedoresPJ, estados_extras };
