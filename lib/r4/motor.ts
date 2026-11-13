@@ -67,6 +67,31 @@ export async function enviarAoMotor(corpo: Record<string, unknown>): Promise<Res
   return j;
 }
 
+/**
+ * Edita a diligência no motor (fluxo R4-03, 13/11). O corpo é o mesmo formato
+ * do envio, mais o id do motor. Responde rápido: as certidões novas são criadas
+ * depois, em segundo plano.
+ */
+export async function editarNoMotor(corpo: Record<string, unknown>): Promise<{ ok: boolean; erro?: string }> {
+  const segredo = await segredoMotor();
+  if (!segredo) return { ok: false, erro: 'O motor do rquatro ainda não foi configurado (segredo ausente).' };
+  try {
+    const r = await fetch(`${N8N}/r4-diligencia-editar`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-r4-secret': segredo },
+      body: JSON.stringify(corpo),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(60_000),
+    });
+    const j = (await r.json().catch(() => null)) as { ok?: boolean; erro?: string } | null;
+    if (r.status === 404) return { ok: false, erro: 'O fluxo de edição do motor está desligado. Avise a administração do rquatro.' };
+    if (!r.ok || !j?.ok) return { ok: false, erro: j?.erro || `Motor respondeu ${r.status}` };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, erro: `Motor não respondeu: ${(e as Error).message}` };
+  }
+}
+
 // Linha de painel.v_painel_cliente_admin (só o que o rquatro usa).
 export type CertidaoMotor = {
   certidao_id: string;
