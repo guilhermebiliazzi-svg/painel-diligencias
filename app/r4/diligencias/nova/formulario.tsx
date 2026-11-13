@@ -24,6 +24,7 @@ export type Conjuge = {
   nascimento: string;
   genero: string;
   mae: string;
+  pai: string;
   nacionalidade: string;
   profissao: string;
   email: string;
@@ -35,6 +36,7 @@ export type PF = {
   nascimento: string;
   genero: string;
   mae: string;
+  pai: string;
   nacionalidade: string;
   profissao: string;
   email: string;
@@ -51,6 +53,7 @@ export type Rep = {
   nascimento: string;
   genero: string;
   mae: string;
+  pai: string;
   nacionalidade: string;
   profissao: string;
   estado_civil: string;
@@ -60,15 +63,15 @@ export type PJ = { vinculo: string; nome: string; cnpj: string; reps: Rep[] };
 export type Mat = { numero: string; cartorio: string; sql: string };
 
 const conjVazio = (): Conjuge => ({
-  participacao: '', registro: '', nome: '', cpf: '', rg: '', nascimento: '', genero: '', mae: '',
+  participacao: '', registro: '', nome: '', cpf: '', rg: '', nascimento: '', genero: '', mae: '', pai: '',
   nacionalidade: 'brasileiro(a)', profissao: '', email: '',
 });
 const pfVazia = (): PF => ({
-  nome: '', cpf: '', rg: '', nascimento: '', genero: '', mae: '', nacionalidade: 'brasileiro(a)', profissao: '',
+  nome: '', cpf: '', rg: '', nascimento: '', genero: '', mae: '', pai: '', nacionalidade: 'brasileiro(a)', profissao: '',
   email: '', estado_civil: '', regime: '', conjuge: conjVazio(),
 });
 const repVazio = (): Rep => ({
-  papel: '', certidoes: false, nome: '', cpf: '', rg: '', nascimento: '', genero: '', mae: '',
+  papel: '', certidoes: false, nome: '', cpf: '', rg: '', nascimento: '', genero: '', mae: '', pai: '',
   nacionalidade: 'brasileiro(a)', profissao: '', estado_civil: '', email: '',
 });
 const pjVazia = (): PJ => ({ vinculo: '', nome: '', cnpj: '', reps: [repVazio()] });
@@ -82,7 +85,7 @@ const ESTADOS_EXTRAS = [{ uf: 'CE', nome: 'Ceará' }];
 // Arquivos de cada vendedor (mesma posição da lista de vendedores)
 type Docs = { identidade?: File; comprovante?: File; estado_civil?: File; conjuge?: File };
 type Leitura = { st: 'lendo' | 'ok' | 'erro'; msg: string };
-type DadosOcr = { nome: string | null; cpf: string | null; rg: string | null; nascimento: string | null; mae: string | null; genero: string | null };
+type DadosOcr = { nome: string | null; cpf: string | null; rg: string | null; nascimento: string | null; mae: string | null; pai?: string | null; genero: string | null };
 
 const LIMITE_OCR = 4 * 1024 * 1024;
 const ACEITA = 'image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,.pdf';
@@ -209,7 +212,7 @@ function Sel({ valor, muda, opcoes, vazio = 'Escolha…' }: { valor: string; mud
 }
 
 /** Campos pessoais comuns (titular, cônjuge e signatário). */
-function DadosPessoa<T extends { nome: string; cpf: string; rg: string; nascimento: string; genero: string; mae: string; nacionalidade: string; profissao: string; email: string }>({
+function DadosPessoa<T extends { nome: string; cpf: string; rg: string; nascimento: string; genero: string; mae: string; pai: string; nacionalidade: string; profissao: string; email: string }>({
   p,
   muda,
   obrig,
@@ -230,6 +233,10 @@ function DadosPessoa<T extends { nome: string; cpf: string; rg: string; nascimen
         <Sel valor={p.genero} muda={(v) => muda('genero', v)} opcoes={[['F', 'Feminino'], ['M', 'Masculino']]} />
       </label>
       <label className={`${rotulo} sm:col-span-2`}>Nome da mãe{a}<input value={p.mae} onChange={(e) => muda('mae', e.target.value)} className={campo} /></label>
+      <label className={`${rotulo} sm:col-span-2`}>
+        Nome do pai <span className="font-normal text-slate-400">(obrigatório se marcar o Ceará: o TJCE exige)</span>
+        <input value={p.pai} onChange={(e) => muda('pai', e.target.value)} className={campo} />
+      </label>
       <label className={rotulo}>Nacionalidade<input value={p.nacionalidade} onChange={(e) => muda('nacionalidade', e.target.value)} className={campo} /></label>
       <label className={rotulo}>Profissão<input value={p.profissao} onChange={(e) => muda('profissao', e.target.value)} className={campo} /></label>
       <label className={`${rotulo} sm:col-span-2`}>E-mail<input type="email" value={p.email} onChange={(e) => muda('email', e.target.value)} className={campo} /></label>
@@ -288,6 +295,7 @@ export function FormularioNova({
         ['nascimento', d.nascimento],
         ['genero', d.genero],
         ['mae', d.mae],
+        ['pai', d.pai ?? null],
       ];
       setPf((a) =>
         a.map((p, j) => {
