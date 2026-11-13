@@ -76,6 +76,9 @@ const matVazia = (): Mat => ({ numero: '', cartorio: '', sql: '' });
 
 export const temConjuge = (ec: string) => ec === 'casado' || ec === 'uniao_estavel';
 
+/** Estados com certidões além de SP (13/11: Ceará). */
+const ESTADOS_EXTRAS = [{ uf: 'CE', nome: 'Ceará' }];
+
 // Arquivos de cada vendedor (mesma posição da lista de vendedores)
 type Docs = { identidade?: File; comprovante?: File; estado_civil?: File; conjuge?: File };
 type Leitura = { st: 'lendo' | 'ok' | 'erro'; msg: string };
@@ -248,7 +251,7 @@ export function FormularioNova({
   /** corretores da unidade (só para o responsável escolher quem vê) */
   equipe: { id: string; nome: string | null; email: string }[] | null;
   /** 13/11: editar uma diligência que já existe (formulário já preenchido) */
-  edicao?: { id: string; endereco: string; pf: PF[]; pj: PJ[]; mat: Mat[] };
+  edicao?: { id: string; endereco: string; pf: PF[]; pj: PJ[]; mat: Mat[]; estados?: string[] };
 }) {
   const router = useRouter();
   const [r, acao, enviando] = useActionState(edicao ? editarDiligencia : criarDiligencia, null);
@@ -256,6 +259,8 @@ export function FormularioNova({
   const [docs, setDocs] = useState<Docs[]>(edicao?.pf.length ? edicao.pf.map(() => ({})) : [{}]);
   const [leituras, setLeituras] = useState<Record<string, Leitura>>({});
   const [corretores, setCorretores] = useState<string[]>([]);
+  // 13/11: estados além de SP (certidões do estado para todos os vendedores)
+  const [estados, setEstados] = useState<string[]>(edicao?.estados ?? []);
   const [envio, setEnvio] = useState<{ fase: 'docs' | 'fim'; msg: string; erros: string[] } | null>(null);
   const enviouDocs = useRef<string | null>(null);
 
@@ -387,6 +392,7 @@ export function FormularioNova({
       <input type="hidden" name="pj" value={JSON.stringify(pj)} />
       <input type="hidden" name="mat" value={JSON.stringify(mat)} />
       <input type="hidden" name="corretores" value={JSON.stringify(corretores)} />
+      <input type="hidden" name="estados" value={JSON.stringify(estados)} />
       {edicao && <input type="hidden" name="r4_id" value={edicao.id} />}
 
       {unidades && !edicao && (
@@ -609,6 +615,29 @@ export function FormularioNova({
             )}
           </div>
         ))}
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5">
+        <h2 className="text-base font-semibold">Certidões de outros estados</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Além de São Paulo. Marque se algum vendedor mora ou tem negócios no estado: as certidões dele entram para todos os vendedores.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
+          {ESTADOS_EXTRAS.map((e) => (
+            <label key={e.uf} className="inline-flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={estados.includes(e.uf)}
+                onChange={(ev) => setEstados((a) => (ev.target.checked ? [...a, e.uf] : a.filter((x) => x !== e.uf)))}
+                className="size-4 rounded border-slate-300"
+              />
+              {e.nome}
+            </label>
+          ))}
+        </div>
+        {edicao && (edicao.estados ?? []).length > 0 && (
+          <p className="mt-2 text-xs text-slate-500">Desmarcar um estado não apaga as certidões dele que já foram criadas: esconda pelo &quot;Mostrar&quot; do card.</p>
+        )}
       </section>
 
       {equipe && !edicao && (
