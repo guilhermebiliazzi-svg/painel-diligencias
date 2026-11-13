@@ -4,7 +4,7 @@ import { r4Admin, r4UsuarioAtual } from '@/lib/r4/supabase';
 import { revalidatePath } from 'next/cache';
 import { pool } from '@/lib/db';
 import { exigirDiligenciaR4 } from '@/lib/r4/diligencia';
-import { enviarAoMotor } from '@/lib/r4/motor';
+import { editarNoMotor, enviarAoMotor } from '@/lib/r4/motor';
 
 export type ResultadoNova = { ok: boolean; msg: string; id?: string } | null;
 
@@ -63,26 +63,18 @@ function faltaParaCertidoes(p: Pessoa, n: string): string | null {
   return null;
 }
 
-/** Cria a diligência no rquatro e manda para o motor (fluxo R4-01). */
-export async function criarDiligencia(_prev: ResultadoNova, form: FormData): Promise<ResultadoNova> {
-  const u = await r4UsuarioAtual();
-  if (!u || !u.ativo) return { ok: false, msg: 'Sessão expirada. Entre de novo.' };
-  if (!u.ferramentas.includes('diligencia')) return { ok: false, msg: 'Seu acesso não inclui a diligência.' };
+type Montado =
+  | { ok: false; msg: string }
+  | {
+      ok: true;
+      endereco: string;
+      matriculas: Record<string, unknown>[];
+      vendedoresPF: Record<string, unknown>[];
+      vendedoresPJ: Record<string, unknown>[];
+    };
 
-  const unidadeId = u.papel === 'superadmin' ? txt(form.get('unidade_id')) : u.unidade_id;
-  if (!unidadeId) return { ok: false, msg: 'Escolha a unidade.' };
-
-  const adm = r4Admin();
-  const { data: un } = await adm
-    .from('unidades')
-    .select('id,nome,ativa,pasta_drive_id')
-    .eq('id', unidadeId)
-    .maybeSingle();
-  if (!un || !un.ativa) return { ok: false, msg: 'Unidade inativa ou inexistente.' };
-  if (!un.pasta_drive_id) {
-    return { ok: false, msg: 'A pasta do Google Drive da unidade ainda não foi configurada.' };
-  }
-
+/** Lê e confere o formulário (criar e editar) e devolve os dados no formato do WF-01. */
+function montarDados(form: FormData): Montado {
   let pf: PF[] = [];
   let pj: PJ[] = [];
   let mat: Mat[] = [];
@@ -91,55 +83,55 @@ export async function criarDiligencia(_prev: ResultadoNova, form: FormData): Pro
     pj = JSON.parse(String(form.get('pj') || '[]'));
     mat = JSON.parse(String(form.get('mat') || '[]'));
   } catch {
-    return { ok: false, msg: 'Dados do formulário inválidos. Recarregue a página.' };
+    return { ok: false as const, msg: 'Dados do formulário inválidos. Recarregue a página.' };
   }
 
   const endereco = txt(form.get('endereco')).replace(/\s+/g, ' ');
-  if (endereco.length < 8) return { ok: false, msg: 'Informe o endereço completo do imóvel (com número e complemento).' };
+  if (endereco.length < 8) return { ok: false as const, msg: 'Informe o endereço completo do imóvel (com número e complemento).' };
 
   mat = mat.filter((m) => txt(m.numero) || txt(m.sql) || txt(m.cartorio));
-  if (!mat.length) return { ok: false, msg: 'Informe o número da matrícula do imóvel.' };
+  if (!mat.length) return { ok: false as const, msg: 'Informe o número da matrícula do imóvel.' };
   for (const [i, m] of mat.entries()) {
-    if (!so(m.numero)) return { ok: false, msg: `Matrícula ${i + 1}: informe o número.` };
-    if (txt(m.sql) && so(m.sql).length < 10) return { ok: false, msg: `Matrícula ${i + 1}: SQL do IPTU incompleto.` };
+    if (!so(m.numero)) return { ok: false as const, msg: `Matrícula ${i + 1}: informe o número.` };
+    if (txt(m.sql) && so(m.sql).length < 10) return { ok: false as const, msg: `Matrícula ${i + 1}: SQL do IPTU incompleto.` };
   }
 
   pf = pf.filter((p) => txt(p.nome) || so(p.cpf));
   pj = pj.filter((p) => txt(p.nome) || so(p.cnpj));
   if (!pf.length && !pj.some((p) => p.vinculo === 'vendedora')) {
-    return { ok: false, msg: 'Inclua ao menos um vendedor (pessoa física ou empresa vendedora).' };
+    return { ok: false as const, msg: 'Inclua ao menos um vendedor (pessoa física ou empresa vendedora).' };
   }
 
   for (const [i, p] of pf.entries()) {
     const n = `Vendedor(a) ${i + 1}`;
     const f = faltaParaCertidoes(p, n);
-    if (f) return { ok: false, msg: f };
-    if (!ESTADOS.includes(p.estado_civil)) return { ok: false, msg: `${n}: informe o estado civil.` };
+    if (f) return { ok: false as const, msg: f };
+    if (!ESTADOS.includes(p.estado_civil)) return { ok: false as const, msg: `${n}: informe o estado civil.` };
     if (temConjuge(p.estado_civil)) {
-      if (!REGIMES.includes(p.regime)) return { ok: false, msg: `${n}: informe o regime de bens.` };
+      if (!REGIMES.includes(p.regime)) return { ok: false as const, msg: `${n}: informe o regime de bens.` };
       if (!PARTICIPACOES.includes(p.conjuge?.participacao)) {
-        return { ok: false, msg: `${n}: informe se o cônjuge é coproprietário (parte vendedora) ou anuente.` };
+        return { ok: false as const, msg: `${n}: informe se o cônjuge é coproprietário (parte vendedora) ou anuente.` };
       }
       const fc = faltaParaCertidoes(p.conjuge, `Cônjuge de ${n.toLowerCase()}`);
-      if (fc) return { ok: false, msg: fc };
+      if (fc) return { ok: false as const, msg: fc };
     }
   }
   for (const [i, p] of pj.entries()) {
     const n = `Empresa ${i + 1}`;
-    if (p.vinculo !== 'vendedora' && p.vinculo !== 'participacao') return { ok: false, msg: `${n}: informe o vínculo da empresa.` };
-    if (!txt(p.nome)) return { ok: false, msg: `${n}: informe a razão social.` };
-    if (!cnpjValido(so(p.cnpj))) return { ok: false, msg: `${n}: CNPJ inválido.` };
+    if (p.vinculo !== 'vendedora' && p.vinculo !== 'participacao') return { ok: false as const, msg: `${n}: informe o vínculo da empresa.` };
+    if (!txt(p.nome)) return { ok: false as const, msg: `${n}: informe a razão social.` };
+    if (!cnpjValido(so(p.cnpj))) return { ok: false as const, msg: `${n}: CNPJ inválido.` };
     if (p.vinculo === 'vendedora') {
       const reps = (p.reps || []).filter((r) => txt(r.nome) || so(r.cpf));
-      if (!reps.length) return { ok: false, msg: `${n}: informe quem assina pela empresa.` };
+      if (!reps.length) return { ok: false as const, msg: `${n}: informe quem assina pela empresa.` };
       for (const [ri, r] of reps.entries()) {
         const nr = `${n}, signatário ${ri + 1}`;
-        if (!['socio_adm', 'adm_nao_socio', 'procurador'].includes(r.papel)) return { ok: false, msg: `${nr}: informe o papel na empresa.` };
-        if (!txt(r.nome)) return { ok: false, msg: `${nr}: informe o nome.` };
-        if (!cpfValido(so(r.cpf))) return { ok: false, msg: `${nr}: CPF inválido.` };
+        if (!['socio_adm', 'adm_nao_socio', 'procurador'].includes(r.papel)) return { ok: false as const, msg: `${nr}: informe o papel na empresa.` };
+        if (!txt(r.nome)) return { ok: false as const, msg: `${nr}: informe o nome.` };
+        if (!cpfValido(so(r.cpf))) return { ok: false as const, msg: `${nr}: CPF inválido.` };
         if (r.certidoes) {
           const f = faltaParaCertidoes(r, nr);
-          if (f) return { ok: false, msg: f };
+          if (f) return { ok: false as const, msg: f };
         }
       }
       p.reps = reps;
@@ -151,7 +143,7 @@ export async function criarDiligencia(_prev: ResultadoNova, form: FormData): Pro
     ...pf.map((p) => so(p.cpf)),
     ...pf.filter((p) => temConjuge(p.estado_civil)).map((p) => so(p.conjuge.cpf)),
   ];
-  if (new Set(cpfs).size !== cpfs.length) return { ok: false, msg: 'Há CPF repetido entre vendedores e cônjuges.' };
+  if (new Set(cpfs).size !== cpfs.length) return { ok: false as const, msg: 'Há CPF repetido entre vendedores e cônjuges.' };
 
   // Formato do formulário do WF-01 (o R4-01 usa o mesmo "Montar Template").
   const pessoa = (p: Pessoa) => ({
@@ -210,6 +202,33 @@ export async function criarDiligencia(_prev: ResultadoNova, form: FormData): Pro
     matricula_cartorio: txt(m.cartorio),
     matricula_iptu: txt(m.sql),
   }));
+
+  return { ok: true, endereco, matriculas, vendedoresPF, vendedoresPJ };
+}
+
+/** Cria a diligência no rquatro e manda para o motor (fluxo R4-01). */
+export async function criarDiligencia(_prev: ResultadoNova, form: FormData): Promise<ResultadoNova> {
+  const u = await r4UsuarioAtual();
+  if (!u || !u.ativo) return { ok: false, msg: 'Sessão expirada. Entre de novo.' };
+  if (!u.ferramentas.includes('diligencia')) return { ok: false, msg: 'Seu acesso não inclui a diligência.' };
+
+  const unidadeId = u.papel === 'superadmin' ? txt(form.get('unidade_id')) : u.unidade_id;
+  if (!unidadeId) return { ok: false, msg: 'Escolha a unidade.' };
+
+  const adm = r4Admin();
+  const { data: un } = await adm
+    .from('unidades')
+    .select('id,nome,ativa,pasta_drive_id')
+    .eq('id', unidadeId)
+    .maybeSingle();
+  if (!un || !un.ativa) return { ok: false, msg: 'Unidade inativa ou inexistente.' };
+  if (!un.pasta_drive_id) {
+    return { ok: false, msg: 'A pasta do Google Drive da unidade ainda não foi configurada.' };
+  }
+
+  const m = montarDados(form);
+  if (!m.ok) return { ok: false, msg: m.msg };
+  const { endereco, matriculas, vendedoresPF, vendedoresPJ } = m;
 
   const dados = { endereco, matriculas, vendedoresPF, vendedoresPJ };
 
@@ -309,4 +328,58 @@ export async function r4Arquivar(fd: FormData): Promise<void> {
 
 export async function r4Desarquivar(fd: FormData): Promise<void> {
   await marcarArquivo(fd, false);
+}
+
+/**
+ * Edita a diligência (13/11): corrige endereço, matrículas e proprietários.
+ * Pode editar: responsável da unidade, superadmin e quem cadastrou.
+ * O motor (fluxo R4-03) grava os dados SEM tirar a marca "rquatro", cria as
+ * certidões só de quem/do que é novo (pessoa nova, matrícula ou SQL novos) e
+ * atualiza os dados pessoais das certidões que já existem (para a reemissão).
+ * Quem sai do formulário continua na diligência: esconde-se pelo "Mostrar" do card.
+ */
+export async function editarDiligencia(_prev: ResultadoNova, form: FormData): Promise<ResultadoNova> {
+  const u = await r4UsuarioAtual();
+  if (!u || !u.ativo) return { ok: false, msg: 'Sessão expirada. Entre de novo.' };
+  if (!u.ferramentas.includes('diligencia')) return { ok: false, msg: 'Seu acesso não inclui a diligência.' };
+
+  const id = txt(form.get('r4_id'));
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return { ok: false, msg: 'Diligência inválida.' };
+  const adm = r4Admin();
+  const { data: dil } = await adm
+    .from('diligencias')
+    .select('id,unidade_id,motor_id,criado_por,dados')
+    .eq('id', id)
+    .maybeSingle();
+  if (!dil || !dil.motor_id) return { ok: false, msg: 'Diligência não encontrada.' };
+  const pode =
+    u.papel === 'superadmin' ||
+    (dil.unidade_id === u.unidade_id && (u.papel === 'admin' || dil.criado_por === u.id));
+  if (!pode) return { ok: false, msg: 'Só o responsável da unidade ou quem cadastrou pode editar esta diligência.' };
+
+  const m = montarDados(form);
+  if (!m.ok) return { ok: false, msg: m.msg };
+  const { endereco, matriculas, vendedoresPF, vendedoresPJ } = m;
+
+  const r = await editarNoMotor({
+    id: dil.motor_id,
+    endereco,
+    matriculas,
+    vendedoresPF,
+    vendedoresPJ,
+    r4: { unidade_id: dil.unidade_id, diligencia_r4_id: dil.id },
+  });
+  if (!r.ok) return { ok: false, msg: `Não consegui salvar: ${r.erro}` };
+
+  const antes = (dil.dados || {}) as Record<string, unknown>;
+  await adm
+    .from('diligencias')
+    .update({
+      titulo: endereco,
+      dados: { ...antes, endereco, matriculas, vendedoresPF, vendedoresPJ },
+      atualizado_em: new Date().toISOString(),
+    })
+    .eq('id', dil.id);
+  revalidatePath('/r4/diligencias/' + dil.id);
+  return { ok: true, msg: 'Alterações salvas.', id: dil.id };
 }
