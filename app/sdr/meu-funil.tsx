@@ -273,6 +273,8 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
                                 </a>
                               )}
                               {l.telefone && <Link href={`/sdr/conversa/${String(l.telefone).replace(/\D/g, '')}`} className="block text-xs font-medium text-slate-700 underline hover:text-slate-900">Conversa da Eva com o cliente</Link>}
+                              {/* 14/11: registrar visita direto pelo painel */}
+                              {!ehProp && !['arquivado', 'encerrado'].includes(l.status) && <a href={`/sdr/visita/${l.id}`} className="mt-1 inline-block rounded-full bg-emerald-600 px-2.5 py-0.5 text-xs font-semibold text-white hover:bg-emerald-700">Registrar visita</a>}
                             </td>
                             <td className="py-2 pr-3 text-slate-600">{INTENCAO[l.intencao ?? ''] ?? (l.intencao || '—')}</td>
                             <td className="py-2 pr-3 text-slate-600">
