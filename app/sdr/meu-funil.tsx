@@ -111,6 +111,10 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
 
   // "Seus" = atribuídos a ele (ficou com o lead). "Ofertados" = recebeu a oferta ou ficou com o lead.
   const meus = leads.filter((l) => fim8(l.corretor_phone) === k && !!l.atribuido_em);
+  // 14/11: leads de imóvel da carteira dele que vieram direto ao gestor (sem fila) — não têm atribuido_em
+  const diretos = leads.filter((l) => fim8(l.corretor_phone) === k && !l.atribuido_em && !['aguardando_cliente', 'em_qualificacao', 'qualificado', 'em_cascata', 'aguardando_guilherme'].includes(l.status));
+  const diretosIds = new Set(diretos.map((l) => l.id));
+  const comVoce = [...meus, ...diretos];
   const ofertados = new Set([...atrs.map((a) => a.lead_id), ...meus.map((l) => l.id)]);
   const noPrazo = (a: Atr) => {
     if (!a.respondido_em) return false;
@@ -126,21 +130,25 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
   const proposta = (l: LeadMin) => !!funil.get(l.id)?.proposta;
   const ehProp = fk === 'prop_venda' || fk === 'prop_locacao';
   const nivel = (l: LeadMin) => nivelCap.get(l.id) ?? -1;
-  const etapas = [
-    { rotulo: 'Ofertados a você', n: ofertados.size },
-    { rotulo: 'Você aceitou', n: meus.length },
-    { rotulo: 'Contato feito', n: meus.filter(ehProp ? (l: LeadMin) => !!l.feito_em || nivel(l) >= 0 : contato).length },
+  // 14/11: Ofertados → aceitos (fila) e, ao lado, os recebidos direto (carteira); daí em diante conta todos os leads com ele,
+  // e a % das etapas seguintes é sobre esse total (aceitos + diretos).
+  const baseCom = comVoce.length;
+  const etapas: { rotulo: string; n: number; base?: number; sem?: boolean }[] = [
+    { rotulo: 'Ofertados a você', n: ofertados.size, sem: true },
+    { rotulo: 'Você aceitou', n: meus.length, base: ofertados.size },
+    { rotulo: 'Recebidos direto (carteira)', n: diretos.length, sem: true },
+    { rotulo: 'Contato feito', n: comVoce.filter(ehProp ? (l: LeadMin) => !!l.feito_em || nivel(l) >= 0 : contato).length, base: baseCom },
     ...(fk === 'prop_venda'
-      ? ETAPAS_CAP.map((e, i) => ({ rotulo: e.rotulo, n: meus.filter((l) => nivel(l) >= i).length }))
+      ? ETAPAS_CAP.map((e, i) => ({ rotulo: e.rotulo, n: comVoce.filter((l) => nivel(l) >= i).length, base: baseCom }))
       : fk === 'prop_locacao'
         ? []
         : [
-            { rotulo: 'Visita agendada', n: meus.filter(visita).length },
-            { rotulo: 'Proposta', n: meus.filter(proposta).length },
+            { rotulo: 'Visita agendada', n: comVoce.filter(visita).length, base: baseCom },
+            { rotulo: 'Proposta', n: comVoce.filter(proposta).length, base: baseCom },
           ]),
   ];
-  const topo = Math.max(etapas[0].n, 1);
-  const lista = [...meus].sort((a, b) => (b.atribuido_em || b.created_at).localeCompare(a.atribuido_em || a.created_at));
+  const topo = Math.max(ofertados.size, baseCom, 1);
+  const lista = [...comVoce].sort((a, b) => (b.atribuido_em || b.created_at).localeCompare(a.atribuido_em || a.created_at));
   // 10/11: corretor parceiro (dono do imóvel, outra unidade) de cada lead: nome, telefone e a conversa com a Eva.
   const parceiros = new Map<string, { nome: string; tel: string; ref: string | null }[]>();
   if (lista.length) {
@@ -166,7 +174,7 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
               <Link href="/" className="text-xs font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-800">← Painel interno</Link>
             )}
             <h1 className="mt-1 text-2xl font-semibold text-slate-900 sm:text-3xl">{comoAdmin ? `Funil de ${nome}` : 'Meu funil'}</h1>
-            <p className="mt-1 text-sm text-slate-600">{comoAdmin ? `Exatamente o que ${nome} vê em “Meu funil”.` : `Os leads da Eva oferecidos a você, ${nome}.`}</p>
+            <p className="mt-1 text-sm text-slate-600">{comoAdmin ? `Exatamente o que ${nome} vê em “Meu funil”.` : `Os leads da Eva com você, ${nome}: os da fila e os dos imóveis da sua carteira.`}</p>
           </div>
           <nav className="flex gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
             {PERIODOS.map((x) => (
@@ -198,11 +206,12 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
           <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">Não consegui ler os dados: {erro}</div>
         ) : (
           <>
-            <section className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <section className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-5">
               <Kpi rotulo="Ofertados" valor={ofertados.size} />
               <Kpi rotulo="Aceitos" valor={meus.length} sub={`${pct(meus.length, ofertados.size)}% das ofertas`} />
               <Kpi rotulo="Recusados" valor={recusou.size} />
               <Kpi rotulo="Sem resposta" valor={semResposta} sub="no prazo de 15 min" />
+              <Kpi rotulo="Diretos (carteira)" valor={diretos.length} sub="imóveis que você gere" />
             </section>
 
             <section style={{ backgroundColor: '#ffffff' }} className="mt-6 rounded-2xl border border-slate-200 p-5 shadow-sm">
@@ -214,7 +223,7 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
                       <span className="text-slate-700">{e.rotulo}</span>
                       <span className="tabular-nums text-slate-900">
                         <strong>{e.n}</strong>
-                        {i > 0 && <span className="ml-2 text-xs text-slate-500">{pct(e.n, etapas[0].n)}%</span>}
+                        {!e.sem && i > 0 && <span className="ml-2 text-xs text-slate-500">{pct(e.n, e.base ?? etapas[0].n)}%</span>}
                       </span>
                     </div>
                     <div className="mt-1 h-2.5 w-full rounded-full bg-slate-100">
@@ -235,7 +244,7 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
                   <table className="w-full min-w-[640px] text-left text-sm">
                     <thead className="text-xs uppercase tracking-wide text-slate-500">
                       <tr>
-                        <th className="py-2 pr-3 font-medium">Aceito em</th>
+                        <th className="py-2 pr-3 font-medium">Com você desde</th>
                         <th className="py-2 pr-3 font-medium">Lead</th>
                         <th className="py-2 pr-3 font-medium">Interesse</th>
                         <th className="py-2 pr-3 font-medium">Imóvel</th>
@@ -252,7 +261,10 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
                         const tom = (ehProp ? nv >= 0 : proposta(l) || visita(l)) ? 'bg-emerald-100 text-emerald-700' : (ehProp ? !!l.feito_em : contato(l)) ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700';
                         return (
                           <tr key={l.id}>
-                            <td className="whitespace-nowrap py-2 pr-3 text-slate-600">{fmtData.format(new Date(l.atribuido_em || l.created_at))}</td>
+                            <td className="whitespace-nowrap py-2 pr-3 text-slate-600">
+                              {fmtData.format(new Date(l.atribuido_em || l.created_at))}
+                              <span className="block text-xs text-slate-500">{diretosIds.has(l.id) ? 'carteira (direto)' : 'fila'}</span>
+                            </td>
                             <td className="py-2 pr-3">
                               <span className="font-medium text-slate-900">{l.nome || '—'}</span>
                               {l.telefone && (
