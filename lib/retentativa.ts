@@ -10,6 +10,8 @@
 //      erro_infosimples  : 30 min depois da última atualização, até 5 tentativas
 //  WF-15 e-SAJ (TJSP)  — de 2 em 2 h, minuto 0, horas ÍMPARES em UTC
 //      aguardando_email / em_processamento com número de pedido, pedido nos últimos 60 dias
+//  WF-06 E-mail — de 2 em 2 h, minuto 0, horas ÍMPARES em UTC (14/11: inclui o TJCE)
+//      aguardando_email dos tipos que chegam por e-mail (TRF, TJSP e-SAJ, TJCE)
 //  WF-16 eproc (TJSP 1º grau) — 03, 09, 15 e 21 h UTC (00, 06, 12 e 18 h de Brasília)
 //      em_processamento / erro_infosimples com número de pedido, até 12 tentativas,
 //      criada há menos de 7 dias, espera 1 h, 2 h, 4 h e depois 6 h (teto desde 12/11)
@@ -27,6 +29,8 @@ export type Retentativa = {
 };
 
 const ESAJ = new Set(['tjsp_civeis', 'tjsp_falencia', 'tjsp_inventarios', 'tjsp_criminais', 'tjsp_exec_crim']);
+/** Certidões que o órgão manda por e-mail e o WF-06 baixa da caixa. */
+const POR_EMAIL = new Set(['trf_civel', 'trf_criminal', 'tjce_pf', ...ESAJ]);
 const H = 3600_000;
 const FINAIS = new Set(['concluido', 'aguardando_match', 'cancelada', 'com_pendencias']);
 
@@ -82,6 +86,9 @@ export function calcularRetentativa(c: Linha, agora = new Date()): Retentativa |
     ['aguardando_email', 'em_processamento', 'baixando_esaj'].includes(st) &&
     new Date(c.pedido_data).getTime() >= agora.getTime() - 60 * 24 * H
   ) cands.push(proximoDisparo(agora, 0, impar));
+
+  // WF-06 (e-mail do órgão): confere a caixa de 2 em 2 h
+  if (POR_EMAIL.has(c.tipo) && st === 'aguardando_email') cands.push(proximoDisparo(agora, 0, impar));
 
   // WF-16 (eproc)
   if (
