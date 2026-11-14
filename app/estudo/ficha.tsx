@@ -80,6 +80,7 @@ const FORMS: Record<Tipo, { label: string; sections: Secao[] }> = {
       ] },
       { num: '3', h: 'Decisão de preço (vender rápido × segurar)', fields: [
         yn('mora', 'O proprietário mora no imóvel?'),
+        money('aluguel_moradia', 'Aluguel de um imóvel igual', '/mês', { showIf: ['mora', 'sim'], full: true, hint: 'quanto pagaria para morar em outro igual — entra como economia na conta vender agora × esperar' }),
         yn('alugado', 'Está alugado?'),
         money('aluguel', 'Aluguel', '/mês', { showIf: ['alugado', 'sim'], half: true }),
         money('cond_mes', 'Condomínio', '/mês', { half: true }),
@@ -122,6 +123,7 @@ const FORMS: Record<Tipo, { label: string; sections: Secao[] }> = {
       ] },
       { num: '3', h: 'Decisão de preço', fields: [
         yn('mora', 'O proprietário mora no imóvel?'),
+        money('aluguel_moradia', 'Aluguel de um imóvel igual', '/mês', { showIf: ['mora', 'sim'], full: true, hint: 'quanto pagaria para morar em outro igual — entra como economia na conta vender agora × esperar' }),
         money('cond_mes', 'Condomínio (se houver)', '/mês', { half: true }),
         money('iptu', 'IPTU', '/ano', { half: true }),
         money('alvo', 'Preço-alvo do proprietário', '', { full: true, hint: 'se não souber, tudo bem' }),
@@ -226,7 +228,8 @@ function montarMensagem(tipo: Tipo, vals: Record<string, Valor>): string {
   const alug = g('alugado');
   if (mora || alug) {
     let occ: string;
-    if (mora === 'sim') occ = tipo === 'sala' ? 'o proprietário usa a sala' : 'o proprietário mora no imóvel';
+    if (mora === 'sim') occ = (tipo === 'sala' ? 'o proprietário usa a sala' : 'o proprietário mora no imóvel')
+      + (tipo !== 'sala' && g('aluguel_moradia') ? ' — pagaria ' + R$(g('aluguel_moradia')!) + '/mês de aluguel num imóvel igual' : '');
     else if (alug === 'sim') occ = 'alugado' + (g('aluguel') ? ' por ' + R$(g('aluguel')!) + '/mês' : '');
     else if (mora === 'não' && alug === 'não') occ = 'desocupado (ninguém mora, não está alugado)';
     else occ = line([mora && (tipo === 'sala' ? 'usa' : 'mora') + ': ' + mora, alug && 'alugado: ' + alug]);
