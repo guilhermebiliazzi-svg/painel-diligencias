@@ -457,7 +457,19 @@ export default function Ficha() {
 
 // ---------------------------------------------------------------- SQL e certidão do IPTU
 
-type Aviso = { tom: 'ok' | 'alerta' | 'erro'; texto: string } | null;
+type Aviso = { tom: 'ok' | 'alerta' | 'erro'; texto: string; link?: { href: string; rotulo: string } } | null;
+
+// 14/11: quando a busca automática não acha o SQL, o corretor procura no site da Prefeitura (CIT),
+// que lista as ruas com esse nome e, escolhida a rua e digitado o número, mostra o SQL de cada unidade.
+function linkCit(endereco: string): { href: string; rotulo: string } {
+  const nome = String(endereco || '').split(/[,\d]/)[0]
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()
+    .replace(/^\s*(RUA|R\.?|AVENIDA|AV\.?|ALAMEDA|AL\.?|TRAVESSA|TV\.?|PRACA|PCA\.?|ESTRADA|ESTR\.?|LARGO|VIELA)\s+/, '')
+    .replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  const base = 'https://www3.prefeitura.sp.gov.br/cit/Forms/frmPesquisaEndereco.aspx';
+  return { href: nome ? `${base}?Endereco=${encodeURIComponent(nome)}` : base,
+    rotulo: 'Procurar o SQL no site da Prefeitura ↗ (clique em “Selecionar” na rua certa e digite o número)' };
+}
 const soDigitos = (s: string) => String(s || '').replace(/\D/g, '');
 const fmtSql = (s: string) => {
   const d = soDigitos(s);
@@ -495,7 +507,7 @@ function IptuBox({ tipo, get, set }: { tipo: Tipo; get: (id: string) => Valor | 
       const j = await chamar({ acao: 'sql', endereco: txt('endereco'), unidade: tipo === 'sala' ? txt('conjunto') : '' });
       setCandidatos([]);
       if (!j.predio) {
-        setAviso({ tom: 'alerta', texto: `Não achei esse endereço nas vendas do ITBI nem no cadastro da Prefeitura. Confira rua e número, ou digite o SQL do carnê do IPTU.${j.avisoCit ? ' ' + j.avisoCit : ''}` });
+        setAviso({ tom: 'alerta', texto: `Não achei esse endereço nas vendas do ITBI nem no cadastro da Prefeitura. Confira rua e número, ou digite o SQL do carnê do IPTU.${j.avisoCit ? ' ' + j.avisoCit : ''}`, link: linkCit(txt('endereco')) });
       } else if (!j.unidadeProcurada && j.sqlUnico) {
         const u = j.sqlUnico;
         set('sql', fmtSql(u.sql)); set('cert_pdf', ''); set('cert_info', '');
@@ -506,14 +518,14 @@ function IptuBox({ tipo, get, set }: { tipo: Tipo; get: (id: string) => Valor | 
         setCandidatos(j.sqlsDoNumero);
         setAviso({ tom: 'alerta', texto: `Esse número tem ${j.sqlsDoNumero.length} SQLs nas vendas do ITBI (vila ou condomínio). Escolha o do carnê:` });
       } else if (!j.unidadeProcurada && ehCasa) {
-        setAviso({ tom: 'alerta', texto: `Achei o endereço (${j.predio.logradouro}, ${j.predio.numero}), mas sem SQL nas vendas do ITBI. Digite o SQL do carnê do IPTU.` });
+        setAviso({ tom: 'alerta', texto: `Achei o endereço (${j.predio.logradouro}, ${j.predio.numero}), mas sem SQL nas vendas do ITBI. Digite o SQL do carnê do IPTU.`, link: linkCit(j.predio.logradouro || txt('endereco')) });
       } else if (!j.unidadeProcurada) {
         setAviso({ tom: 'alerta', texto: `Achei o prédio (${j.predio.logradouro}, ${j.predio.numero}), mas falta o número da unidade no endereço (ex.: “— ap 91”).` });
       } else if (j.candidatos?.length) {
         setCandidatos(j.candidatos);
         setAviso({ tom: 'alerta', texto: `O cadastro da Prefeitura tem mais de um SQL para a unidade ${j.unidadeProcurada} (o prédio foi recadastrado e um deles está cancelado). Escolha o do carnê:` });
       } else if (!j.unidade) {
-        setAviso({ tom: 'alerta', texto: `Achei o prédio (${j.predio.logradouro}, ${j.predio.numero}), mas não a unidade ${j.unidadeProcurada}, nem nas vendas do ITBI nem no cadastro da Prefeitura.${j.avisoCit ? ' ' + j.avisoCit : ''} Confira o número ou digite o SQL do carnê do IPTU.` });
+        setAviso({ tom: 'alerta', texto: `Achei o prédio (${j.predio.logradouro}, ${j.predio.numero}), mas não a unidade ${j.unidadeProcurada}, nem nas vendas do ITBI nem no cadastro da Prefeitura.${j.avisoCit ? ' ' + j.avisoCit : ''} Confira o número ou digite o SQL do carnê do IPTU.`, link: linkCit(j.predio.logradouro || txt('endereco')) });
       } else if (j.fonte === 'cit') {
         const u = j.unidade;
         set('sql', fmtSql(u.sql)); set('cert_pdf', ''); set('cert_info', '');
@@ -576,7 +588,8 @@ function IptuBox({ tipo, get, set }: { tipo: Tipo; get: (id: string) => Valor | 
           {certPdf && <a href={certPdf} target="_blank" rel="noopener noreferrer">Abrir certidão ↗</a>}
         </div>
       )}
-      {aviso && <p className={`fe-iptu-aviso ${aviso.tom}`} role="status">{aviso.texto}</p>}
+      {aviso && <p className={`fe-iptu-aviso ${aviso.tom}`} role="status">{aviso.texto}
+        {aviso.link && <><br /><a href={aviso.link.href} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 600, textDecoration: 'underline', color: 'inherit' }}>{aviso.link.rotulo}</a></>}</p>}
       {candidatos.length > 0 && (
         <div className="fe-iptu-cands">
           {candidatos.map((c) => (
