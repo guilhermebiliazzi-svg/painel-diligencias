@@ -221,7 +221,8 @@ export async function GET(req: Request) {
       const e2e = tx.endToEnd || tx.endToEndId || d.endToEnd || null;
       const dataHora = tx.dataHoraMovimento || tx.dataHoraSolicitacao || null;
       const efetivado = /EFETIVAD|REALIZAD|PAGO|CONCLU|PROCESSAD/.test(statusInter);
-      const cancelado = /CANCELAD|DEVOLVID|FALHA|ERRO|REJEITAD/.test(statusInter);
+      // 14/11: EXPIRADO = ninguém aprovou no app do Inter a tempo; libera um novo envio.
+      const cancelado = /CANCELAD|DEVOLVID|FALHA|ERRO|REJEITAD|EXPIRAD/.test(statusInter);
       const novo = efetivado ? "efetivado" : cancelado ? "cancelado" : pagamento.status;
 
       await adm
