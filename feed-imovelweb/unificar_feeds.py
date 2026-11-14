@@ -502,6 +502,32 @@ def _atributos(bloco):
     }
 
 
+def fatos_catalogo(bloco):
+    """14/11: fatos do anuncio guardados no catalogo do banco (tipo, areas,
+    quartos, vagas, bairro, coordenada). Com o historico de preco, servem para
+    medir quanto tempo cada imovel ficou anunciado e cruzar com o ITBI (vendeu?
+    por quanto?). Nada e estimado: campo ausente vai vazio."""
+    c = {k.strip().upper(): v.strip() for k, v in RE_CARACTERISTICA.findall(bloco)}
+    def num(chave):
+        b = re.sub(r"[^\d.]", "", (c.get(chave) or "").replace(",", "."))
+        try:
+            v = float(b) if b else None
+        except ValueError:
+            return None
+        return v if v and v > 0 else None
+    def coord(tag):
+        try:
+            v = float(campo(tag, bloco).strip())
+        except ValueError:
+            return None
+        return v if v else None
+    a = _atributos(bloco)
+    return {"ti": a["tipo"] or None, "b": a["bairro"] or None,
+            "q": a["quartos"], "vg": a["vagas"],
+            "au": num("MEDIDAS|AREA_UTIL"), "at": num("MEDIDAS|AREA_TOTAL"),
+            "la": coord("latitude"), "lo": coord("longitude")}
+
+
 def montar_titulo(bloco, sucursal):
     """Monta um titulo proprio da sucursal a partir dos atributos reais.
 
@@ -1647,6 +1673,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                 # So existe para o pool: imovel de carteira ja tem dono.
                 "m": (sorted(marcado_por.get(chave_compartilhada(codigo), ()))
                       if (codigo and dono == DONO_ROLETA) else None),
+                **fatos_catalogo(bloco),   # 14/11: historico de anuncios
             })
         out.write("</Imoveis>\n</OpenNavent>\n")
 
