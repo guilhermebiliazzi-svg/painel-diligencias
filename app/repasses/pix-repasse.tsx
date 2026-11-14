@@ -158,6 +158,14 @@ export default function PixRepasse({
         </div>
       ) : (
         <>
+          {pg && pg.status === "cancelado" && (
+            <div className="vjpix-erro">
+              {/EXPIRAD/i.test(pg.inter_status || "")
+                ? "O Pix anterior expirou sem aprovação no app do Inter. Envie de novo e aprove no app."
+                : "O Pix anterior foi cancelado no Inter. Pode enviar de novo."}
+              {" "}({brl(pg.valor)}{pg.inter_codigo ? ` · código ${pg.inter_codigo}` : ""})
+            </div>
+          )}
           <p className="vjpix-sub">
             Envia o valor líquido por Pix para a conta do locador. Fica pendente da sua
             aprovação no app do Inter antes de sair.
