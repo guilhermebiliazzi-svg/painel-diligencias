@@ -779,7 +779,7 @@ function GerarEstudo({ tipo, vals, aberto, fechar }: { tipo: Tipo; vals: Record<
                   </button>
                 </div>
                 <p className="fe-gnote">
-                  Ficaram os de {busca.criterio} de {ehCasa ? 'área construída' : 'área útil'}.{' '}
+                  Ficaram os {busca.criterio} de {ehCasa ? 'área construída' : 'área útil'}.{' '}
                   {ehCasa ? 'Entram no slide “Casas à venda agora” (preço pedido).' : 'Entram como comparáveis à venda (preço pedido).'}
                 </p>
                 {busca.anuncios.map((a) => (
@@ -890,7 +890,7 @@ const CSS = `
 .fe-iptu-cands .fe-mini{padding:9px 12px}
 .fe-iptu-aviso{margin:8px 0 0;font-size:12.5px;line-height:1.45}
 .fe-iptu-aviso.ok{color:#14653A}.fe-iptu-aviso.alerta{color:#8A5A00}.fe-iptu-aviso.erro{color:var(--danger)}
-.fe-gen{flex:1;display:flex;align-items:center;justify-content:center;background:var(--navy);color:#fff;border:0;border-radius:11px;font:700 15px/1 var(--head);padding:14px 10px;cursor:pointer}
+.fe-gen{flex:1;white-space:nowrap;display:flex;align-items:center;justify-content:center;background:var(--navy);color:#fff;border:0;border-radius:11px;font:700 15px/1 var(--head);padding:14px 10px;cursor:pointer}
 .fe-gen:disabled{opacity:.6;cursor:wait}
 .fe-send.fe-eva{flex:0 0 auto;padding:14px 14px}
 .fe-gerar{max-width:600px}
@@ -907,7 +907,7 @@ const CSS = `
 .fe-gnote{color:var(--muted);font-size:12px;margin:4px 0 8px}
 .fe-galerta{color:#8A5A00;margin:8px 0 0}
 .fe-gtab{display:flex;flex-direction:column}
-.fe-grow{display:grid;grid-template-columns:22px 82px 1fr auto auto auto;gap:8px;align-items:center;padding:7px 6px;border-radius:6px;font-size:12.5px;cursor:pointer;font-variant-numeric:tabular-nums}
+.fe-grow{display:grid;grid-template-columns:22px 82px minmax(0,1fr) 62px 104px 76px;gap:8px;align-items:center;padding:7px 6px;border-radius:6px;font-size:12.5px;cursor:pointer;font-variant-numeric:tabular-nums}
 .fe-grow+.fe-grow{border-top:1px solid var(--line)}
 .fe-grow.anc{background:var(--ice)}
 .fe-grow .u{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -922,6 +922,6 @@ const CSS = `
 .fe-gan input,.fe-grow input{width:16px;height:16px;accent-color:var(--navy)}
 .fe-spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--navy);border-radius:50%;animation:fe-gira .8s linear infinite;vertical-align:-1px;margin-right:4px}
 @keyframes fe-gira{to{transform:rotate(360deg)}}
-@media (max-width:520px){.fe-grow{grid-template-columns:22px 1fr auto;row-gap:2px}.fe-grow .u{grid-column:2/4}.fe-grow .r:not(.b){display:none}.fe-grow>span:nth-child(2){grid-column:2}}
+@media (max-width:520px){.fe-grow{grid-template-columns:22px minmax(0,1fr) auto;row-gap:1px}.fe-grow>input{grid-row:1/3}.fe-grow>span:nth-child(2){grid-column:2;grid-row:1}.fe-grow .u{grid-column:2;grid-row:2;color:var(--muted)}.fe-grow .b{grid-column:3;grid-row:1/3}.fe-grow .r:not(.b){display:none}.fe-count{display:none}.fe-barin .fe-ghost{padding:14px 10px}}
 @media (max-width:430px){.fe-grid .half{grid-column:1/-1}.fe-iptu-row{flex-direction:column}.fe-mini{padding:11px 12px}}
 `;
