@@ -1,7 +1,8 @@
 'use client';
 
 // Ficha de captação → mensagem pronta para a Eva fazer o estudo de mercado.
-// O corretor preenche na visita e envia tudo de uma vez pelo WhatsApp.
+// O corretor preenche na visita e envia tudo de uma vez pelo WhatsApp, ou gera o
+// estudo direto aqui (botão "Gerar estudo": baixa o PowerPoint, sem passar pela Eva).
 // O rascunho fica só no navegador de quem preenche (localStorage).
 
 import Link from 'next/link';
@@ -265,6 +266,7 @@ export default function Ficha() {
   const [aviso, setAviso] = useState<string | null>(null);
   const [armado, setArmado] = useState(false);
   const [copiado, setCopiado] = useState(false);
+  const [abrirGerar, setAbrirGerar] = useState(0);
   const dlg = useRef<HTMLDialogElement>(null);
   const timerAviso = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timerArm = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -333,6 +335,11 @@ export default function Ficha() {
     setArmado(false);
     setVals((o) => Object.fromEntries(Object.entries(o).filter(([k]) => !k.startsWith(tipo + '.'))));
     avisar('Ficha limpa — pronta pra próxima captação.');
+  }
+  function pedirEstudo() {
+    const f = faltaGerar(tipo, vals);
+    if (f.length) { avisar('Para gerar o estudo, falta: ' + f.join(', ')); return; }
+    setAbrirGerar((n) => n + 1);
   }
   async function copiar() {
     try {
@@ -434,9 +441,10 @@ export default function Ficha() {
       <div className="fe-bar"><div className="fe-barin">
         <div className="fe-count">{preenchidos} {preenchidos === 1 ? 'campo' : 'campos'}</div>
         <button className="fe-ghost" type="button" onClick={() => dlg.current?.showModal()}>Ver texto</button>
-        <a className="fe-send" href={href} target="_blank" rel="noopener noreferrer" aria-disabled={faltando.length > 0} onClick={guardar}>
+        <button className="fe-gen" type="button" onClick={pedirEstudo}>Gerar estudo</button>
+        <a className="fe-send fe-eva" href={href} target="_blank" rel="noopener noreferrer" aria-disabled={faltando.length > 0} onClick={guardar} title="Enviar a ficha pra Eva no WhatsApp">
           <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.5 15.3L2 22l4.9-1.4A10 10 0 1 0 12 2Zm5.5 14.1c-.2.7-1.3 1.3-1.9 1.3-.5.1-1.1.1-1.8-.1-.4-.1-1-.3-1.7-.6-3-1.3-4.9-4.3-5.1-4.5-.1-.2-1.2-1.6-1.2-3.1s.8-2.2 1-2.5c.3-.3.6-.4.8-.4h.6c.2 0 .4-.1.7.5.2.6.8 2 .9 2.1.1.2.1.3 0 .5s-.2.4-.3.5l-.5.6c-.2.2-.3.4-.1.7.2.3.8 1.3 1.7 2.1 1.2 1.1 2.2 1.4 2.5 1.5.3.2.5.1.7-.1l1-1.2c.2-.3.4-.2.7-.1l2 .9c.3.2.5.2.6.4.1.1.1.7-.1 1.5Z" /></svg>
-          Enviar pra Eva
+          Eva
         </a>
       </div></div>
 
@@ -448,6 +456,8 @@ export default function Ficha() {
           <a className="fe-send" href={href} target="_blank" rel="noopener noreferrer" aria-disabled={faltando.length > 0} onClick={guardar}>Abrir no WhatsApp</a>
         </div>
       </dialog>
+
+      <GerarEstudo tipo={tipo} vals={vals} aberto={abrirGerar} fechar={() => {}} />
 
       {aviso && <div className="fe-toast" role="status">{aviso}</div>}
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
@@ -604,6 +614,210 @@ function IptuBox({ tipo, get, set }: { tipo: Tipo; get: (id: string) => Valor | 
   );
 }
 
+// ---------------------------------------------------------------- Gerar estudo pelo painel
+
+type VendaP = { chave: string; data: string; unidade: string; area: number; valor: number; valor_m2: number; mesma_area: boolean };
+type AnuncioP = { link: string; codigo: string; titulo: string; preco: number; area: number | null; quartos: number | null; suites: number | null; vagas: number | null; condominio_mensal: number | null; bairro: string };
+type BuscaP = { anuncios: AnuncioP[]; total_na_busca: number | null; links_encontrados: number; fora_do_tamanho: number; criterio: string; outros_links: number };
+type FaseGerar = 'carregando' | 'escolha' | 'gerando' | 'pronto' | 'erro';
+
+const reais = (v: number) => 'R$ ' + Math.round(v).toLocaleString('pt-BR');
+
+/** Falta algo para gerar pelo painel? (o servidor confere de novo) */
+function faltaGerar(tipo: Tipo, vals: Record<string, Valor>): string[] {
+  const g = (id: string) => { const v = vals[tipo + '.' + id]; return typeof v === 'string' ? v.trim() : ''; };
+  const pos = (id: string) => Number(g(id).replace(/\./g, '').replace(',', '.')) > 0;
+  const out: string[] = [];
+  if (!/\d/.test(g('endereco'))) out.push('endereço com número');
+  if (tipo === 'casa') { if (!pos('area_terreno')) out.push('área do terreno'); }
+  else {
+    if (!pos('area_util')) out.push('área útil');
+    if (!pos('area_iptu')) out.push('área total (IPTU)');
+  }
+  return out;
+}
+
+function GerarEstudo({ tipo, vals, aberto, fechar }: { tipo: Tipo; vals: Record<string, Valor>; aberto: number; fechar: () => void }) {
+  const dlg = useRef<HTMLDialogElement>(null);
+  const [fase, setFase] = useState<FaseGerar>('carregando');
+  const [msg, setMsg] = useState('');
+  const [itbi, setItbi] = useState<VendaP[] | null>(null);
+  const [busca, setBusca] = useState<BuscaP | null>(null);
+  const [foraItbi, setForaItbi] = useState<string[]>([]);
+  const [foraAn, setForaAn] = useState<string[]>([]);
+  const [todas, setTodas] = useState(false);
+  const [arquivo, setArquivo] = useState<{ url: string; nome: string } | null>(null);
+  const [andamento, setAndamento] = useState('');
+  const sessao = useRef(0); // invalida a consulta em andamento quando a janela fecha
+  const valsRef = useRef(vals);
+  valsRef.current = vals;
+
+  const endereco = (() => { const v = vals[tipo + '.endereco']; return typeof v === 'string' ? v : ''; })();
+  const areaTotal = (() => { const v = vals[tipo + '.area_iptu']; return typeof v === 'string' ? v : ''; })();
+
+  async function api(init?: RequestInit, qs = '') {
+    const r = await fetch('/api/estudo/gerar' + qs, { cache: 'no-store', ...init });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.erro || 'Falha na consulta.');
+    return j;
+  }
+
+  useEffect(() => {
+    if (!aberto) return;
+    const minha = ++sessao.current;
+    dlg.current?.showModal();
+    queueMicrotask(() => {
+      setFase('carregando'); setMsg(''); setItbi(null); setBusca(null); setForaItbi([]); setForaAn([]); setTodas(false); setArquivo(null);
+    });
+    api({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ acao: 'previa', tipo, vals: valsRef.current }) })
+      .then((j) => { if (sessao.current !== minha) return; setItbi(j.itbi || null); setBusca(j.busca || null); setFase('escolha'); })
+      .catch((e) => { if (sessao.current !== minha) return; setMsg((e as Error).message); setFase('erro'); });
+    // abre de novo a cada clique (o contador muda)
+  }, [aberto, tipo]);
+
+  function sair() {
+    sessao.current++;
+    dlg.current?.close();
+    fechar();
+  }
+
+  async function gerar() {
+    const minha = sessao.current;
+    const manter = (itbi || []).filter((v) => !foraItbi.includes(v.chave)).map((v) => v.chave);
+    if (itbi && !manter.length) { setMsg('Deixe pelo menos uma venda do ITBI marcada.'); return; }
+    setFase('gerando'); setMsg(''); setAndamento('Enviando o pedido…');
+    try {
+      const j = await api({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        acao: 'gerar', tipo, vals: valsRef.current,
+        itbi_manter: manter, itbi_excluir: foraItbi,
+        anuncios: (busca?.anuncios || []).filter((a) => !foraAn.includes(a.link)),
+      }) });
+      const t0 = Date.now();
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 4000));
+        if (sessao.current !== minha) return;
+        const s = await api(undefined, '?id=' + encodeURIComponent(j.id));
+        if (sessao.current !== minha) return;
+        if (s.status === 'pronto') {
+          setArquivo({ url: s.url, nome: s.nome }); setFase('pronto');
+          const a = document.createElement('a'); a.href = s.url; a.download = s.nome; document.body.appendChild(a); a.click(); a.remove();
+          return;
+        }
+        if (s.status === 'erro') throw new Error(s.mensagem);
+        const seg = Math.round((Date.now() - t0) / 1000);
+        setAndamento(`Montando o estudo… ${seg} s (costuma levar de 20 s a 1 min)`);
+      }
+    } catch (e) {
+      if (sessao.current !== minha) return;
+      setMsg((e as Error).message); setFase('erro');
+    }
+  }
+
+  const visiveis = itbi ? (todas ? itbi : itbi.slice(0, 8)) : [];
+  const ehCasa = tipo === 'casa';
+  const alterna = (lista: string[], set: (v: string[]) => void, k: string) => set(lista.includes(k) ? lista.filter((x) => x !== k) : [...lista, k]);
+
+  return (
+    <dialog ref={dlg} className="fe-dlg fe-gerar" onClose={() => { sessao.current++; fechar(); }}>
+      <div className="fe-dlghead">
+        <h3>Gerar estudo{endereco ? ' — ' + endereco : ''}</h3>
+        <button type="button" aria-label="Fechar" onClick={sair}>×</button>
+      </div>
+
+      {fase === 'carregando' && <p className="fe-gsub">Buscando as vendas do ITBI{ehCasa ? '' : ' do prédio'} e os anúncios da sua busca…</p>}
+      {fase === 'erro' && <p className="fe-gsub fe-gerro" role="alert">{msg}</p>}
+      {fase === 'gerando' && (
+        <div className="fe-gsub" role="status"><span className="fe-spin" aria-hidden="true" /> {andamento}<br />Não feche esta janela.</div>
+      )}
+      {fase === 'pronto' && arquivo && (
+        <div className="fe-gsub" role="status">
+          Estudo pronto. O download começou; se não começar, <a href={arquivo.url} download={arquivo.nome}>baixe aqui</a>.
+          <br />O link vale por 24 horas.
+        </div>
+      )}
+
+      {fase === 'escolha' && (
+        <div className="fe-gbody">
+          <p className="fe-gsub">Confira o que entra no estudo. Desmarque o que não quiser.</p>
+
+          {itbi && (
+            <div className="fe-gbox">
+              <div className="fe-ghead">
+                <strong>Vendas do ITBI no prédio ({itbi.length})</strong>
+                <button type="button" className="fe-glink" onClick={() => setForaItbi(foraItbi.length ? [] : itbi.map((v) => v.chave))}>
+                  {foraItbi.length ? 'marcar todas' : 'desmarcar todas'}
+                </button>
+              </div>
+              {itbi.some((v) => v.mesma_area) && <p className="fe-gnote">Em azul: mesma área total da sua ({areaTotal} m²) — são as que ancoram o valor.</p>}
+              <div className="fe-gtab">
+                {visiveis.map((v) => (
+                  <label key={v.chave} className={`fe-grow${v.mesma_area ? ' anc' : ''}`}>
+                    <input type="checkbox" checked={!foraItbi.includes(v.chave)} onChange={() => alterna(foraItbi, setForaItbi, v.chave)} />
+                    <span>{v.data}</span>
+                    <span className="u">{v.unidade.replace(/\bVG\b/, '· com vaga')}</span>
+                    <span className="r">{fmtM2(v.area)} m²</span>
+                    <span className="r b">{reais(v.valor)}</span>
+                    <span className="r m">{Math.round(v.valor_m2).toLocaleString('pt-BR')}/m²</span>
+                  </label>
+                ))}
+              </div>
+              {itbi.length > 8 && (
+                <button type="button" className="fe-glink" onClick={() => setTodas(!todas)}>
+                  {todas ? 'mostrar só as 8 mais recentes' : `+ ${itbi.length - 8} vendas mais antigas…`}
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="fe-gbox">
+            {busca && busca.anuncios.length > 0 ? (
+              <>
+                <div className="fe-ghead">
+                  <strong>Concorrentes da sua busca ({busca.anuncios.length}{busca.total_na_busca ? ' de ' + busca.total_na_busca : ''})</strong>
+                  <button type="button" className="fe-glink" onClick={() => setForaAn(foraAn.length ? [] : busca.anuncios.map((a) => a.link))}>
+                    {foraAn.length ? 'marcar todos' : 'desmarcar todos'}
+                  </button>
+                </div>
+                <p className="fe-gnote">
+                  Ficaram os de {busca.criterio} de {ehCasa ? 'área construída' : 'área útil'}.{' '}
+                  {ehCasa ? 'Entram no slide “Casas à venda agora” (preço pedido).' : 'Entram como comparáveis à venda (preço pedido).'}
+                </p>
+                {busca.anuncios.map((a) => (
+                  <label key={a.link} className="fe-gan">
+                    <input type="checkbox" checked={!foraAn.includes(a.link)} onChange={() => alterna(foraAn, setForaAn, a.link)} />
+                    <span>
+                      <strong>{reais(a.preco)}</strong>
+                      <span className="d">{[a.titulo.split(/ em | à venda/)[0], a.area && fmtM2(a.area) + ' m²', a.quartos && a.quartos + ' quartos', a.suites && a.suites + (a.suites === 1 ? ' suíte' : ' suítes'), a.vagas && a.vagas + (a.vagas === 1 ? ' vaga' : ' vagas')].filter(Boolean).join(' · ')}</span>
+                      <a href={a.link} target="_blank" rel="noopener noreferrer">ver anúncio {a.codigo} ›</a>
+                    </span>
+                  </label>
+                ))}
+              </>
+            ) : (
+              <p className="fe-gnote" style={{ margin: 0 }}>
+                {busca && busca.links_encontrados > 0
+                  ? `Nenhum anúncio da sua busca ficou no tamanho do imóvel (${busca.criterio}).`
+                  : 'Nenhuma busca do villejardins.com.br em “Concorrentes”.'}{' '}
+                {ehCasa ? 'O estudo sai com as casas vendidas da região.' : 'O estudo sai só com as vendas do ITBI.'}
+              </p>
+            )}
+            {busca && busca.outros_links > 0 && (
+              <p className="fe-gnote fe-galerta">{busca.outros_links === 1 ? '1 link de outro site não entra' : `${busca.outros_links} links de outros sites não entram`} pelo painel. Para usar, envie a ficha pra Eva.</p>
+            )}
+          </div>
+          {msg && <p className="fe-gsub fe-gerro" role="alert">{msg}</p>}
+        </div>
+      )}
+
+      <div className="fe-dlgbar">
+        <button className="fe-ghost" type="button" onClick={sair}>{fase === 'pronto' ? 'Fechar' : 'Voltar'}</button>
+        {fase === 'escolha' && <button className="fe-gen" type="button" onClick={gerar}>Gerar e baixar o estudo</button>}
+        {fase === 'gerando' && <button className="fe-gen" type="button" disabled>Gerando…</button>}
+      </div>
+    </dialog>
+  );
+}
+
 const CSS = `
 .fe{--navy:#10243F;--red:#E4002B;--ink:#1A2332;--muted:#5D6B7E;--ground:#F4F7FA;--card:#FFFFFF;--line:#D8E0EA;--ice:#EAF1FB;--wa:#1A9E50;--focus:#2563EB;--on:#10243F;--on-ink:#FFFFFF;--danger:#B42318;--head:'Archivo',system-ui,sans-serif;--body:'Open Sans',system-ui,sans-serif;
   background:var(--ground);color:var(--ink);font:15px/1.55 var(--body);min-height:100vh;padding-bottom:110px}
@@ -676,5 +890,38 @@ const CSS = `
 .fe-iptu-cands .fe-mini{padding:9px 12px}
 .fe-iptu-aviso{margin:8px 0 0;font-size:12.5px;line-height:1.45}
 .fe-iptu-aviso.ok{color:#14653A}.fe-iptu-aviso.alerta{color:#8A5A00}.fe-iptu-aviso.erro{color:var(--danger)}
+.fe-gen{flex:1;display:flex;align-items:center;justify-content:center;background:var(--navy);color:#fff;border:0;border-radius:11px;font:700 15px/1 var(--head);padding:14px 10px;cursor:pointer}
+.fe-gen:disabled{opacity:.6;cursor:wait}
+.fe-send.fe-eva{flex:0 0 auto;padding:14px 14px}
+.fe-gerar{max-width:600px}
+.fe-gerar .fe-dlghead h3{font-size:17px;line-height:1.3}
+.fe-gbody{max-height:62vh;overflow:auto;padding:0 18px}
+.fe-gsub{color:var(--muted);font-size:13px;margin:8px 18px 14px}
+.fe-gbody .fe-gsub{margin:6px 0 12px}
+.fe-gsub a{color:var(--navy);font-weight:700}
+.fe-gerro{color:var(--danger)}
+.fe-gbox{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px}
+.fe-ghead{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.fe-ghead strong{font:700 14.5px/1.3 var(--head);color:var(--navy)}
+.fe-glink{border:0;background:none;color:var(--focus);font:600 12.5px/1.2 var(--body);cursor:pointer;padding:6px 0;white-space:nowrap}
+.fe-gnote{color:var(--muted);font-size:12px;margin:4px 0 8px}
+.fe-galerta{color:#8A5A00;margin:8px 0 0}
+.fe-gtab{display:flex;flex-direction:column}
+.fe-grow{display:grid;grid-template-columns:22px 82px 1fr auto auto auto;gap:8px;align-items:center;padding:7px 6px;border-radius:6px;font-size:12.5px;cursor:pointer;font-variant-numeric:tabular-nums}
+.fe-grow+.fe-grow{border-top:1px solid var(--line)}
+.fe-grow.anc{background:var(--ice)}
+.fe-grow .u{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fe-grow .r{text-align:right;white-space:nowrap}
+.fe-grow .b{font-weight:700}
+.fe-grow .m{color:var(--muted)}
+.fe-gan{display:flex;gap:10px;align-items:flex-start;padding:10px 4px;border-top:1px solid var(--line);cursor:pointer}
+.fe-gan>span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.fe-gan strong{font:700 14px/1.3 var(--head);color:var(--navy)}
+.fe-gan .d{color:var(--muted);font-size:12.5px}
+.fe-gan a{color:var(--focus);font-size:12.5px;text-decoration:underline;width:fit-content}
+.fe-gan input,.fe-grow input{width:16px;height:16px;accent-color:var(--navy)}
+.fe-spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--navy);border-radius:50%;animation:fe-gira .8s linear infinite;vertical-align:-1px;margin-right:4px}
+@keyframes fe-gira{to{transform:rotate(360deg)}}
+@media (max-width:520px){.fe-grow{grid-template-columns:22px 1fr auto;row-gap:2px}.fe-grow .u{grid-column:2/4}.fe-grow .r:not(.b){display:none}.fe-grow>span:nth-child(2){grid-column:2}}
 @media (max-width:430px){.fe-grid .half{grid-column:1/-1}.fe-iptu-row{flex-direction:column}.fe-mini{padding:11px 12px}}
 `;
