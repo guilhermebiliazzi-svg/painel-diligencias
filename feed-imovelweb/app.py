@@ -440,6 +440,13 @@ def gravar_catalogo_no_banco(itens):
         # Sucursais que mandaram este imovel no proprio XML do Nonstop.
         # Gravado desde 19/09; o motor da roleta ainda NAO consulta.
         "marcado_por": it.get("m") or None,
+        # 14/11: fatos do anuncio p/ o historico (tempo anunciado, reducoes de
+        # preco e cruzamento com o ITBI). O preco de cada geracao vai para
+        # alianca_preco_historico por gatilho no banco.
+        "tipo": it.get("ti"), "bairro": it.get("b"),
+        "quartos": it.get("q"), "vagas": it.get("vg"),
+        "area_util": it.get("au"), "area_total": it.get("at"),
+        "lat": it.get("la"), "lng": it.get("lo"),
         "ativo": True,
         "gerado_em": agora_iso,
         "visto_em": agora_iso,
