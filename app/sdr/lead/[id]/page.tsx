@@ -262,6 +262,12 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
           imoveisRef={imoveisRef}
         />
 
+        {/* 14/11: registrar a visita pelo painel (mesmo formulário do link da Eva) */}
+        {l.corretor_phone && !['arquivado', 'encerrado'].includes(l.status) && (
+          <a href={`/sdr/visita/${l.id}`} className="block w-full rounded-xl bg-emerald-600 px-4 py-3 text-center text-sm font-semibold text-white hover:bg-emerald-700">
+            Registrar visita
+          </a>
+        )}
         {['atribuido', 'visita_agendada', 'direto'].includes(l.status) && <Encerrar id={l.id} />}
 
         {reabre && (
