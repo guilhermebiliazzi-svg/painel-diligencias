@@ -162,6 +162,8 @@ export async function POST(req: Request) {
     bairro: txt(b.b, 80),
     valor: txt(b.x, 200),
     extra: extraLimpo(b.e),
+    // 14/11: gclid do clique no anúncio (liga a conversa com a Eva ao anúncio → conversão no Google Ads)
+    gclid: typeof b.g === 'string' && /^[\w-]{10,200}$/.test(b.g) ? b.g : null,
   });
   if (error) return new NextResponse(null, { status: 500, headers: h });
   return new NextResponse(null, { status: 204, headers: h });
