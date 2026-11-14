@@ -281,6 +281,26 @@ function LogProcessamento({ r }: { r: AdminRow }) {
   const dataAtu = formatDateTime(r.ret?.ultima ?? r.cs_atualizado_em);
   const erro = r.cs_erro?.trim();
 
+  // 14/11: pedido aceito, o órgão manda a certidão por e-mail (não é erro).
+  if (r.cs_status === 'aguardando_email') {
+    return (
+      <div className="rounded-md border border-sky-200 bg-sky-50/60 px-2 py-1.5 text-xs text-sky-900">
+        <div className="font-semibold">
+          ✉ Aguardando o e-mail do órgão{r.cs_numero_pedido ? <> · pedido <span className="font-mono">{r.cs_numero_pedido}</span></> : null}
+        </div>
+        <div className="mt-0.5 leading-snug">
+          O pedido foi aceito. Quando o e-mail chegar, o sistema baixa o PDF sozinho.
+          {dataAtu && <> Pedido feito em {dataAtu}.</>}
+        </div>
+        {r.ret?.proxima && (
+          <div className="mt-0.5 leading-snug">
+            <span className="font-medium">Próxima conferência do e-mail:</span> {formatDateTime(r.ret.proxima)} (automática)
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // Caso 1: tem erro registrado
   if (erro) {
     return (
