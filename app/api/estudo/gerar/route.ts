@@ -14,7 +14,7 @@ import { getSessaoPerfil } from '@/lib/perfil';
 import { podeTela } from '@/lib/acesso';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import {
-  faltandoParaGerar, ficha, lerBuscaSite, montarPayload, nomeArquivo, vendasItbi,
+  faltandoParaGerar, ficha, lerConcorrentes, montarPayload, nomeArquivo, vendasItbi,
   type Anuncio, type TipoFicha, type Vals,
 } from '@/lib/estudo-gerar';
 
@@ -56,12 +56,16 @@ function lerAnuncios(x: unknown): Anuncio[] {
   const num = (v: unknown) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
   return x.slice(0, 15).flatMap((a) => {
     const o = (a || {}) as Record<string, unknown>;
-    const link = String(o.link || '');
-    if (!/^https:\/\/(www\.)?villejardins\.com\.br\/imovel\//i.test(link) || !num(o.preco)) return [];
+    const link = String(o.link || '').slice(0, 500);
+    const doSite = /^https:\/\/(www\.)?villejardins\.com\.br\/imovel\//i.test(link);
+    // villejardins: anúncio /imovel/; outros portais: qualquer https (só apartamento/sala chegam aqui)
+    if (!(doSite || /^https:\/\/[^\s]+$/i.test(link)) || !num(o.preco)) return [];
     return [{
       link, codigo: String(o.codigo || '').slice(0, 20), titulo: String(o.titulo || '').slice(0, 200),
       preco: num(o.preco)!, area: num(o.area), quartos: num(o.quartos), suites: num(o.suites), vagas: num(o.vagas),
       condominio_mensal: num(o.condominio_mensal), bairro: String(o.bairro || '').slice(0, 80),
+      origem: doSite ? 'site' as const : 'portal' as const,
+      condominio_nome: String(o.condominio_nome || '').slice(0, 120), address: String(o.address || '').slice(0, 200),
     }];
   });
 }
@@ -90,7 +94,10 @@ export async function POST(req: Request) {
         console.error('[estudo][gerar] ITBI', e);
         return null;
       }),
-      g('concorrentes') ? lerBuscaSite(g('concorrentes'), area, tipo === 'casa' ? 0.3 : 0.15) : Promise.resolve(null),
+      g('concorrentes')
+        ? lerConcorrentes(g('concorrentes'), area, tipo === 'casa' ? 0.3 : 0.15, tipo !== 'casa',
+            { predio_curto: tipo === 'sala' ? g('edificio') : g('condominio'), bairro: g('bairro') })
+        : Promise.resolve(null),
     ]);
     if (tipo !== 'casa' && itbi && !itbi.length) {
       return erro('Não há venda registrada no ITBI para esse prédio. Confira rua e número no endereço (o estudo de apartamento precisa das vendas do próprio prédio).', 404);
@@ -99,7 +106,8 @@ export async function POST(req: Request) {
   }
 
   if (body.acao === 'gerar') {
-    const esc = { itbi_manter: chaves(body.itbi_manter), itbi_excluir: chaves(body.itbi_excluir), anuncios: lerAnuncios(body.anuncios) };
+    const anuncios = lerAnuncios(body.anuncios).filter((a) => tipo !== 'casa' || a.origem === 'site'); // casa: só o site
+    const esc = { itbi_manter: chaves(body.itbi_manter), itbi_excluir: chaves(body.itbi_excluir), anuncios };
     if (tipo !== 'casa' && !esc.itbi_manter.length) return erro('Deixe pelo menos uma venda do ITBI marcada.');
     const payload = { ...montarPayload(tipo, vals, esc), nome_arquivo: nomeArquivo(tipo, g('endereco')) };
     const sb = supabaseAdmin();
