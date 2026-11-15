@@ -2,6 +2,7 @@
 // (public.site_eventos, gravado por /api/site/evento) e o custo diário do Google Ads
 // (public.ads_custos_diarios e ads_termos_pesquisa, gravados pelo n8n às 6h10).
 // Tudo vem de uma chamada só: public.site_painel(de, ate).
+// 15/11: e a lista "Quem converteu" de public.site_convertidos(de, ate).
 import Link from 'next/link';
 import { exigirTela } from '@/lib/perfil';
 import { supabaseAdmin } from '@/lib/supabase/admin';
@@ -189,6 +190,109 @@ function PorDia({ dias }: { dias: Dados['por_dia'] }) {
   );
 }
 
+// 15/11: quem converteu — cada contato do site (WhatsApp que chegou na Eva, formulário, ligação),
+// quem é, de onde veio e até onde foi no funil (lead → corretor → visita → proposta). Fonte: public.site_convertidos(de, ate).
+type Convertido = {
+  quando: string; sessao: string; canal: 'WhatsApp' | 'Formulário' | 'Telefone'; tipo_form: 'captacao' | 'recrutamento' | null;
+  imovel_id: string | null; caminho: string | null; imovel_titulo: string | null;
+  origem: string | null; pago: boolean; paginas: number | null; dispositivo: string | null; campanha: string | null;
+  telefone: string | null; nome: string | null; profissional: boolean;
+  lead_id: string | null; lead_em: string | null; fonte: string | null; status: string | null; intencao: string | null; corretor: string | null;
+  qualificado: boolean | null; visita_agendada: boolean | null; visitou: boolean; proposta: boolean;
+  recrut_etapa: string | null; etapas_captacao: string[] | null;
+};
+
+const STATUS_LEAD: Record<string, string> = {
+  em_qualificacao: 'Em qualificação com a Eva', aguardando_cliente: 'Aguardando o cliente', aguardando_guilherme: 'Aguardando sua decisão',
+  em_cascata: 'Oferecido aos corretores', atribuido: 'Com corretor', direto: 'Direto ao gestor do imóvel', visita_agendada: 'Visita agendada',
+  arquivado: 'Arquivado', encerrado: 'Encerrado',
+};
+
+const telBR = (t: string | null) => {
+  const d = (t || '').replace(/\D/g, '');
+  const m = d.match(/^55(\d{2})(\d{4,5})(\d{4})$/);
+  return m ? `(${m[1]}) ${m[2]}-${m[3]}` : t || '';
+};
+
+function Etapas({ c }: { c: Convertido }) {
+  const capt = c.tipo_form === 'captacao' || (c.fonte || '').startsWith('Captação');
+  const e = c.etapas_captacao || [];
+  const passos: [string, boolean][] = capt
+    ? [['Lead', !!c.lead_id], ['Captador', !!c.corretor], ['V1 agendada', e.some((x) => x.startsWith('v1') || x.startsWith('v2') || x.startsWith('contrato'))],
+       ['V1 realizada', e.some((x) => x === 'v1_realizada' || x.startsWith('v2') || x.startsWith('contrato'))], ['V2', e.some((x) => x.startsWith('v2') || x.startsWith('contrato'))],
+       ['Contrato', e.some((x) => x.startsWith('contrato'))]]
+    : [['Lead', !!c.lead_id], ['Corretor', !!c.corretor], ['Visita agendada', !!c.visita_agendada || c.visitou || c.proposta], ['Visitou', c.visitou || c.proposta], ['Proposta', c.proposta]];
+  return (
+    <ol className="flex flex-wrap items-center gap-1 text-xs">
+      {passos.map(([t, ok], i) => (
+        <li key={t} className="flex items-center gap-1">
+          {i > 0 && <span className="text-slate-300">→</span>}
+          <span className={`rounded-full px-2 py-0.5 font-semibold ${ok ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-400'}`}>{t}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function QuemConverteu({ lista }: { lista: Convertido[] }) {
+  if (!lista.length) return <p className="rounded-2xl border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">Ninguém fez contato pelo site no período.</p>;
+  const comLead = lista.filter((c) => c.lead_id).length;
+  const visitas = lista.filter((c) => c.visita_agendada || c.visitou).length;
+  const propostas = lista.filter((c) => c.proposta).length;
+  return (
+    <>
+      <p className="mb-3 text-sm text-slate-700 tabular-nums">
+        {lista.length} {lista.length === 1 ? 'pessoa' : 'pessoas'} · {comLead} viraram lead · {visitas} com visita · {propostas} com proposta
+      </p>
+      <div className="grid gap-2">
+        {lista.map((c) => {
+          const recrut = c.tipo_form === 'recrutamento';
+          const pagina = c.imovel_titulo ? curto(c.imovel_titulo, c.caminho) : c.caminho === '/anuncie' ? 'Landing “Anuncie seu imóvel”' : c.caminho === '/seja-remax' ? 'Landing “Seja REMAX” (recrutamento)' : c.caminho || '/';
+          return (
+            <div key={c.sessao + c.canal + c.quando} className="min-w-0 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="tabular-nums text-slate-500">{hora(c.quando)}</span>
+                <span className="font-semibold text-slate-900">{c.nome || (c.telefone ? 'Sem nome' : 'Não identificado')}</span>
+                {c.telefone && <span className="tabular-nums text-slate-600">{telBR(c.telefone)}</span>}
+                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800">{c.canal}</span>
+                <Selo pago={c.pago} />
+                {c.profissional && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">Corretor/profissional</span>}
+              </div>
+              <p className="mt-1 text-xs text-slate-600">
+                Veio de: <b className="font-semibold">{c.origem || 'Indefinida'}</b>{c.campanha ? ` · ${c.campanha}` : ''}{c.dispositivo ? ` · ${c.dispositivo}` : ''}{c.paginas ? ` · ${c.paginas} pág.` : ''}
+              </p>
+              <p className="mt-0.5 min-w-0 truncate text-xs text-slate-600">
+                {c.canal === 'Formulário' ? 'Formulário em: ' : 'Contato a partir de: '}
+                <a href={SITE + (c.caminho || '/')} target="_blank" rel="noopener" className="text-blue-700 hover:underline">{pagina}</a>
+              </p>
+              <div className="mt-2 border-t border-slate-100 pt-2">
+                {recrut ? (
+                  <p className="text-xs text-slate-700">Candidato a corretor (recrutamento){c.recrut_etapa ? ` · etapa: ${c.recrut_etapa}` : ''}</p>
+                ) : c.lead_id ? (
+                  <div className="grid gap-1.5">
+                    <Etapas c={c} />
+                    <p className="text-xs text-slate-600">
+                      {c.fonte}{c.status ? ` · ${STATUS_LEAD[c.status] ?? c.status}` : ''}{c.corretor ? ` · ${c.corretor}` : ''}
+                    </p>
+                  </div>
+                ) : c.canal === 'Telefone' ? (
+                  <p className="text-xs text-slate-500">Clicou para ligar — a ligação não é registrada, então não há como saber quem é.</p>
+                ) : (
+                  <p className="text-xs font-semibold text-amber-700">Conversou com a Eva, mas não virou lead no SDR.</p>
+                )}
+                <p className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                  {c.lead_id && <Link href={'/sdr/lead/' + c.lead_id} className="font-semibold text-blue-700 hover:underline">Abrir o lead</Link>}
+                  {c.telefone && !recrut && <Link href={'/sdr/conversa/' + c.telefone} className="font-semibold text-blue-700 hover:underline">Ver a conversa</Link>}
+                </p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 export default async function SitePage({ searchParams }: { searchParams: Promise<{ p?: string; de?: string; ate?: string }> }) {
   await exigirTela('vitrine');
   const { p: pParam, de: deParam, ate: ateParam } = await searchParams;
@@ -196,13 +300,20 @@ export default async function SitePage({ searchParams }: { searchParams: Promise
   const hoje = diaSP(new Date());
   let d: Dados | null = null;
   let erro: string | null = null;
+  let conv: Convertido[] = [];
+  let erroConv: string | null = null;
+  const sb = supabaseAdmin();
+  const [rp, rc] = await Promise.allSettled([sb.rpc('site_painel', { de, ate }), sb.rpc('site_convertidos', { de, ate })]);
   try {
-    const { data, error } = await supabaseAdmin().rpc('site_painel', { de, ate });
-    if (error) throw new Error(error.message);
-    d = data as Dados;
+    if (rp.status === 'rejected') throw rp.reason;
+    if (rp.value.error) throw new Error(rp.value.error.message);
+    d = rp.value.data as Dados;
   } catch (e) {
     erro = e instanceof Error ? e.message : String(e);
   }
+  if (rc.status === 'rejected') erroConv = String(rc.reason);
+  else if (rc.value.error) erroConv = rc.value.error.message;
+  else conv = (rc.value.data as Convertido[]) || [];
 
   const r = d?.resumo;
   const org = d ? d.origens.filter((o) => !o.pago) : [];
@@ -255,6 +366,12 @@ export default async function SitePage({ searchParams }: { searchParams: Promise
               <Cartao titulo="Anúncios de imóveis" valor={brl(custoImoveis)} nota={`${int(d.custo_imoveis.cliques)} cliques no Google Ads, desde o início do registro (dias completos)`} />
               <Cartao titulo="Custo por contato" valor={r.contatos_pagos ? brl(custoImoveis / r.contatos_pagos) : '—'} nota={`${int(r.contatos_pagos)} contatos de anúncio`} />
             </div>
+
+            <Secao titulo="Quem converteu" descricao="Cada pessoa que fez contato pelo site no período: quem é, de onde veio, por onde entrou em contato e até onde foi no funil. Visita e proposta dependem do registro do corretor.">
+              {erroConv
+                ? <p className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">Não consegui carregar a lista agora: {erroConv}</p>
+                : <QuemConverteu lista={conv} />}
+            </Secao>
 
             <Secao titulo="Visitas por dia">
               <PorDia dias={d.por_dia} />
