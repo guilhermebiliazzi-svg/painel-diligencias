@@ -114,16 +114,35 @@ function fmtMin(m: number | null) {
 const diasHoje = () => { const agora = Date.now(); const sp = new Date(agora - 3 * 36e5); return Math.max(1 / 1440, (agora - (Date.UTC(sp.getUTCFullYear(), sp.getUTCMonth(), sp.getUTCDate()) + 3 * 36e5)) / 864e5); };
 const diasDoPeriodo = (k: string) => (k === 'tudo' ? null : k === 'hoje' ? diasHoje() : Number(k));
 const desde = (dias: number | null) => (dias == null ? '1970-01-01T00:00:00Z' : new Date(Date.now() - dias * 864e5).toISOString());
+// 15/11: intervalo de datas escolhido (?de=AAAA-MM-DD&ate=AAAA-MM-DD), dias inteiros de São Paulo.
+// Vira "dias" (início, como os períodos prontos) + "ate" (fim exclusivo; null quando chega até agora).
+const DIA = /^\d{4}-\d{2}-\d{2}$/;
+const diaSP = (d: Date) => new Date(d.getTime() - 3 * 36e5).toISOString().slice(0, 10);
+const meiaNoiteSP = (dia: string) => Date.parse(dia + 'T00:00:00-03:00');
+const dataBR = (dia: string) => dia.split('-').reverse().join('/');
+function intervalo(deP?: string, ateP?: string) {
+  if (!deP || !ateP || !DIA.test(deP) || !DIA.test(ateP) || Number.isNaN(Date.parse(deP)) || Number.isNaN(Date.parse(ateP))) return null;
+  const [a, b] = deP <= ateP ? [deP, ateP] : [ateP, deP];
+  const agora = Date.now();
+  const fim = meiaNoiteSP(b) + 864e5;
+  return {
+    deDia: a, ateDia: b,
+    dias: Math.max(1 / 1440, (agora - meiaNoiteSP(a)) / 864e5),
+    ate: fim < agora ? new Date(fim).toISOString() : null,
+    rotulo: a === b ? dataBR(a) : `${dataBR(a)} a ${dataBR(b)}`,
+  };
+}
 
 // ---------- carga ----------
-async function carregarClientes(dias: number | null): Promise<Lead[]> {
+async function carregarClientes(dias: number | null, ate: string | null = null): Promise<Lead[]> {
   // 09/11: as consultas que não dependem umas das outras rodam juntas (antes iam uma depois da outra).
   const [{ rows }, { data: inds }] = await Promise.all([
     pool.query<Lead>(
       `select * from public.v_painel_sdr_funil
         where ($1::float8 is null or created_at >= now() - $1::float8 * interval '1 day')
+          and ($2::timestamptz is null or created_at < $2::timestamptz)
         order by created_at desc`,
-      [dias]
+      [dias, ate]
     ),
     supabaseAdmin().from('indicacoes').select('cliente_telefone,status,criado_em')
       .gte('criado_em', new Date(Date.now() - 180 * 864e5).toISOString()).order('criado_em', { ascending: true }).limit(2000),
@@ -169,10 +188,12 @@ const ETAPAS_CAP = [
 ] as const;
 const ordemCap = (k: string) => ETAPAS_CAP.findIndex((e) => e.k === k);
 
-async function carregarCaptacao(dias: number | null) {
+async function carregarCaptacao(dias: number | null, ate: string | null = null) {
   const sb = supabaseAdmin();
+  let qCap = sb.from('captacao_leads').select('id,criado_em,evento,nome,telefone,intencao,tipo,bairro,endereco,descartado_em,referenciado_em').gte('criado_em', desde(dias));
+  if (ate) qCap = qCap.lt('criado_em', ate);
   const [{ data: cap }, { data: lds }, { data: cors }] = await Promise.all([
-    sb.from('captacao_leads').select('id,criado_em,evento,nome,telefone,intencao,tipo,bairro,endereco,descartado_em,referenciado_em').gte('criado_em', desde(dias)).order('criado_em', { ascending: false }).limit(2000),
+    qCap.order('criado_em', { ascending: false }).limit(2000),
     sb.from('sdr_leads').select('id,telefone,status,intencao,corretor_phone,atribuido_em,feito_em,fila_corretores,created_at,nome,fonte,tipologia,bairros,imovel_anuncio_endereco').ilike('fonte', 'Capta%').gte('created_at', desde(dias === null ? null : dias + 2)),
     sb.from('corretores_associados').select('phone,nome,apelido'),
   ]);
@@ -278,8 +299,8 @@ const contar = <T,>(xs: T[], f: (x: T) => string) =>
   Object.entries(xs.reduce<Record<string, number>>((a, x) => { const k = f(x); a[k] = (a[k] || 0) + 1; return a; }, {})).sort((a, b) => b[1] - a[1]);
 
 // ---------- funis de cliente (comprador / locatário) ----------
-async function FunilCliente({ dias, intencao }: { dias: number | null; intencao: 'compra' | 'aluguel' }) {
-  const todos = await carregarClientes(dias);
+async function FunilCliente({ dias, ate = null, intencao }: { dias: number | null; ate?: string | null; intencao: 'compra' | 'aluguel' }) {
+  const todos = await carregarClientes(dias, ate);
   // 26/10: lead sem intenção (cliente não respondeu e o anúncio não informou) entra em compradores, marcado — nunca some do painel.
   const semIntencao = (l: Lead) => !l.intencao && !/ignorado|corretor|recrutamento/i.test(l.motivo_arquivamento ?? ''); // fora do SDR (parceiro, recrutamento, criado pela Eva) não entra
   const leads = todos.filter((l) => l.intencao === intencao || (intencao === 'compra' && semIntencao(l)));
@@ -519,8 +540,8 @@ async function FunilCliente({ dias, intencao }: { dias: number | null; intencao:
 }
 
 // ---------- funis de proprietário (venda / locação) ----------
-async function FunilProprietario({ dias, alugar }: { dias: number | null; alugar: boolean }) {
-  const { cap, leads, nomeCor, etapas: etapasCap } = await carregarCaptacao(dias);
+async function FunilProprietario({ dias, ate = null, alugar }: { dias: number | null; ate?: string | null; alugar: boolean }) {
+  const { cap, leads, nomeCor, etapas: etapasCap } = await carregarCaptacao(dias, ate);
   // venda × locação: vale a intenção do lead (cadastro do SDR) quando existe; senão, o que veio da landing
   const leadDoTel = new Map(leads.map((l) => [fim8(l.telefone), l]));
   const daIntencao = (c: Captacao) => {
@@ -556,7 +577,7 @@ async function FunilProprietario({ dias, alugar }: { dias: number | null; alugar
   const inicio = desde(dias);
   for (const l of leads) {
     const k = fim8(l.telefone);
-    if (porTel.has(k) || l.created_at < inicio) continue;
+    if (porTel.has(k) || l.created_at < inicio || (ate && l.created_at >= ate)) continue;
     if (/^alug/i.test(String(l.intencao ?? '')) !== alugar) continue;
     const canal = String(l.fonte ?? '').replace(/^capta[cç][aã]o\s*[—-]\s*/i, '');
     if (/landing/i.test(canal)) continue;
@@ -736,9 +757,10 @@ async function ForaDoPerfil() {
   );
 }
 
-export default async function FunilSdr({ searchParams }: { searchParams: Promise<{ d?: string; f?: string; c?: string; a?: string }> }) {
+export default async function FunilSdr({ searchParams }: { searchParams: Promise<{ d?: string; f?: string; c?: string; a?: string; de?: string; ate?: string }> }) {
   const perfil = await exigirTela('sdr');
-  const { d, f, c, a } = await searchParams;
+  const { d, f, c, a, de: deP, ate: ateP } = await searchParams;
+  const datas = intervalo(deP, ateP);
   // Perfil Corretor: só o próprio funil.
   if (escopoSdr(perfil) === 'proprio') {
     const cor = await corretorDaPessoa(perfil.email);
@@ -748,10 +770,10 @@ export default async function FunilSdr({ searchParams }: { searchParams: Promise
   // 09/11: a lista de corretores e o funil de cliente carregam ao mesmo tempo.
   const periodoPre = PERIODOS.some((p) => p.k === d) ? (d as string) : '30';
   const funilPre: FunilK = FUNIS.some((x) => x.k === f) ? (f as FunilK) : 'comprador';
-  const diasPre = diasDoPeriodo(periodoPre);
+  const diasPre = datas ? datas.dias : diasDoPeriodo(periodoPre);
   const corsP = supabaseAdmin().from('corretores_associados').select('id,nome,phone').eq('status', 'ativo').order('nome');
   const clientePre = !c && (funilPre === 'comprador' || funilPre === 'locatario')
-    ? FunilCliente({ dias: diasPre, intencao: funilPre === 'comprador' ? 'compra' : 'aluguel' }).then((x) => ({ ok: x }), (e: unknown) => ({ erro: e }))
+    ? FunilCliente({ dias: diasPre, ate: datas?.ate ?? null, intencao: funilPre === 'comprador' ? 'compra' : 'aluguel' }).then((x) => ({ ok: x }), (e: unknown) => ({ erro: e }))
     : null;
   const { data: corsAtivos } = await corsP;
   const corretores = ((corsAtivos ?? []) as { id: number; nome: string; phone: string | null }[]);
@@ -769,9 +791,14 @@ export default async function FunilSdr({ searchParams }: { searchParams: Promise
         />
       );
   }
-  const periodo = PERIODOS.some((p) => p.k === d) ? (d as string) : '30';
+  const periodo = datas ? 'datas' : PERIODOS.some((p) => p.k === d) ? (d as string) : '30';
   const funil: FunilK = FUNIS.some((x) => x.k === f) ? (f as FunilK) : 'comprador';
-  const dias = diasDoPeriodo(periodo);
+  const dias = datas ? datas.dias : diasDoPeriodo(periodo);
+  const ate = datas?.ate ?? null;
+  // parâmetros do período para os links (troca de funil, abas do recrutamento)
+  const qPer = datas ? `de=${datas.deDia}&ate=${datas.ateDia}` : `d=${periodo}`;
+  const hoje = diaSP(new Date());
+  const deDefault = datas?.deDia ?? diaSP(new Date(desde(dias ?? 365)));
 
   let conteudo: React.ReactNode = null;
   let erro: string | null = null;
@@ -780,11 +807,11 @@ export default async function FunilSdr({ searchParams }: { searchParams: Promise
     if (pre && 'erro' in pre) throw pre.erro;
     conteudo =
       pre ? pre.ok
-      : funil === 'comprador' ? await FunilCliente({ dias, intencao: 'compra' })
-      : funil === 'locatario' ? await FunilCliente({ dias, intencao: 'aluguel' })
-      : funil === 'prop_venda' ? await FunilProprietario({ dias, alugar: false })
-      : funil === 'prop_locacao' ? await FunilProprietario({ dias, alugar: true })
-      : await FunilRecrutamento({ dias, base: `/sdr?f=recrutamento&d=${periodo}`, aba: a ?? 'decidir', corretores: corretores.map((x) => ({ id: x.id, nome: x.nome.split(' - ')[0] })) });
+      : funil === 'comprador' ? await FunilCliente({ dias, ate, intencao: 'compra' })
+      : funil === 'locatario' ? await FunilCliente({ dias, ate, intencao: 'aluguel' })
+      : funil === 'prop_venda' ? await FunilProprietario({ dias, ate, alugar: false })
+      : funil === 'prop_locacao' ? await FunilProprietario({ dias, ate, alugar: true })
+      : await FunilRecrutamento({ dias, ate, base: `/sdr?f=recrutamento&${qPer}`, aba: a ?? 'decidir', corretores: corretores.map((x) => ({ id: x.id, nome: x.nome.split(' - ')[0] })) });
   } catch (e) {
     erro = e instanceof Error ? e.message : String(e);
   }
@@ -808,11 +835,29 @@ export default async function FunilSdr({ searchParams }: { searchParams: Promise
           </nav>
         </header>
 
+        {/* 15/11: filtro por datas (dias inteiros, horário de São Paulo) */}
+        <form action="/sdr" method="get" className="mt-4 flex flex-wrap items-end justify-end gap-2" aria-label="Filtrar por datas">
+          <input type="hidden" name="f" value={funil} />
+          {funil === 'recrutamento' && a ? <input type="hidden" name="a" value={a} /> : null}
+          <div className={`flex flex-wrap items-end gap-2 rounded-xl border bg-white px-3 py-2 shadow-sm ${datas ? 'border-slate-900' : 'border-slate-200'}`}>
+            <label className="text-xs font-medium text-slate-600">
+              De
+              <input type="date" name="de" defaultValue={deDefault} max={hoje} required className="mt-0.5 block rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900" />
+            </label>
+            <label className="text-xs font-medium text-slate-600">
+              Até
+              <input type="date" name="ate" defaultValue={datas?.ateDia ?? hoje} max={hoje} required className="mt-0.5 block rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900" />
+            </label>
+            <button type="submit" className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">Filtrar</button>
+          </div>
+        </form>
+        {datas && <p className="mt-2 text-right text-sm font-semibold text-slate-700">Período: {datas.rotulo}{datas.ateDia === hoje ? ' (hoje até agora)' : ''}</p>}
+
         <div className="mt-6">
           <div className="flex flex-wrap items-center gap-4">
-            <FunilSelect funis={FUNIS.map((x) => ({ k: x.k, rotulo: x.rotulo }))} atual={funil} periodo={periodo} />
+            <FunilSelect funis={FUNIS.map((x) => ({ k: x.k, rotulo: x.rotulo }))} atual={funil} periodo={qPer} />
             <Link href="/sdr/parceiros" className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Corretores de fora</Link>
-            <VerComoCorretor corretores={corretores.map((x) => ({ id: x.id, nome: x.nome.split(' - ')[0] }))} base={`/sdr?d=${periodo}&f=${funil}&c=`} />
+            <VerComoCorretor corretores={corretores.map((x) => ({ id: x.id, nome: x.nome.split(' - ')[0] }))} base={`/sdr?d=${datas ? '30' : periodo}&f=${funil}&c=`} />
             <form action="/sdr/busca" method="get" className="flex min-w-0 flex-1 basis-full gap-2 sm:basis-auto sm:max-w-xs">
               <input name="q" placeholder="Buscar cliente (nome ou telefone)" className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm focus:border-slate-500 focus:outline-none" />
               <button className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">Buscar</button>
