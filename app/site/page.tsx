@@ -103,13 +103,25 @@ function Jornadas({ lista }: { lista: Jornada[] }) {
 const TIPO_CAMP: Record<string, string> = { imoveis: 'Imóveis', captacao: 'Captação', recrutamento: 'Recrutamento' };
 
 // Meia-noite de São Paulo (UTC-3, sem horário de verão) de "hoje menos n dias".
-function periodo(k: string) {
-  const p = PERIODOS.find((x) => x.k === k) ?? PERIODOS[1];
+// 15/11: ou um intervalo escolhido (?de=AAAA-MM-DD&ate=AAAA-MM-DD), dias inteiros de São Paulo.
+const DIA = /^\d{4}-\d{2}-\d{2}$/;
+const diaSP = (d: Date) => new Date(d.getTime() - 3 * 3600e3).toISOString().slice(0, 10);
+const meiaNoiteSP = (dia: string) => new Date(Date.parse(dia + 'T00:00:00-03:00'));
+const dataBR = (dia: string) => dia.split('-').reverse().join('/');
+function periodo(k: string, deP?: string, ateP?: string) {
   const agora = new Date();
-  const sp = new Date(agora.getTime() - 3 * 3600e3);
-  const meiaNoite = Date.UTC(sp.getUTCFullYear(), sp.getUTCMonth(), sp.getUTCDate()) + 3 * 3600e3;
+  if (deP && ateP && DIA.test(deP) && DIA.test(ateP) && !Number.isNaN(Date.parse(deP)) && !Number.isNaN(Date.parse(ateP))) {
+    const [a, b] = deP <= ateP ? [deP, ateP] : [ateP, deP];
+    const fim = new Date(meiaNoiteSP(b).getTime() + 86400e3);
+    return {
+      p: { k: 'datas', rotulo: a === b ? dataBR(a) : `${dataBR(a)} a ${dataBR(b)}`, dias: -1 },
+      de: meiaNoiteSP(a).toISOString(), ate: (fim < agora ? fim : agora).toISOString(), deDia: a, ateDia: b,
+    };
+  }
+  const p = PERIODOS.find((x) => x.k === k) ?? PERIODOS[1];
+  const meiaNoite = meiaNoiteSP(diaSP(agora)).getTime();
   const de = new Date(meiaNoite - (p.dias ? (p.dias - 1) * 86400e3 : 0));
-  return { p, de: de.toISOString(), ate: agora.toISOString() };
+  return { p, de: de.toISOString(), ate: agora.toISOString(), deDia: diaSP(de), ateDia: diaSP(agora) };
 }
 
 function Cartao({ titulo, valor, nota }: { titulo: string; valor: string; nota?: string }) {
@@ -177,10 +189,11 @@ function PorDia({ dias }: { dias: Dados['por_dia'] }) {
   );
 }
 
-export default async function SitePage({ searchParams }: { searchParams: Promise<{ p?: string }> }) {
+export default async function SitePage({ searchParams }: { searchParams: Promise<{ p?: string; de?: string; ate?: string }> }) {
   await exigirTela('vitrine');
-  const { p: pParam } = await searchParams;
-  const { p, de, ate } = periodo(pParam || '7');
+  const { p: pParam, de: deParam, ate: ateParam } = await searchParams;
+  const { p, de, ate, deDia, ateDia } = periodo(pParam || '7', deParam, ateParam);
+  const hoje = diaSP(new Date());
   let d: Dados | null = null;
   let erro: string | null = null;
   try {
@@ -207,11 +220,26 @@ export default async function SitePage({ searchParams }: { searchParams: Promise
           Visitas, caminho de cada pessoa, tempo, imóveis vistos, contatos e de onde vieram. O registro começou em {INICIO_REGISTRO.split('-').reverse().join('/')}; o tempo e a rolagem, no fim do mesmo dia.
           O custo dos anúncios é atualizado todo dia às 6h10 (o de hoje ainda não entra).
         </p>
-        <nav className="mt-4 flex flex-wrap gap-2" aria-label="Período">
-          {PERIODOS.map((x) => (
-            <Link key={x.k} href={`/site?p=${x.k}`} className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${x.k === p.k ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700 hover:border-slate-500'}`}>{x.rotulo}</Link>
-          ))}
-        </nav>
+        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-3">
+          <nav className="flex flex-wrap gap-2" aria-label="Período">
+            {PERIODOS.map((x) => (
+              <Link key={x.k} href={`/site?p=${x.k}`} className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${x.k === p.k ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700 hover:border-slate-500'}`}>{x.rotulo}</Link>
+            ))}
+          </nav>
+          {/* 15/11: filtro por datas (dias inteiros, horário de São Paulo) */}
+          <form action="/site" method="get" className={`flex flex-wrap items-end gap-2 rounded-2xl border px-3 py-2 ${p.k === 'datas' ? 'border-slate-900 bg-white' : 'border-slate-200 bg-white'}`} aria-label="Filtrar por datas">
+            <label className="text-xs font-semibold text-slate-600">
+              De
+              <input type="date" name="de" defaultValue={deDia} min={INICIO_REGISTRO} max={hoje} required className="mt-0.5 block rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm font-normal text-slate-800" />
+            </label>
+            <label className="text-xs font-semibold text-slate-600">
+              Até
+              <input type="date" name="ate" defaultValue={ateDia} min={INICIO_REGISTRO} max={hoje} required className="mt-0.5 block rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm font-normal text-slate-800" />
+            </label>
+            <button type="submit" className="rounded-full bg-slate-900 px-4 py-1.5 text-sm font-semibold text-white hover:bg-slate-700">Filtrar</button>
+          </form>
+        </div>
+        {p.k === 'datas' && <p className="mt-2 text-sm font-semibold text-slate-700">Período: {p.rotulo}{ateDia === hoje ? ' (hoje até agora)' : ''}</p>}
 
         {erro || !d || !r ? (
           <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">Não consegui carregar os números agora: {erro}</div>
