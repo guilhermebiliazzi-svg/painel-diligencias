@@ -5,8 +5,8 @@ import { registrarVisita, type ResVisita } from './actions';
 
 export type ImovelOpc = { id: string; rotulo: string };
 
-export default function FormVisita({ token, imoveis }: { token: string; imoveis: ImovelOpc[] }) {
-  const [imovel, setImovel] = useState(imoveis[0]?.id ?? '');
+export default function FormVisita({ token, imoveis, inicial }: { token: string; imoveis: ImovelOpc[]; inicial?: string }) {
+  const [imovel, setImovel] = useState(inicial ?? imoveis[0]?.id ?? '');
   const [data, setData] = useState('');
   const [hora, setHora] = useState('');
   const [res, setRes] = useState<ResVisita | null>(null);
