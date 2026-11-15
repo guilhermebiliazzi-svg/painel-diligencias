@@ -48,7 +48,11 @@ export type FormRepresentacao = {
   pessoas: Pessoa[];
   corretor_id: number | null;
   corretor_cpf: string;
+  /** 15/11: lead de captação de onde os dados vieram; quando o contrato é assinado, a captação fecha sozinha */
+  lead_id?: string | null;
 };
+
+export type LeadCaptacao = { id: string; nome: string; telefone: string; endereco: string; bairro: string; tipo: string; v2: string | null };
 
 export type CorretorOpcao = { id: number; nome: string; creci: string; cpf: string; temEmail: boolean; temFone: boolean };
 
@@ -255,12 +259,52 @@ export async function enviarAssinatura(f: FormRepresentacao): Promise<{ ok: bool
       .gte('criado_em', new Date(Date.now() - 10 * 60000).toISOString())
       .limit(1)
       .maybeSingle();
-    if (aberto?.id) return { ok: true, pedido: String(aberto.id) };
+    if (aberto?.id) { await ligarLead(String(aberto.id), f.lead_id, c.phone); return { ok: true, pedido: String(aberto.id) }; }
     const r = await chamar({ acao: 'enviar', ...m });
     if (!r?.ok || !r.pedido_id) return { ok: false, erro: r?.erro || 'Não consegui registrar o envio. Nada foi enviado.' };
+    await ligarLead(String(r.pedido_id), f.lead_id, c.phone);
     return { ok: true, pedido: String(r.pedido_id) };
   } catch (e) {
     return { ok: false, erro: (e as Error).message };
+  }
+}
+
+// 15/11: liga o envio ao lead de captação (só se o lead for do corretor do contrato). Ao assinar, um gatilho no banco
+// registra "contrato assinado" na captação e encerra o lead.
+async function ligarLead(pedido: string, leadId: string | null | undefined, phoneCorretor: string) {
+  if (!leadId || !/^[0-9a-f-]{36}$/i.test(leadId) || !/^[0-9a-f-]{36}$/i.test(pedido)) return;
+  const sb = supabaseAdmin();
+  const { data: l } = await sb.from('sdr_leads').select('corretor_phone').eq('id', leadId).maybeSingle();
+  if (!l || dig(l.corretor_phone).slice(-8) !== dig(phoneCorretor).slice(-8)) return;
+  const { error } = await sb.from('representacao_envios').update({ lead_id: leadId }).eq('id', pedido);
+  if (error) console.error('[representacao] lead', error);
+}
+
+/** 15/11: leads de captação abertos do corretor, para puxar os dados do proprietário e do imóvel. */
+export async function leadsDeCaptacao(corretorId: number | null): Promise<LeadCaptacao[]> {
+  try {
+    const s = await sessao();
+    const c = await corretorDoEnvio(s, corretorId);
+    const fim = c.phone.slice(-8);
+    if (fim.length < 8) return [];
+    const sb = supabaseAdmin();
+    const { data } = await sb.from('sdr_leads').select('id,nome,telefone,imovel_anuncio_endereco,bairros,tipologia,corretor_phone,created_at')
+      .ilike('fonte', 'capta%').not('status', 'in', '(arquivado,encerrado)').ilike('corretor_phone', '%' + fim)
+      .order('created_at', { ascending: false }).limit(50);
+    const leads = ((data ?? []) as { id: string; nome: string | null; telefone: string; imovel_anuncio_endereco: string | null; bairros: string[] | null; tipologia: string | null; corretor_phone: string | null }[])
+      .filter((l) => dig(l.corretor_phone).slice(-8) === fim);
+    const v2 = new Map<string, string>();
+    if (leads.length) {
+      const { data: et } = await sb.from('sdr_captacao_etapas').select('lead_id,quando').in('lead_id', leads.map((l) => l.id)).eq('etapa', 'v2_agendada').order('created_at');
+      for (const e of (et ?? []) as { lead_id: string; quando: string | null }[]) if (e.quando) v2.set(e.lead_id, e.quando);
+    }
+    const tipo = (t: string | null) => { const x = String(t || '').toLowerCase(); return /sala/.test(x) ? 'Sala comercial' : /terreno/.test(x) ? 'Terreno' : /casa/.test(x) ? 'Casa' : /apart/.test(x) ? 'Apartamento' : ''; };
+    return leads.map((l) => ({
+      id: l.id, nome: txt(l.nome), telefone: dig(l.telefone).replace(/^55(?=\d{10,11}$)/, ''), endereco: txt(l.imovel_anuncio_endereco),
+      bairro: txt((l.bairros || [])[0]), tipo: tipo(l.tipologia), v2: v2.get(l.id) ?? null,
+    }));
+  } catch {
+    return [];
   }
 }
 
