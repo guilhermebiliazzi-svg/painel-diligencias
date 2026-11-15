@@ -115,7 +115,24 @@ export function faltandoParaGerar(tipo: TipoFicha, vals: Vals): string[] {
     if (!(Number(n('area_util')) > 0)) out.push('área útil');
     if (!(Number(n('area_iptu')) > 0)) out.push('área total (IPTU) — use “Achar pelo endereço” ou a certidão');
   }
+  // 15/11: todo estudo vira lead de captação: nome e celular do proprietário e a data da V2 são obrigatórios
+  const pr = proprietario(tipo, vals);
+  if (!pr.nome) out.push('nome do proprietário');
+  if (!pr.tel) out.push('celular do proprietário (com DDD)');
+  if (!pr.v2) out.push('dia e hora da apresentação (V2)');
+  else if (new Date(pr.v2).getTime() < Date.now() - 3600e3) out.push('data da V2 de hoje em diante');
   return out;
+}
+
+/** 15/11: proprietário e V2 da ficha. v2 em ISO com o fuso de São Paulo (-03:00). */
+export function proprietario(tipo: TipoFicha, vals: Vals): { nome: string; tel: string; v2: string } {
+  const { g } = ficha(tipo, vals);
+  const nome = g('prop_nome').replace(/\s+/g, ' ').trim().slice(0, 120);
+  let tel = g('prop_cel').replace(/\D/g, '');
+  if (tel.startsWith('55') && tel.length >= 12) tel = tel.slice(2);
+  const data = g('v2_data'); const hora = g('v2_hora');
+  const v2 = /^\d{4}-\d{2}-\d{2}$/.test(data) && /^\d{2}:\d{2}$/.test(hora) ? `${data}T${hora}:00-03:00` : '';
+  return { nome: nome.length >= 2 ? nome : '', tel: tel.length === 10 || tel.length === 11 ? '55' + tel : '', v2 };
 }
 
 // ------------------------------------------------------------------ prévia: ITBI do prédio
