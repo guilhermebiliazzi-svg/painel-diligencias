@@ -36,6 +36,9 @@ export type Anuncio = {
   vagas: number | null;
   condominio_mensal: number | null;
   bairro: string;
+  origem?: 'site' | 'portal';   // site = villejardins.com.br; portal = outros sites (lidos pelo serviço do estudo)
+  condominio_nome?: string;
+  address?: string;
 };
 
 export type Busca = {
@@ -44,7 +47,10 @@ export type Busca = {
   links_encontrados: number;
   fora_do_tamanho: number;
   criterio: string;
-  outros_links: number; // links que não são do villejardins.com.br (o painel não lê)
+  outros_links: number;   // links de outros sites que ficaram de fora (casa, ou além do limite)
+  outros: Anuncio[];      // anúncios de outros portais lidos (apartamento/sala)
+  outros_falha: string[]; // links de outros portais que não deu para ler (portal bloqueou)
+  outros_fora: number;    // de outros portais, mas fora do tamanho (±30% da área útil)
 };
 
 // ------------------------------------------------------------------ leitura da ficha
@@ -84,11 +90,17 @@ function padraoReforma(itens: string[]): string {
   return itens.length >= 3 ? 'media' : 'simples';
 }
 
-/** Links colados em "Concorrentes": os do villejardins.com.br e quantos são de outros sites. */
-export function linksConcorrentes(texto: string): { site: string[]; outros: number } {
+/** Links colados em "Concorrentes": os do villejardins.com.br e os de outros sites. */
+export function linksConcorrentes(texto: string): { site: string[]; outros: string[] } {
   const todos = [...new Set((String(texto || '').match(/https?:\/\/[^\s<>"']+/g) || []).map((u) => u.replace(/[),.;]+$/, '')))];
-  const site = todos.filter((u) => /^https?:\/\/(www\.)?villejardins\.com\.br\//i.test(u));
-  return { site: site.slice(0, 5), outros: todos.length - site.length };
+  const ehSite = (u: string) => /^https?:\/\/(www\.)?villejardins\.com\.br\//i.test(u);
+  return { site: todos.filter(ehSite).slice(0, 5), outros: todos.filter((u) => !ehSite(u)) };
+}
+
+/** Código do anúncio pelo link: id numérico no caminho (QuintoAndar) ou fim em maiúsculas/números (...-IIGFT). */
+export function codigoDoLink(url: string): string {
+  const p = String(url || '').split(/[?#]/)[0].replace(/\/+$/, '');
+  return (p.match(/\/(\d{6,12})(?:\/|$)/) || p.match(/-([A-Z0-9]{3,14})$/) || [])[1] || '';
 }
 
 /** O que falta preencher para gerar pelo painel (vazio = pode gerar). */
@@ -190,8 +202,7 @@ const numBR = (s: string | null | undefined): number | null => {
  * "EVA - Ler Busca do Site (estudo)": até 4 páginas por busca, corte de tamanho pelo m² do
  * link e até 12 anúncios abertos.
  */
-export async function lerBuscaSite(texto: string, area: number | null, tolerancia = 0.15): Promise<Busca> {
-  const { site, outros } = linksConcorrentes(texto);
+async function lerBuscaSite(site: string[], area: number | null, tolerancia = 0.15) {
   let links: string[] = [];
   let total: number | null = null;
   for (const u of site) {
@@ -234,6 +245,7 @@ export async function lerBuscaSite(texto: string, area: number | null, toleranci
       vagas: numBR(g(/Vagas\s*(\d+)/)),
       condominio_mensal: numBR(g(/Condom[íi]nio\s*R\$\s*([\d.]+)/)),
       bairro: (g(/ em ([^,—]+),/, t) || '').trim(),
+      origem: 'site',
     };
   }));
   const anuncios = lidos.filter((a): a is Anuncio => !!a).sort((a, b) => a.preco - b.preco);
@@ -243,7 +255,72 @@ export async function lerBuscaSite(texto: string, area: number | null, toleranci
     links_encontrados: links.length,
     fora_do_tamanho: fora,
     criterio: area ? `de ${Math.round(area * (1 - tolerancia))} a ${Math.round(area * (1 + tolerancia))} m²` : 'sem corte de tamanho',
-    outros_links: outros,
+  };
+}
+
+// Anúncios de outros portais (QuintoAndar, Zap, Viva Real, REMAX...): o serviço do estudo
+// (eva-estudo-render, POST /amostras) lê cada link — o mesmo que a EVA usa no WhatsApp.
+const RENDER = 'https://eva-estudo-render.onrender.com';
+const MAX_OUTROS = 6;
+
+async function lerOutrosPortais(links: string[], area: number | null, subject: { predio_curto?: string; bairro?: string }) {
+  const vazio = { outros: [] as Anuncio[], outros_falha: [] as string[], outros_fora: 0 };
+  if (!links.length) return vazio;
+  let lidos: Record<string, unknown>[] = [];
+  try {
+    const r = await fetch(RENDER + '/amostras', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ avaliando: null, urls: links, subject }), // sem phone: não grava sessão da EVA
+      signal: AbortSignal.timeout(95_000),
+      cache: 'no-store',
+    });
+    const j = (await r.json().catch(() => ({}))) as { amostras?: Record<string, unknown>[] };
+    lidos = Array.isArray(j.amostras) ? j.amostras : [];
+  } catch {
+    return { ...vazio, outros_falha: links };
+  }
+  const num = (v: unknown) => { const m = String(v ?? '').match(/\d+(?:[.,]\d+)?/); const x = m ? Number(m[0].replace(',', '.')) : NaN; return Number.isFinite(x) && x > 0 ? x : null; };
+  const out = { ...vazio };
+  for (const link of links) {
+    const a = lidos.find((x) => x && x.link === link);
+    const preco = Number(a?.valor) > 0 ? Number(a!.valor) : null;
+    if (!a || !preco) { out.outros_falha.push(link); continue; }
+    const ar = num(a.area);
+    if (area && ar && Math.abs(ar - area) > area * 0.3) { out.outros_fora++; continue; } // o estudo descarta fora de ±30%
+    const raw = (a._raw || {}) as Record<string, unknown>;
+    out.outros.push({
+      link, codigo: codigoDoLink(link), titulo: String(a.nome || ''), preco, area: ar,
+      quartos: null, suites: num(a.suites), vagas: num(a.vagas), condominio_mensal: null,
+      bairro: String(a.bairro || ''), origem: 'portal',
+      condominio_nome: String(raw.condominio || ''), address: String(raw.endereco || ''),
+    });
+  }
+  out.outros.sort((x, y) => x.preco - y.preco);
+  return out;
+}
+
+/**
+ * Concorrentes colados na ficha: busca/anúncios do villejardins.com.br e, no apartamento/sala,
+ * anúncios de outros portais (até 6). Na casa, só o villejardins (o estudo de casa lê só o site).
+ */
+export async function lerConcorrentes(
+  texto: string, area: number | null, tolerancia: number, comPortais: boolean, subject: { predio_curto?: string; bairro?: string },
+): Promise<Busca> {
+  const { site, outros } = linksConcorrentes(texto);
+  const ler = comPortais ? outros.slice(0, MAX_OUTROS) : [];
+  const [bs, op] = await Promise.all([
+    site.length ? lerBuscaSite(site, area, tolerancia) : Promise.resolve(null),
+    lerOutrosPortais(ler, area, subject),
+  ]);
+  return {
+    anuncios: bs?.anuncios || [],
+    total_na_busca: bs?.total_na_busca ?? null,
+    links_encontrados: bs?.links_encontrados || 0,
+    fora_do_tamanho: bs?.fora_do_tamanho || 0,
+    criterio: bs?.criterio || (area ? `de ${Math.round(area * (1 - tolerancia))} a ${Math.round(area * (1 + tolerancia))} m²` : 'sem corte de tamanho'),
+    outros_links: outros.length - ler.length,
+    ...op,
   };
 }
 
@@ -320,7 +397,7 @@ export function montarPayload(tipo: TipoFicha, vals: Vals, esc: Escolhas) {
   // amostras "cruas" (o mesmo formato que a EVA passa): o /estudo converte para o contrato do estudo
   const amostras = esc.anuncios.map((a) => ({
     link: a.link, preco: a.preco, area: a.area, quartos: a.quartos, suites: a.suites, vagas: a.vagas,
-    bairro: a.bairro, condominio_mensal: a.condominio_mensal, address: '', condominio_nome: '',
+    bairro: a.bairro, condominio_mensal: a.condominio_mensal, address: a.address || '', condominio_nome: a.condominio_nome || '',
   }));
   return {
     tipo,
