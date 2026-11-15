@@ -70,13 +70,15 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const sb = supabaseAdmin();
 
-  const [{ data: lead }, { data: msgs }, { data: cors }, { data: outros }, { data: etapasCap }, { data: imvs }] = await Promise.all([
+  const [{ data: lead }, { data: msgs }, { data: cors }, { data: outros }, { data: etapasCap }, { data: imvs }, { data: estudos }] = await Promise.all([
     sb.from('sdr_leads').select('*').eq('id', id).maybeSingle(),
     sb.from('sdr_mensagens').select('id,created_at,direcao,interlocutor,telefone,template,conteudo,wa_message_id').eq('lead_id', id).order('created_at', { ascending: false }).limit(40),
     sb.from('corretores_associados').select('phone,nome,apelido,foto_url').eq('status', 'ativo').not('phone', 'is', null).order('nome'),
     sb.from('sdr_leads').select('id,nome,imovel_anuncio_endereco,bairros').eq('status', 'aguardando_guilherme').neq('id', id).gte('updated_at', new Date(Date.now() - 7 * 864e5).toISOString()).order('cartao_enviado_em', { ascending: false }).limit(10),
     sb.from('sdr_captacao_etapas').select('etapa,quando,created_at').eq('lead_id', id).order('created_at'),
     sb.from('sdr_imoveis_lead').select('ref,endereco,parceiro_nome,parceiro_origem').eq('lead_id', id).not('ref', 'is', null),
+    // 15/11: estudos de mercado ligados ao lead (gerados pelo painel ou pela Eva)
+    sb.from('painel_estudo_pedidos').select('id,criado_em,status,nome_arquivo:payload->>nome_arquivo').eq('lead_id', id).eq('status', 'pronto').order('criado_em', { ascending: false }).limit(20),
   ]);
   if (!lead) notFound();
   const l = lead as Lead;
@@ -215,6 +217,13 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
             <Linha k="Fila" v={fila.length ? fila.map(nomeCor).join(' → ') : null} />
             <Linha k="Captação" v={(etapasCap ?? []).length ? (etapasCap as { etapa: string; quando: string | null; created_at: string }[]).map((e) =>
               (ETAPA_CAP[e.etapa] ?? e.etapa) + (e.quando ? ' ' + fmt.format(new Date(e.quando)) : '') + ' (' + fmt.format(new Date(e.created_at)).slice(0, 5) + ')').join(' → ') : null} />
+            <Linha k="Estudos" v={(estudos ?? []).length ? (
+              <span className="flex flex-col gap-0.5">
+                {(estudos as { id: string; criado_em: string; nome_arquivo: string | null }[]).map((e) => (
+                  <a key={e.id} href={'/api/estudo/arquivo?id=' + e.id} className="text-blue-700 underline">{(e.nome_arquivo || 'Estudo de mercado').replace(/\.pptx$/i, '').replace(/_/g, ' ')} · {fmt.format(new Date(e.criado_em))}</a>
+                ))}
+              </span>
+            ) : null} />
             <Linha k={l.status === 'encerrado' ? 'Encerrado' : 'Arquivado'} v={['arquivado', 'encerrado'].includes(l.status) ? l.motivo_arquivamento : null} />
             <Linha k="Pausado" v={pausa} />
             <Linha k="Entrou" v={fmt.format(new Date(l.created_at))} />
