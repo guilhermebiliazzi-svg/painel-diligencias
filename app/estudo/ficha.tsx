@@ -617,8 +617,9 @@ function IptuBox({ tipo, get, set }: { tipo: Tipo; get: (id: string) => Valor | 
 // ---------------------------------------------------------------- Gerar estudo pelo painel
 
 type VendaP = { chave: string; data: string; unidade: string; area: number; valor: number; valor_m2: number; mesma_area: boolean };
-type AnuncioP = { link: string; codigo: string; titulo: string; preco: number; area: number | null; quartos: number | null; suites: number | null; vagas: number | null; condominio_mensal: number | null; bairro: string };
-type BuscaP = { anuncios: AnuncioP[]; total_na_busca: number | null; links_encontrados: number; fora_do_tamanho: number; criterio: string; outros_links: number };
+type AnuncioP = { link: string; codigo: string; titulo: string; preco: number; area: number | null; quartos: number | null; suites: number | null; vagas: number | null; condominio_mensal: number | null; bairro: string; origem?: 'site' | 'portal'; condominio_nome?: string; address?: string };
+type BuscaP = { anuncios: AnuncioP[]; total_na_busca: number | null; links_encontrados: number; fora_do_tamanho: number; criterio: string; outros_links: number; outros?: AnuncioP[]; outros_falha?: string[]; outros_fora?: number };
+const siteDe = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return 'outro site'; } };
 type FaseGerar = 'carregando' | 'escolha' | 'gerando' | 'pronto' | 'erro';
 
 const reais = (v: number) => 'R$ ' + Math.round(v).toLocaleString('pt-BR');
@@ -690,7 +691,7 @@ function GerarEstudo({ tipo, vals, aberto, fechar }: { tipo: Tipo; vals: Record<
       const j = await api({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
         acao: 'gerar', tipo, vals: valsRef.current,
         itbi_manter: manter, itbi_excluir: foraItbi,
-        anuncios: (busca?.anuncios || []).filter((a) => !foraAn.includes(a.link)),
+        anuncios: [...(busca?.anuncios || []), ...(busca?.outros || [])].filter((a) => !foraAn.includes(a.link)),
       }) });
       const t0 = Date.now();
       for (;;) {
@@ -715,6 +716,7 @@ function GerarEstudo({ tipo, vals, aberto, fechar }: { tipo: Tipo; vals: Record<
 
   const visiveis = itbi ? (todas ? itbi : itbi.slice(0, 8)) : [];
   const ehCasa = tipo === 'casa';
+  const todosAn = busca ? [...busca.anuncios, ...(busca.outros || [])] : [];
   const alterna = (lista: string[], set: (v: string[]) => void, k: string) => set(lista.includes(k) ? lista.filter((x) => x !== k) : [...lista, k]);
 
   return (
@@ -724,7 +726,7 @@ function GerarEstudo({ tipo, vals, aberto, fechar }: { tipo: Tipo; vals: Record<
         <button type="button" aria-label="Fechar" onClick={sair}>×</button>
       </div>
 
-      {fase === 'carregando' && <p className="fe-gsub">Buscando as vendas do ITBI{ehCasa ? '' : ' do prédio'} e os anúncios da sua busca…</p>}
+      {fase === 'carregando' && <p className="fe-gsub"><span className="fe-spin" aria-hidden="true" /> Buscando as vendas do ITBI{ehCasa ? '' : ' do prédio'} e lendo os anúncios dos concorrentes…{!ehCasa && <><br />Links de outros portais podem levar até 1 minuto.</>}</p>}
       {fase === 'erro' && <p className="fe-gsub fe-gerro" role="alert">{msg}</p>}
       {fase === 'gerando' && (
         <div className="fe-gsub" role="status"><span className="fe-spin" aria-hidden="true" /> {andamento}<br />Não feche esta janela.</div>
@@ -770,25 +772,26 @@ function GerarEstudo({ tipo, vals, aberto, fechar }: { tipo: Tipo; vals: Record<
           )}
 
           <div className="fe-gbox">
-            {busca && busca.anuncios.length > 0 ? (
+            {todosAn.length > 0 ? (
               <>
                 <div className="fe-ghead">
-                  <strong>Concorrentes da sua busca ({busca.anuncios.length}{busca.total_na_busca ? ' de ' + busca.total_na_busca : ''})</strong>
-                  <button type="button" className="fe-glink" onClick={() => setForaAn(foraAn.length ? [] : busca.anuncios.map((a) => a.link))}>
+                  <strong>Concorrentes ({todosAn.length})</strong>
+                  <button type="button" className="fe-glink" onClick={() => setForaAn(foraAn.length ? [] : todosAn.map((a) => a.link))}>
                     {foraAn.length ? 'marcar todos' : 'desmarcar todos'}
                   </button>
                 </div>
                 <p className="fe-gnote">
-                  Ficaram os {busca.criterio} de {ehCasa ? 'área construída' : 'área útil'}.{' '}
+                  {busca!.anuncios.length > 0 && <>Da busca do site: {busca!.anuncios.length}{busca!.total_na_busca ? ' de ' + busca!.total_na_busca : ''}, os {busca!.criterio} de {ehCasa ? 'área construída' : 'área útil'}. </>}
+                  {(busca!.outros || []).length > 0 && <>De outros portais: {(busca!.outros || []).length}. </>}
                   {ehCasa ? 'Entram no slide “Casas à venda agora” (preço pedido).' : 'Entram como comparáveis à venda (preço pedido).'}
                 </p>
-                {busca.anuncios.map((a) => (
+                {todosAn.map((a) => (
                   <label key={a.link} className="fe-gan">
                     <input type="checkbox" checked={!foraAn.includes(a.link)} onChange={() => alterna(foraAn, setForaAn, a.link)} />
                     <span>
                       <strong>{reais(a.preco)}</strong>
-                      <span className="d">{[a.titulo.split(/ em | à venda/)[0], a.area && fmtM2(a.area) + ' m²', a.quartos && a.quartos + ' quartos', a.suites && a.suites + (a.suites === 1 ? ' suíte' : ' suítes'), a.vagas && a.vagas + (a.vagas === 1 ? ' vaga' : ' vagas')].filter(Boolean).join(' · ')}</span>
-                      <a href={a.link} target="_blank" rel="noopener noreferrer">ver anúncio {a.codigo} ›</a>
+                      <span className="d">{[a.condominio_nome || a.bairro || a.titulo.split(/ em | à venda/)[0] || 'Anúncio', a.area && fmtM2(a.area) + ' m²', a.quartos && a.quartos + ' quartos', a.suites && a.suites + (a.suites === 1 ? ' suíte' : ' suítes'), a.vagas && a.vagas + (a.vagas === 1 ? ' vaga' : ' vagas')].filter(Boolean).join(' · ')}</span>
+                      <a href={a.link} target="_blank" rel="noopener noreferrer">{a.origem === 'portal' ? `ver no ${siteDe(a.link)} ›` : `ver anúncio ${a.codigo} ›`}</a>
                     </span>
                   </label>
                 ))}
@@ -797,12 +800,24 @@ function GerarEstudo({ tipo, vals, aberto, fechar }: { tipo: Tipo; vals: Record<
               <p className="fe-gnote" style={{ margin: 0 }}>
                 {busca && busca.links_encontrados > 0
                   ? `Nenhum anúncio da sua busca ficou no tamanho do imóvel (${busca.criterio}).`
-                  : 'Nenhuma busca do villejardins.com.br em “Concorrentes”.'}{' '}
+                  : busca && ((busca.outros_falha || []).length || busca.outros_fora)
+                    ? 'Nenhum dos anúncios informados entrou.'
+                    : 'Nenhum concorrente em “Concorrentes”.'}{' '}
                 {ehCasa ? 'O estudo sai com as casas vendidas da região.' : 'O estudo sai só com as vendas do ITBI.'}
               </p>
             )}
+            {busca && (busca.outros_fora || 0) > 0 && (
+              <p className="fe-gnote">{busca.outros_fora === 1 ? '1 anúncio de outro portal ficou fora' : `${busca.outros_fora} anúncios de outros portais ficaram fora`} do tamanho (mais de 30% de diferença na área útil).</p>
+            )}
+            {busca && (busca.outros_falha || []).length > 0 && (
+              <p className="fe-gnote fe-galerta">Não consegui ler {(busca.outros_falha || []).length === 1 ? 'o anúncio' : `${(busca.outros_falha || []).length} anúncios`} de {[...new Set((busca.outros_falha || []).map(siteDe))].join(', ')} — o portal bloqueou a leitura. Se puder, cole o link do mesmo imóvel em outro portal.</p>
+            )}
             {busca && busca.outros_links > 0 && (
-              <p className="fe-gnote fe-galerta">{busca.outros_links === 1 ? '1 link de outro site não entra' : `${busca.outros_links} links de outros sites não entram`} pelo painel. Para usar, envie a ficha pra Eva.</p>
+              <p className="fe-gnote fe-galerta">
+                {ehCasa
+                  ? `${busca.outros_links === 1 ? '1 link de outro site não entra' : `${busca.outros_links} links de outros sites não entram`} no estudo de casa pelo painel (só anúncios do villejardins.com.br). Para usar, envie a ficha pra Eva.`
+                  : `${busca.outros_links === 1 ? '1 link ficou' : `${busca.outros_links} links ficaram`} de fora: o painel lê até 6 anúncios de outros portais.`}
+              </p>
             )}
           </div>
           {msg && <p className="fe-gsub fe-gerro" role="alert">{msg}</p>}
