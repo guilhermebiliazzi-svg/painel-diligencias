@@ -34,5 +34,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     token, lead_id: l.id, corretor_phone: l.corretor_phone, expira_em: new Date(Date.now() + 864e5).toISOString(),
   });
   if (error) return ir('/sdr');
-  return ir('/visita/' + token);
+  // 15/11: ?r=1 = remarcar (botão Atualizar do Meu funil): o formulário já vem com o imóvel da visita marcada
+  return ir('/visita/' + token + (new URL(req.url).searchParams.get('r') === '1' ? '?r=1' : ''));
 }
