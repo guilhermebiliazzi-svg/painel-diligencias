@@ -10,11 +10,12 @@
 // O n8n só recebe o id: o pedido (com o e-mail de quem pediu) fica em painel_estudo_pedidos, que só
 // o servidor lê (RLS sem política). O n8n aceita cada pedido uma vez e só nos 10 minutos seguintes.
 import { NextResponse } from 'next/server';
-import { getSessaoPerfil } from '@/lib/perfil';
+import { getSessaoPerfil, corretorDaPessoa } from '@/lib/perfil';
 import { podeTela } from '@/lib/acesso';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { lerPedido, linkDoEstudo } from '@/lib/estudo-arquivo';
 import {
-  faltandoParaGerar, ficha, lerConcorrentes, montarPayload, nomeArquivo, vendasItbi,
+  faltandoParaGerar, ficha, lerConcorrentes, montarPayload, nomeArquivo, proprietario, vendasItbi,
   type Anuncio, type TipoFicha, type Vals,
 } from '@/lib/estudo-gerar';
 
@@ -23,9 +24,6 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 const WEBHOOK = 'https://villejds.app.n8n.cloud/webhook/painel-estudo';
-const BUCKET = 'documentos';
-const PASTA = 'estudos-painel';
-const VALIDADE_LINK = 24 * 3600;
 
 const erro = (msg: string, status = 400) => NextResponse.json({ erro: msg }, { status });
 const TIPOS: TipoFicha[] = ['ap', 'casa', 'sala'];
@@ -47,6 +45,22 @@ function lerVals(tipo: TipoFicha, bruto: unknown): Vals {
     else if (Array.isArray(v)) out[k] = v.slice(0, 20).map((x) => String(x).slice(0, 80));
   }
   return out;
+}
+
+// 15/11: todo estudo vira lead de captação do corretor (V1 realizada + V2 agendada). A função do banco acha ou
+// cria o lead; com simular, só confere (prévia), sem gravar. Conflito (proprietário com outro corretor) bloqueia.
+type Captacao = { ok: boolean; erro?: string; lead_id?: string; etapa_id?: string; remarcou?: boolean; novo?: boolean };
+async function captacao(email: string, tipo: TipoFicha, vals: Vals, simular: boolean): Promise<Captacao> {
+  const cor = await corretorDaPessoa(email);
+  if (!cor?.phone) return { ok: false, erro: 'Não achei seu cadastro de corretor (telefone) para registrar o lead do proprietário. Fale com o Guilherme.' };
+  const pr = proprietario(tipo, vals);
+  const { g } = ficha(tipo, vals);
+  const { data, error } = await supabaseAdmin().rpc('sdr_captacao_estudo', {
+    p_corretor: cor.phone, p_nome: pr.nome, p_tel: pr.tel, p_endereco: g('endereco'), p_tipo: tipo, p_v2: pr.v2,
+    p_origem: 'painel', p_simular: simular,
+  });
+  if (error) { console.error('[estudo][gerar] captacao', error); return { ok: false, erro: 'Não consegui registrar o lead do proprietário. Tente de novo.' }; }
+  return (data || { ok: false, erro: 'Não consegui registrar o lead do proprietário.' }) as Captacao;
 }
 
 const chaves = (x: unknown) => (Array.isArray(x) ? x.slice(0, 60).map((s) => String(s).slice(0, 80)) : []);
@@ -88,6 +102,8 @@ export async function POST(req: Request) {
   const { g, n } = ficha(tipo, vals);
 
   if (body.acao === 'previa') {
+    const cap = await captacao(s.email, tipo, vals, true);
+    if (!cap.ok) return erro(cap.erro || 'Não consegui conferir o proprietário.', 409);
     const area = tipo === 'casa' ? n('area_construida') : n('area_util');
     const [itbi, busca] = await Promise.all([
       tipo === 'casa' ? Promise.resolve(null) : vendasItbi(g('endereco'), n('area_iptu')).catch((e) => {
@@ -109,9 +125,14 @@ export async function POST(req: Request) {
     const anuncios = lerAnuncios(body.anuncios).filter((a) => tipo !== 'casa' || a.origem === 'site'); // casa: só o site
     const esc = { itbi_manter: chaves(body.itbi_manter), itbi_excluir: chaves(body.itbi_excluir), anuncios };
     if (tipo !== 'casa' && !esc.itbi_manter.length) return erro('Deixe pelo menos uma venda do ITBI marcada.');
-    const payload = { ...montarPayload(tipo, vals, esc), nome_arquivo: nomeArquivo(tipo, g('endereco')) };
+    const cap = await captacao(s.email, tipo, vals, false);
+    if (!cap.ok || !cap.lead_id) return erro(cap.erro || 'Não consegui registrar o lead do proprietário.', 409);
+    const payload = {
+      ...montarPayload(tipo, vals, esc), nome_arquivo: nomeArquivo(tipo, g('endereco')),
+      captacao: { lead_id: cap.lead_id, etapa_id: cap.etapa_id, remarcou: !!cap.remarcou, novo: !!cap.novo },
+    };
     const sb = supabaseAdmin();
-    const { data, error } = await sb.from('painel_estudo_pedidos').insert({ email: s.email, payload }).select('id').single();
+    const { data, error } = await sb.from('painel_estudo_pedidos').insert({ email: s.email, payload, lead_id: cap.lead_id }).select('id').single();
     if (error || !data) {
       console.error('[estudo][gerar] pedido', error);
       return erro('Não consegui registrar o pedido. Tente de novo.', 500);
@@ -130,7 +151,7 @@ export async function POST(req: Request) {
       return erro('O gerador de estudos não respondeu. Tente de novo em alguns minutos.', 502);
     }
     console.log(`[estudo][gerar] ${s.email} pediu ${tipo} ${g('endereco')} (${data.id})`);
-    return NextResponse.json({ ok: true, id: data.id });
+    return NextResponse.json({ ok: true, id: data.id, lead_novo: !!cap.novo });
   }
 
   return erro('Ação desconhecida.');
@@ -142,40 +163,15 @@ export async function GET(req: Request) {
   const id = new URL(req.url).searchParams.get('id') || '';
   if (!/^[0-9a-f-]{36}$/i.test(id)) return erro('Pedido inválido.');
 
-  const sb = supabaseAdmin();
-  const { data: p } = await sb
-    .from('painel_estudo_pedidos')
-    .select('id, email, status, mensagem, arquivo_path, criado_em, nome_arquivo:payload->>nome_arquivo')
-    .eq('id', id)
-    .maybeSingle();
+  const p = await lerPedido(id);
   if (!p || (p.email !== s.email && !s.admin)) return erro('Pedido não encontrado.', 404);
-  const nome = String((p as Record<string, unknown>).nome_arquivo || 'Estudo_Mercado.pptx');
-
   if (p.status === 'erro') return NextResponse.json({ status: 'erro', mensagem: p.mensagem || 'O estudo não foi gerado.' });
 
-  let path = p.arquivo_path as string | null;
-  if (!path && p.status === 'pronto') {
-    // primeiro acesso depois de pronto: o arquivo sai da tabela e vai para o Storage
-    const { data: b } = await sb.from('painel_estudo_pedidos').select('arquivo_b64').eq('id', id).single();
-    if (b?.arquivo_b64) {
-      path = `${PASTA}/${id}.pptx`;
-      const up = await sb.storage.from(BUCKET).upload(path, Buffer.from(b.arquivo_b64, 'base64'), {
-        contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        upsert: true,
-      });
-      if (up.error) {
-        console.error('[estudo][gerar] storage', up.error);
-        return erro('O estudo ficou pronto, mas não consegui guardar o arquivo. Tente de novo.', 500);
-      }
-      await sb.from('painel_estudo_pedidos').update({ arquivo_path: path, arquivo_b64: null }).eq('id', id);
-    }
-  }
-  if (path) {
-    const { data: link } = await sb.storage.from(BUCKET).createSignedUrl(path, VALIDADE_LINK, { download: nome });
-    if (link?.signedUrl) return NextResponse.json({ status: 'pronto', url: link.signedUrl, nome });
-  }
+  const link = await linkDoEstudo(p);
+  if (link && 'erro' in link) return erro(link.erro, 500);
+  if (link) return NextResponse.json({ status: 'pronto', url: link.url, nome: link.nome });
 
-  const minutos = (Date.now() - new Date(p.criado_em as string).getTime()) / 60000;
+  const minutos = (Date.now() - new Date(p.criado_em).getTime()) / 60000;
   if (minutos > 8) return NextResponse.json({ status: 'erro', mensagem: 'O estudo demorou demais para ficar pronto. Tente de novo.' });
   return NextResponse.json({ status: p.status === 'novo' ? 'na fila' : 'gerando' });
 }
