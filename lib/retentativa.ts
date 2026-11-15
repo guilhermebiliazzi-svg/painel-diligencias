@@ -13,8 +13,9 @@
 //  WF-06 E-mail — de 2 em 2 h, minuto 0, horas ÍMPARES em UTC (14/11: inclui o TJCE)
 //      aguardando_email dos tipos que chegam por e-mail (TRF, TJSP e-SAJ, TJCE)
 //  WF-16 eproc (TJSP 1º grau) — 03, 09, 15 e 21 h UTC (00, 06, 12 e 18 h de Brasília)
-//      em_processamento / erro_infosimples com número de pedido, até 12 tentativas,
-//      criada há menos de 7 dias, espera 1 h, 2 h, 4 h e depois 6 h (teto desde 12/11)
+//      em_processamento / erro_infosimples com número de pedido:
+//      fase rápida: até 12 tentativas, criada há menos de 7 dias, espera 1 h, 2 h, 4 h e depois 6 h (12/11)
+//      15/11: depois, 1 consulta por dia (23 h desde a última) até 15 dias da criação, teto de 30
 //
 // Se algum desses agendamentos mudar no n8n, este arquivo precisa acompanhar.
 import { pool } from '@/lib/db';
@@ -98,6 +99,14 @@ export function calcularRetentativa(c: Linha, agora = new Date()): Retentativa |
     const espera = H * Math.min(Math.pow(2, Math.min(tentObter, 6)), 6); // 12/11: dobra até travar em 6 h
     const desde = max(agora, new Date(atu.getTime() + espera));
     if (desde.getTime() < criado.getTime() + 7 * 24 * H) cands.push(proximoDisparo(desde, 0, wf16Hora));
+  }
+  // 15/11: eproc com apontamentos demora dias — o mesmo pedido é consultado 1 vez por dia até 15 dias da criação
+  if (
+    c.tipo === 'tjsp_civel_1g' && temPedido && ['em_processamento', 'erro_infosimples'].includes(st) &&
+    tentObter < 30 && criado.getTime() > agora.getTime() - 15 * 24 * H && atu
+  ) {
+    const desde = max(agora, new Date(atu.getTime() + 23 * H));
+    if (desde.getTime() < criado.getTime() + 15 * 24 * H) cands.push(proximoDisparo(desde, 0, wf16Hora));
   }
 
   if (cands.length) {
