@@ -14,8 +14,9 @@ function Caixa({ children }: { children: React.ReactNode }) {
   );
 }
 
-export default async function VisitaLink({ params }: { params: Promise<{ token: string }> }) {
+export default async function VisitaLink({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ r?: string }> }) {
   const { token } = await params;
+  const remarcar = (await searchParams).r === '1';
   if (!/^[0-9a-f]{32}$/.test(token)) return <Caixa><p className="text-sm text-slate-700">Link inválido.</p></Caixa>;
   const sb = supabaseAdmin();
   const { data: link } = await sb.from('sdr_visita_links').select('lead_id,usado_em,expira_em').eq('token', token).maybeSingle();
@@ -23,10 +24,16 @@ export default async function VisitaLink({ params }: { params: Promise<{ token: 
   if (!lk) return <Caixa><p className="text-sm text-slate-700">Link inválido.</p></Caixa>;
   if (lk.usado_em) return <Caixa><p className="text-sm text-slate-700">Esta visita já foi registrada por este link. Para remarcar, toque de novo em &quot;Visita agendada&quot; na próxima mensagem da Eva.</p></Caixa>;
   if (new Date(lk.expira_em).getTime() < Date.now()) return <Caixa><p className="text-sm text-slate-700">Este link expirou. Toque de novo em &quot;Visita agendada&quot; na próxima mensagem da Eva.</p></Caixa>;
-  const [{ data: lead }, { data: ims }] = await Promise.all([
+  const [{ data: lead }, { data: ims }, { data: vis }] = await Promise.all([
     sb.from('sdr_leads').select('nome,status').eq('id', lk.lead_id).maybeSingle(),
     sb.from('sdr_imoveis_lead').select('id,ref,endereco,valor,do_anuncio,aprovado_cliente').eq('lead_id', lk.lead_id).order('created_at'),
+    // 15/11: remarcar — a visita marcada mais recente (o imóvel dela vem escolhido)
+    remarcar
+      ? sb.from('sdr_visitas').select('imovel_lead_id,horario_confirmado').eq('lead_id', lk.lead_id).not('horario_confirmado', 'is', null)
+          .is('resultado', null).order('horario_confirmado', { ascending: false }).limit(1)
+      : Promise.resolve({ data: [] }),
   ]);
+  const marcada = ((vis ?? []) as { imovel_lead_id: string; horario_confirmado: string }[])[0];
   const l = lead as { nome: string | null; status: string } | null;
   if (!l || ['arquivado', 'encerrado'].includes(l.status)) return <Caixa><p className="text-sm text-slate-700">Este lead já foi encerrado.</p></Caixa>;
   const brl = (v: number | null) => (v ? ' · R$ ' + Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) : '');
@@ -36,9 +43,10 @@ export default async function VisitaLink({ params }: { params: Promise<{ token: 
   const nome = (l.nome || 'cliente').split(' ')[0];
   return (
     <Caixa>
-      <h1 className="text-lg font-semibold text-slate-900">Registrar visita de {nome}</h1>
-      <p className="mt-1 text-sm text-slate-600">Ao salvar, a Eva confirma com o cliente, coloca na sua agenda e lembra na véspera.</p>
-      {imoveis.length ? <FormVisita token={token} imoveis={imoveis} /> : (
+      <h1 className="text-lg font-semibold text-slate-900">{marcada ? 'Remarcar' : 'Registrar'} visita de {nome}</h1>
+      {marcada && <p className="mt-1 text-sm text-slate-700">Hoje está marcada para {new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(marcada.horario_confirmado))}.</p>}
+      <p className="mt-1 text-sm text-slate-600">{marcada ? 'Escolha o novo dia e a nova hora. Ao salvar, a Eva avisa o cliente da mudança, atualiza sua agenda e lembra na véspera.' : 'Ao salvar, a Eva confirma com o cliente, coloca na sua agenda e lembra na véspera.'}</p>
+      {imoveis.length ? <FormVisita token={token} imoveis={imoveis} inicial={marcada && imoveis.some((i) => i.id === marcada.imovel_lead_id) ? marcada.imovel_lead_id : undefined} /> : (
         <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">Este lead não tem imóvel cadastrado. Fale com o Guilherme para incluir o imóvel da visita.</p>
       )}
     </Caixa>
