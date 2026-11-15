@@ -15,7 +15,7 @@ type Tipo = 'ap' | 'casa' | 'sala';
 type Campo = {
   id: string;
   label: string;
-  type: 'text' | 'money' | 'num' | 'yn' | 'chips' | 'select' | 'textarea' | 'iptu';
+  type: 'text' | 'money' | 'num' | 'yn' | 'chips' | 'select' | 'textarea' | 'iptu' | 'tel' | 'date' | 'time';
   suf?: string;
   items?: string[];
   showIf?: [string, string];
@@ -48,6 +48,17 @@ const MERCADO: Secao = {
     F('proposta_quando', 'Quando', { showIf: ['propostas', 'sim'], half: true, placeholder: 'ex.: ago/2026' }),
   ],
 };
+// 15/11: todo estudo vira lead de captação do corretor, com a V2 (apresentação do estudo) na agenda.
+const PROP: Secao = {
+  num: '', h: 'Proprietário e apresentação (V2)',
+  note: 'Obrigatório. O estudo vira um lead de captação seu no Funil do SDR, com a V2 agendada (e na sua agenda, se estiver integrada). A Eva não fala com o proprietário.',
+  fields: [
+    F('prop_nome', 'Nome do proprietário', { full: true, req: true }),
+    F('prop_cel', 'Celular do proprietário (com DDD)', { type: 'tel', full: true, req: true, placeholder: '(11) 99999-9999' }),
+    F('v2_data', 'Dia da V2', { type: 'date', half: true, req: true }),
+    F('v2_hora', 'Hora da V2', { type: 'time', half: true, req: true }),
+  ],
+};
 const CONCORR: Secao = {
   num: '5', h: 'Concorrência (opcional)',
   note: 'A Eva também busca comparáveis automáticos (REMAX, QuintoAndar e Ville Jardins) e o ITBI do prédio.',
@@ -58,6 +69,7 @@ const FORMS: Record<Tipo, { label: string; sections: Secao[] }> = {
   ap: {
     label: 'Apartamento',
     sections: [
+      PROP,
       { num: '1', h: 'Sobre o imóvel', fields: [
         F('endereco', 'Endereço (rua, número e apartamento)', { full: true, req: true, placeholder: 'ex.: R. Treze de Maio, 1203 — ap 91' }),
         F('condominio', 'Condomínio (nome)', { half: true }),
@@ -96,6 +108,7 @@ const FORMS: Record<Tipo, { label: string; sections: Secao[] }> = {
   casa: {
     label: 'Casa · Terreno',
     sections: [
+      PROP,
       { num: '1', h: 'Sobre o imóvel', fields: [
         F('endereco', 'Endereço (rua e número)', { full: true, req: true }),
         sel('casa_tipo', 'Tipo', ['', 'casa térrea', 'sobrado', 'casa de vila', 'casa em condomínio', 'terreno vazio'], { half: true }),
@@ -137,6 +150,7 @@ const FORMS: Record<Tipo, { label: string; sections: Secao[] }> = {
   sala: {
     label: 'Sala comercial',
     sections: [
+      PROP,
       { num: '1', h: 'Sobre o imóvel', fields: [
         F('endereco', 'Endereço (rua e número)', { full: true, req: true }),
         F('conjunto', 'Conjunto / sala nº', { half: true }),
@@ -179,6 +193,8 @@ const fmtBR = (v: string) => {
   return Number.isNaN(n) ? String(v) : n.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
 };
 const R$ = (v: string) => 'R$ ' + fmtBR(v);
+const DIAS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+const dataBR = (iso: string) => { const [a, m, d] = iso.split('-').map(Number); return a ? DIAS[new Date(Date.UTC(a, m - 1, d)).getUTCDay()] + ', ' + String(d).padStart(2, '0') + '/' + String(m).padStart(2, '0') : iso; };
 const line = (arr: (string | false | null | undefined)[], sep = ' · ') => arr.filter(Boolean).join(sep);
 
 function montarMensagem(tipo: Tipo, vals: Record<string, Valor>): string {
@@ -196,6 +212,9 @@ function montarMensagem(tipo: Tipo, vals: Record<string, Valor>): string {
   L.push('');
   L.push('*Tipo:* ' + (tipo === 'ap' ? 'Apartamento' : tipo === 'casa' ? (g('casa_tipo') || 'Casa / terreno') : line([g('sala_tipo') || 'Sala comercial', g('conjunto') && 'conj. ' + g('conjunto')])));
   L.push('*Endereço:* ' + (g('endereco') || ''));
+  // 15/11: proprietário e V2 (a Eva registra o lead de captação com a V2 agendada)
+  if (g('prop_nome') || g('prop_cel')) L.push('*Proprietário:* ' + line([g('prop_nome'), g('prop_cel')]));
+  if (g('v2_data')) L.push('*Apresentação do estudo (V2):* ' + dataBR(g('v2_data')!) + (g('v2_hora') ? ' às ' + g('v2_hora') : ''));
   const cond = tipo === 'sala' ? g('edificio') : g('condominio');
   if (cond || g('bairro')) L.push(line([cond && '*' + (tipo === 'sala' ? 'Edifício' : 'Condomínio') + ':* ' + cond, g('bairro') && '*Bairro:* ' + g('bairro')]));
   if (tipo === 'casa') {
@@ -375,7 +394,7 @@ export default function Ficha() {
         <form autoComplete="off" onSubmit={(e) => e.preventDefault()}>
           {cfg.sections.map((sec, si) => (
             <section key={tipo + si}>
-              <div className="fe-shead"><span className="fe-snum">{sec.num}</span><h2>{sec.h}</h2></div>
+              <div className="fe-shead"><span className="fe-snum">{si + 1}</span><h2>{sec.h}</h2></div>
               {sec.note && <p className="fe-snote">{sec.note}</p>}
               <div className="fe-grid">
                 {sec.fields.map((f) => {
@@ -422,7 +441,9 @@ export default function Ficha() {
                       ) : (
                         <div className="fe-in">
                           {f.type === 'money' && <span className="pre">R$</span>}
-                          <input value={sv} placeholder={f.placeholder} inputMode={f.type === 'money' || f.type === 'num' ? 'decimal' : undefined}
+                          <input value={sv} placeholder={f.placeholder}
+                            type={f.type === 'tel' || f.type === 'date' || f.type === 'time' ? f.type : undefined} step={f.type === 'time' ? 900 : undefined}
+                            inputMode={f.type === 'money' || f.type === 'num' ? 'decimal' : f.type === 'tel' ? 'tel' : undefined}
                             onChange={(e) => set(f.id, e.target.value)} />
                           {f.suf && <span className="suf">{f.suf}</span>}
                         </div>
@@ -630,6 +651,11 @@ function faltaGerar(tipo: Tipo, vals: Record<string, Valor>): string[] {
   const pos = (id: string) => Number(g(id).replace(/\./g, '').replace(',', '.')) > 0;
   const out: string[] = [];
   if (!/\d/.test(g('endereco'))) out.push('endereço com número');
+  if (g('prop_nome').length < 2) out.push('nome do proprietário');
+  const cel = g('prop_cel').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '');
+  if (cel.length < 10 || cel.length > 11) out.push('celular do proprietário com DDD');
+  if (!g('v2_data') || !g('v2_hora')) out.push('dia e hora da V2');
+  else if (new Date(g('v2_data') + 'T' + g('v2_hora') + ':00-03:00').getTime() < Date.now() - 3600e3) out.push('V2 de hoje em diante');
   if (tipo === 'casa') { if (!pos('area_terreno')) out.push('área do terreno'); }
   else {
     if (!pos('area_util')) out.push('área útil');
@@ -735,6 +761,7 @@ function GerarEstudo({ tipo, vals, aberto, fechar }: { tipo: Tipo; vals: Record<
         <div className="fe-gsub" role="status">
           Estudo pronto. O download começou; se não começar, <a href={arquivo.url} download={arquivo.nome}>baixe aqui</a>.
           <br />O link vale por 24 horas.
+          <br />O estudo ficou salvo no lead de captação de {(() => { const v = vals[tipo + '.prop_nome']; return typeof v === 'string' && v.trim() ? v.trim().split(' ')[0] : 'proprietário'; })()} no seu Funil do SDR, com a V2 agendada.
         </div>
       )}
 
