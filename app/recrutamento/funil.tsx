@@ -14,8 +14,10 @@ const fim8 = (t: string | null | undefined) => String(t ?? '').replace(/\D/g, ''
 const desde = (dias: number | null) => (dias == null ? '1970-01-01T00:00:00Z' : new Date(Date.now() - dias * 864e5).toISOString());
 
 type Recrut = { id: string; criado_em: string; evento: string; nome: string | null; telefone: string | null; momento: string | null; bairro: string | null; creci: string | null; c2s_lead_id: string | null; payload: Record<string, unknown> | null };
-async function carregarRecrutamento(dias: number | null) {
-  const { data } = await supabaseAdmin().from('recrutamento_leads').select('id,criado_em,evento,nome,telefone,momento,bairro,creci,c2s_lead_id,payload').gte('criado_em', desde(dias)).order('criado_em', { ascending: false }).limit(3000);
+async function carregarRecrutamento(dias: number | null, ate: string | null = null) {
+  let q = supabaseAdmin().from('recrutamento_leads').select('id,criado_em,evento,nome,telefone,momento,bairro,creci,c2s_lead_id,payload').gte('criado_em', desde(dias));
+  if (ate) q = q.lt('criado_em', ate); // 15/11: fim do intervalo de datas (Funil do SDR)
+  const { data } = await q.order('criado_em', { ascending: false }).limit(3000);
   return (data ?? []) as Recrut[];
 }
 
@@ -86,21 +88,21 @@ const custoGuardado = unstable_cache(
   { revalidate: 1800 },
 );
 
-async function custoRecrutamento(dias: number | null): Promise<number | null> {
+async function custoRecrutamento(dias: number | null, ate: string | null = null): Promise<number | null> {
   const dia = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(d);
   const ini = dias == null ? '2026-09-01' : dia(new Date(Date.now() - dias * 864e5));
   try {
-    return await custoGuardado(ini, dia(new Date()));
+    return await custoGuardado(ini, dia(ate ? new Date(Date.parse(ate) - 1) : new Date()));
   } catch {
     return null;
   }
 }
 
-export async function FunilRecrutamento({ dias, base, aba, corretores }: { dias: number | null; base: string; aba: string; corretores: { id: number; nome: string }[] }) {
+export async function FunilRecrutamento({ dias, ate = null, base, aba, corretores }: { dias: number | null; ate?: string | null; base: string; aba: string; corretores: { id: number; nome: string }[] }) {
   const [ev, { data: linhas }, custo] = await Promise.all([
-    carregarRecrutamento(dias),
+    carregarRecrutamento(dias, ate),
     supabaseAdmin().from('recrutamento_candidatos').select('telefone,etapa,motivo,entrevista_em,retomar_em,encaminhado_nome,atualizado_em').limit(5000),
-    custoRecrutamento(dias),
+    custoRecrutamento(dias, ate),
   ]);
   const porTel = new Map(((linhas ?? []) as LinhaRec[]).map((l) => [fim8(l.telefone), l]));
   // 06/11: candidato em andamento (contato, entrevista, pensando) aparece mesmo que tenha chegado antes do período
