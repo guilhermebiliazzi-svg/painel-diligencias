@@ -2,7 +2,7 @@
 
 // Aba "Novo contrato": preencher, conferir o PDF e enviar para assinatura.
 import { useEffect, useMemo, useState, useTransition } from 'react';
-import { gerarPdf, enviarAssinatura, statusEnvio, type FormRepresentacao, type Pessoa, type CorretorOpcao } from './actions';
+import { gerarPdf, enviarAssinatura, statusEnvio, leadsDeCaptacao, type FormRepresentacao, type Pessoa, type CorretorOpcao, type LeadCaptacao } from './actions';
 
 const inputCls =
   'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none disabled:bg-slate-50';
@@ -48,6 +48,24 @@ export default function NovoContrato({
   const [corretorId, setCorretorId] = useState<number | null>(corretorPadrao);
   const corretor = corretores.find((c) => c.id === corretorId) || null;
   const [corretorCpf, setCorretorCpf] = useState(corretor?.cpf || '');
+  // 15/11: puxar proprietário e imóvel de um lead de captação do corretor
+  const [leads, setLeads] = useState<LeadCaptacao[]>([]);
+  const [leadId, setLeadId] = useState<string>('');
+  useEffect(() => {
+    let vivo = true;
+    if (!corretorId) { queueMicrotask(() => { if (vivo) setLeads([]); }); return () => { vivo = false; }; }
+    leadsDeCaptacao(corretorId).then((l) => { if (vivo) setLeads(l); });
+    return () => { vivo = false; };
+  }, [corretorId]);
+  function puxarLead(id: string) {
+    setLeadId(id);
+    const l = leads.find((x) => x.id === id);
+    if (!l) return;
+    const fone = l.telefone.length === 11 ? `(${l.telefone.slice(0, 2)}) ${l.telefone.slice(2, 7)}-${l.telefone.slice(7)}` : l.telefone;
+    setTipo('pf');
+    setPessoas((ps) => [{ ...(ps[0] || vazia()), nome: l.nome || ps[0]?.nome || '', telefone: fone || ps[0]?.telefone || '' }, ...ps.slice(1)]);
+    setImovel((im) => ({ ...im, endereco: l.endereco || im.endereco, bairro: l.bairro || im.bairro, tipo: l.tipo || im.tipo }));
+  }
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfDe, setPdfDe] = useState<string>('');
   const [erro, setErro] = useState<string | null>(null);
@@ -90,8 +108,8 @@ export default function NovoContrato({
   }, [pedido]);
 
   const form: FormRepresentacao = useMemo(
-    () => ({ tipo, imovel, pessoas, corretor_id: corretorId, corretor_cpf: corretorCpf }),
-    [tipo, imovel, pessoas, corretorId, corretorCpf]
+    () => ({ tipo, imovel, pessoas, corretor_id: corretorId, corretor_cpf: corretorCpf, lead_id: leadId || null }),
+    [tipo, imovel, pessoas, corretorId, corretorCpf, leadId]
   );
   const chave = JSON.stringify(form);
   const pdfAtual = !!pdfUrl && pdfDe === chave;
@@ -155,6 +173,7 @@ export default function NovoContrato({
             onClick={() => {
               setOk(null);
               setPessoas([vazia()]);
+              setLeadId('');
               setImovel({ ...imovel, endereco: '', complemento: '', bairro: '', valor: '', matricula: '', cartorio: '', iptu: '', observacoes: '' });
               setPdfUrl(null);
               setPdfDe('');
@@ -170,6 +189,19 @@ export default function NovoContrato({
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-5 rounded-xl border border-blue-200 bg-blue-50/60 p-3">
+        <label className={labelCls}>Puxar de um lead de captação</label>
+        <select value={leadId} onChange={(e) => puxarLead(e.target.value)} disabled={ocupado || !leads.length} className={inputCls}>
+          <option value="">{!corretorId ? (admin ? 'Escolha o corretor lá embaixo primeiro' : 'Sem cadastro de corretor') : leads.length ? 'Escolha o proprietário…' : 'Nenhum lead de captação aberto'}</option>
+          {leads.map((l) => (
+            <option key={l.id} value={l.id}>
+              {(l.nome || 'Proprietário') + (l.endereco ? ' — ' + l.endereco : '') + (l.v2 ? ' · V2 ' + new Date(l.v2).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit' }) : '')}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs text-slate-600">Preenche o proprietário (nome e celular) e o imóvel. Complete CPF, e-mail, matrícula e o resto. Quando todos assinarem, a captação fecha sozinha no funil.</p>
+      </div>
+
       <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-500">Proprietário é</div>
       <div className="flex gap-2">
         {(['pf', 'pj'] as const).map((t) => (
