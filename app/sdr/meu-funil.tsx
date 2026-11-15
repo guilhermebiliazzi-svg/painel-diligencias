@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { pool } from '@/lib/db';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import type { CorretorDaPessoa } from '@/lib/perfil';
+import AtualizarLead from './atualizar-lead';
 
 const fim8 = (t: string | null | undefined) => String(t ?? '').replace(/\D/g, '').slice(-8);
 const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
@@ -14,6 +15,37 @@ const fmtData = new Intl.DateTimeFormat('pt-BR', {
 const fmtValor = (v: number | null) =>
   v == null ? '—' : v >= 1_000_000 ? `R$ ${(v / 1_000_000).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} mi`
     : `R$ ${Math.round(v / 1000).toLocaleString('pt-BR')} mil`;
+
+// 15/11: visita confirmada sem resultado e lembrete ativo de cada lead (botão Atualizar)
+const fmtCurto = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const diaSP = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+type Pend = { visita: Map<string, { quando: string; passou: boolean }>; lembrete: Map<string, string> };
+async function pendencias(ids: string[]): Promise<Pend> {
+  const out: Pend = { visita: new Map(), lembrete: new Map() };
+  if (!ids.length) return out;
+  const sb = supabaseAdmin();
+  const limite = Date.now() + 3 * 3600e3; // "visita feita" vale a partir de 3h antes do horário (igual ao n8n)
+  for (let i = 0; i < ids.length; i += 300) {
+    const parte = ids.slice(i, i + 300);
+    const [{ data: vs }, { data: ls }] = await Promise.all([
+      sb.from('sdr_visitas').select('lead_id,horario_confirmado,confirmacao_cliente').in('lead_id', parte)
+        .not('horario_confirmado', 'is', null).is('resultado', null).order('horario_confirmado', { ascending: true }),
+      sb.from('sdr_lembretes').select('lead_id,lembrar_em').in('lead_id', parte).not('lembrar_em', 'is', null)
+        .is('enviado_em', null).is('cancelado_em', null).order('lembrar_em', { ascending: true }),
+    ]);
+    for (const v of (vs ?? []) as { lead_id: string; horario_confirmado: string; confirmacao_cliente: string | null }[]) {
+      if (v.confirmacao_cliente === 'cancelou') continue;
+      const t = new Date(v.horario_confirmado).getTime();
+      const atual = out.visita.get(v.lead_id);
+      // em ordem de horário: a última que já passou (para marcar como feita) vence; sem nenhuma, a próxima futura
+      if (t <= limite || !atual) out.visita.set(v.lead_id, { quando: fmtCurto.format(new Date(t)).replace(',', ''), passou: t <= limite });
+    }
+    for (const l of (ls ?? []) as { lead_id: string; lembrar_em: string }[]) {
+      if (!out.lembrete.has(l.lead_id)) out.lembrete.set(l.lead_id, fmtCurto.format(new Date(l.lembrar_em)).replace(',', ''));
+    }
+  }
+  return out;
+}
 
 const PERIODOS = [
   { k: '30', rotulo: '30 dias' },
@@ -161,6 +193,8 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
       parceiros.set(x.lead_id, arr);
     }
   }
+  const pend = ehProp ? { visita: new Map(), lembrete: new Map() } as Pend : await pendencias(lista.filter((l) => !['arquivado', 'encerrado'].includes(l.status)).slice(0, 300).map((l) => l.id));
+  const hoje = diaSP();
   const telFmt = (t: string) => { const d = t.replace(/\D/g, '').replace(/^55/, ''); return d.length >= 10 ? `(${d.slice(0, 2)}) ${d.slice(2, -4)}-${d.slice(-4)}` : t; };
 
   return (
@@ -255,10 +289,13 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
                       {lista.map((l) => {
                         const f = funil.get(l.id);
                         const nv = nivel(l);
-                        const andamento = ehProp
+                        const fechado = ['arquivado', 'encerrado'].includes(l.status);
+                        const andamento = fechado ? (l.status === 'arquivado' ? 'Arquivado' : 'Encerrado') : ehProp
                           ? nv >= 0 ? ETAPAS_CAP[nv].rotulo : l.feito_em ? 'Contato feito' : 'Aguardando contato'
                           : proposta(l) ? 'Proposta' : visita(l) ? 'Visita agendada' : contato(l) ? 'Contato feito' : 'Aguardando contato';
-                        const tom = (ehProp ? nv >= 0 : proposta(l) || visita(l)) ? 'bg-emerald-100 text-emerald-700' : (ehProp ? !!l.feito_em : contato(l)) ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700';
+                        const tom = fechado ? 'bg-slate-100 text-slate-600' : (ehProp ? nv >= 0 : proposta(l) || visita(l)) ? 'bg-emerald-100 text-emerald-700' : (ehProp ? !!l.feito_em : contato(l)) ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700';
+                        const vis = pend.visita.get(l.id);
+                        const lemb = pend.lembrete.get(l.id);
                         return (
                           <tr key={l.id}>
                             <td className="whitespace-nowrap py-2 pr-3 text-slate-600">
@@ -273,8 +310,8 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
                                 </a>
                               )}
                               {l.telefone && <Link href={`/sdr/conversa/${String(l.telefone).replace(/\D/g, '')}`} className="block text-xs font-medium text-slate-700 underline hover:text-slate-900">Conversa da Eva com o cliente</Link>}
-                              {/* 14/11: registrar visita direto pelo painel */}
-                              {!ehProp && !['arquivado', 'encerrado'].includes(l.status) && <a href={`/sdr/visita/${l.id}`} className="mt-1 inline-block rounded-full bg-emerald-600 px-2.5 py-0.5 text-xs font-semibold text-white hover:bg-emerald-700">Registrar visita</a>}
+                              {/* 15/11: Atualizar = registrar/remarcar visita, visita feita, novo contato, arquivar */}
+                              {!ehProp && !fechado && <AtualizarLead id={l.id} nome={l.nome || ''} visita={vis ?? null} hoje={hoje} />}
                             </td>
                             <td className="py-2 pr-3 text-slate-600">{INTENCAO[l.intencao ?? ''] ?? (l.intencao || '—')}</td>
                             <td className="py-2 pr-3 text-slate-600">
@@ -288,7 +325,11 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
                                 </span>
                               ))}
                             </td>
-                            <td className="py-2"><span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${tom}`}>{andamento}</span></td>
+                            <td className="py-2">
+                              <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${tom}`}>{andamento}</span>
+                              {vis && <span className="mt-1 block whitespace-nowrap text-xs text-slate-500">{vis.passou ? 'Visita (sem retorno): ' : 'Visita: '}{vis.quando}</span>}
+                              {lemb && <span className="mt-1 block whitespace-nowrap text-xs text-blue-700">Novo contato: {lemb}</span>}
+                            </td>
                           </tr>
                         );
                       })}
