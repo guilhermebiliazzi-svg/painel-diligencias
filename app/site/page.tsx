@@ -135,13 +135,19 @@ function Cartao({ titulo, valor, nota }: { titulo: string; valor: string; nota?:
   );
 }
 
+// 15/11: cada área abre e fecha clicando no título; a página abre com todas fechadas
 function Secao({ titulo, descricao, children }: { titulo: string; descricao?: string; children: React.ReactNode }) {
   return (
-    <section className="mt-8">
-      <h2 className="text-lg font-semibold text-slate-900">{titulo}</h2>
-      {descricao && <p className="mt-0.5 text-sm text-slate-600">{descricao}</p>}
+    <details className="group mt-4 rounded-2xl border border-slate-200 bg-white/70 px-4 py-3">
+      <summary className="flex cursor-pointer list-none items-center gap-3 select-none [&::-webkit-details-marker]:hidden">
+        <span aria-hidden className="text-sm text-slate-400 transition-transform group-open:rotate-90">▶</span>
+        <h2 className="text-lg font-semibold text-slate-900">{titulo}</h2>
+        <span className="ml-auto text-xs font-semibold text-blue-700 group-open:hidden">abrir</span>
+        <span className="ml-auto hidden text-xs font-semibold text-blue-700 group-open:inline">recolher</span>
+      </summary>
+      {descricao && <p className="mt-1 text-sm text-slate-600">{descricao}</p>}
       <div className="mt-3">{children}</div>
-    </section>
+    </details>
   );
 }
 
@@ -356,7 +362,7 @@ export default async function SitePage({ searchParams }: { searchParams: Promise
           <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">Não consegui carregar os números agora: {erro}</div>
         ) : (
           <>
-            <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="mt-6 mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
               <Cartao titulo="Visitantes" valor={int(r.visitantes)} nota={`${int(r.sessoes)} visitas`} />
               <Cartao titulo="Páginas vistas" valor={int(r.paginas)} nota={`${pct(r.uma_pagina, r.sessoes)} saíram na 1ª página`} />
               <Cartao titulo="Tempo no site" valor={dur(r.tempo_mediano)} nota={`metade das visitas fica até isso · média ${dur(r.tempo_medio)}`} />
@@ -439,7 +445,7 @@ export default async function SitePage({ searchParams }: { searchParams: Promise
               />
             </Secao>
 
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid items-start gap-x-4 lg:grid-cols-2">
               <Secao titulo="Bairros dos imóveis vistos">
                 <Tabela cab={[{ t: 'Bairro' }, { t: 'Visualizações', dir: true }, { t: 'Visitas', dir: true }]} linhas={d.bairros.map((b) => [b.bairro, int(b.visitas), int(b.sessoes)])} />
               </Secao>
@@ -448,7 +454,7 @@ export default async function SitePage({ searchParams }: { searchParams: Promise
               </Secao>
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid items-start gap-x-4 lg:grid-cols-2">
               <Secao titulo="Onde as visitas terminaram" descricao="Última página vista em cada visita, e quantas saíram dali sem falar com a gente.">
                 <Tabela cab={[{ t: 'Página' }, { t: 'Visitas', dir: true }, { t: 'Sem contato', dir: true }]} linhas={d.saidas.map((s) => [<span key="p" className="break-all">{s.caminho}</span>, int(s.sessoes), int(s.sem_contato)])} />
               </Secao>
