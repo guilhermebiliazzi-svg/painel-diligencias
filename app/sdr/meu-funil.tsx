@@ -142,9 +142,11 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
   }
 
   // "Seus" = atribuídos a ele (ficou com o lead). "Ofertados" = recebeu a oferta ou ficou com o lead.
-  const meus = leads.filter((l) => fim8(l.corretor_phone) === k && !!l.atribuido_em);
+  // 15/11: lead de captação que nasceu do estudo de mercado do próprio corretor conta como "recebido direto", não como oferta aceita
+  const ehEstudo = (l: LeadMin) => /estudo de mercado/i.test(String(l.fonte ?? ''));
+  const meus = leads.filter((l) => fim8(l.corretor_phone) === k && !!l.atribuido_em && !ehEstudo(l));
   // 14/11: leads de imóvel da carteira dele que vieram direto ao gestor (sem fila) — não têm atribuido_em
-  const diretos = leads.filter((l) => fim8(l.corretor_phone) === k && !l.atribuido_em && !['aguardando_cliente', 'em_qualificacao', 'qualificado', 'em_cascata', 'aguardando_guilherme'].includes(l.status));
+  const diretos = leads.filter((l) => fim8(l.corretor_phone) === k && (!l.atribuido_em || ehEstudo(l)) && !['aguardando_cliente', 'em_qualificacao', 'qualificado', 'em_cascata', 'aguardando_guilherme'].includes(l.status));
   const diretosIds = new Set(diretos.map((l) => l.id));
   const comVoce = [...meus, ...diretos];
   const ofertados = new Set([...atrs.map((a) => a.lead_id), ...meus.map((l) => l.id)]);
@@ -168,7 +170,7 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
   const etapas: { rotulo: string; n: number; base?: number; sem?: boolean }[] = [
     { rotulo: 'Ofertados a você', n: ofertados.size, sem: true },
     { rotulo: 'Você aceitou', n: meus.length, base: ofertados.size },
-    { rotulo: 'Recebidos direto (carteira)', n: diretos.length, sem: true },
+    { rotulo: 'Recebidos direto (carteira ou seu estudo)', n: diretos.length, sem: true },
     { rotulo: 'Contato feito', n: comVoce.filter(ehProp ? (l: LeadMin) => !!l.feito_em || nivel(l) >= 0 : contato).length, base: baseCom },
     ...(fk === 'prop_venda'
       ? ETAPAS_CAP.map((e, i) => ({ rotulo: e.rotulo, n: comVoce.filter((l) => nivel(l) >= i).length, base: baseCom }))
@@ -195,6 +197,13 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
   }
   const pend = ehProp ? { visita: new Map(), lembrete: new Map() } as Pend : await pendencias(lista.filter((l) => !['arquivado', 'encerrado'].includes(l.status)).slice(0, 300).map((l) => l.id));
   const hoje = diaSP();
+  // 15/11: estudos de mercado salvos em cada lead de captação (o mais recente vira link na lista)
+  const estudoDo = new Map<string, string>();
+  if (ehProp && lista.length) {
+    const { data: es } = await supabaseAdmin().from('painel_estudo_pedidos').select('id,lead_id,criado_em')
+      .in('lead_id', lista.slice(0, 300).map((l) => l.id)).eq('status', 'pronto').order('criado_em', { ascending: false });
+    for (const e of (es ?? []) as { id: string; lead_id: string }[]) if (!estudoDo.has(e.lead_id)) estudoDo.set(e.lead_id, e.id);
+  }
   const telFmt = (t: string) => { const d = t.replace(/\D/g, '').replace(/^55/, ''); return d.length >= 10 ? `(${d.slice(0, 2)}) ${d.slice(2, -4)}-${d.slice(-4)}` : t; };
 
   return (
@@ -300,7 +309,7 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
                           <tr key={l.id}>
                             <td className="whitespace-nowrap py-2 pr-3 text-slate-600">
                               {fmtData.format(new Date(l.atribuido_em || l.created_at))}
-                              <span className="block text-xs text-slate-500">{diretosIds.has(l.id) ? 'carteira (direto)' : 'fila'}</span>
+                              <span className="block text-xs text-slate-500">{ehEstudo(l) ? 'seu estudo' : diretosIds.has(l.id) ? 'carteira (direto)' : 'fila'}</span>
                             </td>
                             <td className="py-2 pr-3">
                               <span className="font-medium text-slate-900">{l.nome || '—'}</span>
@@ -310,6 +319,7 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
                                 </a>
                               )}
                               {l.telefone && <Link href={`/sdr/conversa/${String(l.telefone).replace(/\D/g, '')}`} className="block text-xs font-medium text-slate-700 underline hover:text-slate-900">Conversa da Eva com o cliente</Link>}
+                              {estudoDo.has(l.id) && <a href={'/api/estudo/arquivo?id=' + estudoDo.get(l.id)} className="block text-xs font-medium text-blue-700 underline">Baixar o estudo de mercado</a>}
                               {/* 15/11: Atualizar = registrar/remarcar visita, visita feita, novo contato, arquivar */}
                               {!ehProp && !fechado && <AtualizarLead id={l.id} nome={l.nome || ''} visita={vis ?? null} hoje={hoje} />}
                             </td>
