@@ -5,6 +5,7 @@ import { unstable_cache } from 'next/cache';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import AcoesCandidato from '@/app/sdr/recrutamento-acoes';
 import { ETAPAS_REC, foraDeSp, perfilCandidato, type EtapaRec, type PerfilRec } from '@/lib/recrutamento';
+import { statusDasMensagens, rotuloStatus } from '@/lib/wa-status';
 
 const fmtData = new Intl.DateTimeFormat('pt-BR', {
   timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
@@ -118,6 +119,8 @@ export async function FunilRecrutamento({ dias, ate = null, base, aba, corretore
     tel: string; nome: string | null; criado_em: string; formulario: boolean; conversa: boolean; relatorio: boolean;
     legado: 'qualificado' | 'descartado' | null; momento: string | null; bairro: string | null; creci: string | null; indicador: string | null;
     etapa: EtapaRec | 'fora'; perfil: PerfilRec; reg: LinhaRec | null;
+    // 16/11: última mensagem que a Eva mandou sem a pessoa ter escrito (abertura do formulário ou 2ª mensagem)
+    eva?: { quando: string; wamid: string; texto: string | null; erro: string };
   };
   const cands = new Map<string, Cand>();
   for (const e of [...ev].reverse()) {
@@ -130,6 +133,10 @@ export async function FunilRecrutamento({ dias, ate = null, base, aba, corretore
     if (e.evento === 'whatsapp_resumo') { c.conversa = true; c.relatorio = true; }
     if (e.evento === 'qualificado') c.legado = 'qualificado';
     if (e.evento === 'descartado') c.legado = 'descartado';
+    if (e.evento === 'abertura_form' || e.evento === 'whatsapp_followup') {
+      const p = (e.payload ?? {}) as { wa_message_id?: string; texto?: string; erro?: string };
+      c.eva = { quando: e.criado_em, wamid: String(p.wa_message_id ?? ''), texto: p.texto ? String(p.texto) : null, erro: String(p.erro ?? '') };
+    }
     c.momento = e.momento || c.momento;
     c.bairro = e.bairro || c.bairro;
     c.creci = e.creci || c.creci;
@@ -144,6 +151,19 @@ export async function FunilRecrutamento({ dias, ate = null, base, aba, corretore
     c.etapa = c.reg ? c.reg.etapa : c.legado === 'descartado' ? 'descartado' : c.legado === 'qualificado' ? 'contato' : foraDeSp(c.bairro) ? 'fora' : 'decidir';
   }
   lista.sort((a, b) => b.criado_em.localeCompare(a.criado_em));
+  // 16/11: status no WhatsApp (enviada/entregue/lida) e o texto exato da mensagem da Eva. Antes de 16/11 o texto
+  // não ia no registro: vem da memória da Eva (primeira mensagem dela para o número).
+  const comEva = lista.filter((c) => c.eva);
+  const stEva = await statusDasMensagens(supabaseAdmin(), comEva.map((c) => c.eva!.wamid));
+  const semTexto = comEva.filter((c) => !c.eva!.texto).map((c) => c.tel);
+  if (semTexto.length) {
+    const { data: hs } = await supabaseAdmin().from('n8n_chat_histories').select('id,session_id,message').in('session_id', semTexto).order('id', { ascending: true }).limit(3000);
+    const primeira = new Map<string, string>();
+    for (const h of (hs ?? []) as { session_id: string; message: { type?: string; content?: string } | null }[]) {
+      if (h.message?.type === 'ai' && !primeira.has(h.session_id)) primeira.set(h.session_id, String(h.message.content ?? '').trim());
+    }
+    for (const c of comEva) if (!c.eva!.texto) c.eva!.texto = primeira.get(c.tel) || null;
+  }
 
   const abaK = ETAPAS_REC.some((x) => x.k === aba) ? aba : 'decidir';
   const n = (k: string) => lista.filter((c) => c.etapa === k).length;
@@ -198,8 +218,16 @@ export async function FunilRecrutamento({ dias, ate = null, base, aba, corretore
                     <Selo texto={c.perfil} tom={TOM[c.perfil]} />
                     {c.bairro && <span>{c.bairro}</span>}
                     {c.momento && <span className="min-w-0 break-words">· {c.momento}</span>}
-                    {!c.conversa && <span>· ainda não falou com a Eva</span>}
+                    {!c.conversa && !c.eva && <span>· a Eva ainda não falou com o candidato</span>}
                   </div>
+                  {c.eva && (
+                    <div className="mt-1.5 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs">
+                      <p className="text-slate-500">
+                        Eva escreveu {fmtData.format(new Date(c.eva.quando))} · {rotuloStatus(stEva, c.eva.wamid, !!c.eva.erro) ?? 'enviada'}{!c.conversa ? ' · sem resposta' : ''}
+                      </p>
+                      <p className="mt-0.5 whitespace-pre-line break-words text-sm text-slate-800">{c.eva.texto || 'Texto não registrado.'}</p>
+                    </div>
+                  )}
                   {c.etapa === 'pensando' && c.reg?.retomar_em && (
                     <p className={`mt-1 text-xs font-semibold ${c.reg.retomar_em <= hoje ? 'text-red-700' : 'text-slate-700'}`}>
                       {c.reg.retomar_em < hoje ? `Retomar desde ${dataBr(c.reg.retomar_em)} — atrasado` : c.reg.retomar_em === hoje ? 'Retomar hoje' : `Retomar em ${dataBr(c.reg.retomar_em)}`}
