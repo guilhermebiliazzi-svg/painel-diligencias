@@ -1,6 +1,6 @@
 // Certificado de participação nas oficinas da loja: quem tem presença em todas as
 // oficinas ativas recebe o certificado em PDF. O link é público, pelo token de
-// onb_certificados (painel.villejardins.com.br/certificado/<token>), e vai pelo Max no WhatsApp.
+// onb_certificados_oficinas (painel.villejardins.com.br/certificado/<token>), e vai pelo Max no WhatsApp.
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { LOGO_DIPLOMA_B64 } from '@/lib/diploma-logo';
@@ -36,7 +36,7 @@ function curta(d: string): string {
 export async function lerCertificado(token: string): Promise<DadosCertificado | null> {
   if (!/^[0-9a-f-]{36}$/i.test(token)) return null;
   const sb = supabaseAdmin();
-  const { data: dip } = await sb.from('onb_certificados').select('corretor_id,concluido_em,token').eq('token', token).maybeSingle();
+  const { data: dip } = await sb.from('onb_certificados_oficinas').select('corretor_id,concluido_em,token').eq('token', token).maybeSingle();
   if (!dip) return null;
   const [cor, ofi, pre] = await Promise.all([
     sb.from('corretores_associados').select('nome').eq('id', dip.corretor_id).maybeSingle(),
@@ -59,7 +59,7 @@ export async function lerCertificado(token: string): Promise<DadosCertificado | 
 // (o gatilho do banco cria na hora da presença; isto cobre quem concluiu antes).
 export async function tokenCertificado(corretorId: number): Promise<string | null> {
   const sb = supabaseAdmin();
-  const { data } = await sb.from('onb_certificados').select('token').eq('corretor_id', corretorId).maybeSingle();
+  const { data } = await sb.from('onb_certificados_oficinas').select('token').eq('corretor_id', corretorId).maybeSingle();
   if (data?.token) return String(data.token);
   const [ofi, pre] = await Promise.all([
     sb.from('onb_oficinas').select('id').eq('ativa', true),
@@ -74,12 +74,12 @@ export async function tokenCertificado(corretorId: number): Promise<string | nul
   if (!ids.length || ids.some((id) => !primeira.has(id))) return null;
   const concluido = ids.map((id) => primeira.get(id)!).sort().at(-1)!;
   const { data: novo } = await sb
-    .from('onb_certificados')
+    .from('onb_certificados_oficinas')
     .upsert({ corretor_id: corretorId, concluido_em: concluido }, { onConflict: 'corretor_id', ignoreDuplicates: true })
     .select('token')
     .maybeSingle();
   if (novo?.token) return String(novo.token);
-  const { data: de } = await sb.from('onb_certificados').select('token').eq('corretor_id', corretorId).maybeSingle();
+  const { data: de } = await sb.from('onb_certificados_oficinas').select('token').eq('corretor_id', corretorId).maybeSingle();
   return de?.token ? String(de.token) : null;
 }
 
