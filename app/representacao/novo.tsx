@@ -69,7 +69,9 @@ export default function NovoContrato({
       setTipo('pj');
       setPessoas((ps) => {
         const p0 = ps[0] || vazia();
-        return [{ ...p0, nome: v('ct_razao', p0.nome), doc: v('ct_cnpj', p0.doc), ie: v('ct_ie', p0.ie), endereco: v('ct_sede', p0.endereco), email: v('ct_email', p0.email), telefone: fone || p0.telefone }, ...ps.slice(1)];
+        return [{ ...p0, nome: v('ct_razao', p0.nome), doc: v('ct_cnpj', p0.doc), ie: v('ct_ie', p0.ie), endereco: v('ct_sede', p0.endereco),
+          complemento: v('ct_sede_compl', p0.complemento), bairro: v('ct_sede_bairro', p0.bairro), municipio: v('ct_sede_municipio', p0.municipio),
+          estado: v('ct_sede_uf', p0.estado), email: v('ct_email', p0.email), telefone: fone || p0.telefone }, ...ps.slice(1)];
       });
     } else {
       setTipo('pf');
@@ -78,14 +80,22 @@ export default function NovoContrato({
         const prim = { ...p0, nome: l.nome || p0.nome, telefone: fone || p0.telefone, doc: v('ct_cpf', p0.doc), rg: v('ct_rg', p0.rg),
           nacionalidade: v('ct_nacionalidade', p0.nacionalidade), estado_civil: v('ct_estado_civil', p0.estado_civil),
           endereco: v('ct_end_res', p0.endereco), email: v('ct_email', p0.email) };
-        if (c.ct_outro !== 'sim' || !c.ct2_nome) return [prim, ...ps.slice(1)];
-        const p1 = ps[1] || vazia();
-        const seg = { ...p1, nome: c.ct2_nome, doc: v('ct2_cpf', p1.doc), rg: v('ct2_rg', p1.rg), estado_civil: v('ct2_estado_civil', p1.estado_civil),
-          telefone: v('ct2_cel', p1.telefone), email: v('ct2_email', p1.email), endereco: p1.endereco || prim.endereco };
-        return [prim, seg, ...ps.slice(2)];
+        const out = [prim];
+        if (c.ct_outro === 'sim') {
+          for (const n of [2, 3, 4]) {
+            if (n > 2 && c['ct' + n + '_tem'] !== 'sim') break;
+            if (!c['ct' + n + '_nome']) continue;
+            const pn = ps[out.length] || vazia();
+            out.push({ ...pn, nome: c['ct' + n + '_nome'], doc: v('ct' + n + '_cpf', pn.doc), rg: v('ct' + n + '_rg', pn.rg),
+              nacionalidade: v('ct' + n + '_nacionalidade', pn.nacionalidade || prim.nacionalidade), estado_civil: v('ct' + n + '_estado_civil', pn.estado_civil),
+              endereco: v('ct' + n + '_end_res', pn.endereco || prim.endereco), telefone: v('ct' + n + '_cel', pn.telefone), email: v('ct' + n + '_email', pn.email) });
+          }
+        }
+        return [...out, ...ps.slice(out.length)];
       });
     }
-    setImovel((im) => ({ ...im, endereco: l.endereco || im.endereco, bairro: l.bairro || im.bairro, tipo: l.tipo || im.tipo,
+    setImovel((im) => ({ ...im, endereco: l.endereco || im.endereco, bairro: c.ct_bairro || l.bairro || c.bairro_ficha || im.bairro, tipo: l.tipo || im.tipo,
+      complemento: v('ct_complemento', im.complemento), municipio: v('ct_municipio', im.municipio), estado: v('ct_uf', im.estado),
       valor: v('ct_valor', im.valor), matricula: v('ct_matricula', im.matricula), cartorio: v('ct_cartorio', im.cartorio),
       iptu: v('iptu', im.iptu), observacoes: v('ct_obs', im.observacoes) }));
   }
