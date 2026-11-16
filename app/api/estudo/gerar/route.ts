@@ -15,7 +15,7 @@ import { podeTela } from '@/lib/acesso';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { lerPedido, linkDoEstudo } from '@/lib/estudo-arquivo';
 import {
-  faltandoParaGerar, ficha, lerConcorrentes, montarPayload, nomeArquivo, proprietario, vendasItbi,
+  dadosContrato, faltandoParaGerar, ficha, lerConcorrentes, montarPayload, nomeArquivo, proprietario, vendasItbi,
   type Anuncio, type TipoFicha, type Vals,
 } from '@/lib/estudo-gerar';
 
@@ -58,6 +58,8 @@ async function captacao(email: string, tipo: TipoFicha, vals: Vals, simular: boo
   const { data, error } = await supabaseAdmin().rpc('sdr_captacao_estudo', {
     p_corretor: cor.phone, p_nome: pr.nome, p_tel: pr.tel, p_endereco: g('endereco'), p_tipo: tipo, p_v2: pr.v2,
     p_origem: 'painel', p_simular: simular,
+    // 16/11: V2 pode ser previsão "a confirmar"; dados do contrato (opcionais) ficam no lead
+    p_v2_confirmar: pr.v2Confirmar, p_contrato: dadosContrato(tipo, vals),
   });
   if (error) { console.error('[estudo][gerar] captacao', error); return { ok: false, erro: 'Não consegui registrar o lead do proprietário. Tente de novo.' }; }
   return (data || { ok: false, erro: 'Não consegui registrar o lead do proprietário.' }) as Captacao;
