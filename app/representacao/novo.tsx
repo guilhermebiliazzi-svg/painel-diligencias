@@ -62,9 +62,32 @@ export default function NovoContrato({
     const l = leads.find((x) => x.id === id);
     if (!l) return;
     const fone = l.telefone.length === 11 ? `(${l.telefone.slice(0, 2)}) ${l.telefone.slice(2, 7)}-${l.telefone.slice(7)}` : l.telefone;
-    setTipo('pf');
-    setPessoas((ps) => [{ ...(ps[0] || vazia()), nome: l.nome || ps[0]?.nome || '', telefone: fone || ps[0]?.telefone || '' }, ...ps.slice(1)]);
-    setImovel((im) => ({ ...im, endereco: l.endereco || im.endereco, bairro: l.bairro || im.bairro, tipo: l.tipo || im.tipo }));
+    // 16/11: o que o corretor já preencheu na ficha do estudo (dados do contrato) entra aqui
+    const c = l.contrato || {};
+    const v = (k: string, atual: string) => c[k] || atual;
+    if (c.ct_pj === 'sim') {
+      setTipo('pj');
+      setPessoas((ps) => {
+        const p0 = ps[0] || vazia();
+        return [{ ...p0, nome: v('ct_razao', p0.nome), doc: v('ct_cnpj', p0.doc), ie: v('ct_ie', p0.ie), endereco: v('ct_sede', p0.endereco), email: v('ct_email', p0.email), telefone: fone || p0.telefone }, ...ps.slice(1)];
+      });
+    } else {
+      setTipo('pf');
+      setPessoas((ps) => {
+        const p0 = ps[0] || vazia();
+        const prim = { ...p0, nome: l.nome || p0.nome, telefone: fone || p0.telefone, doc: v('ct_cpf', p0.doc), rg: v('ct_rg', p0.rg),
+          nacionalidade: v('ct_nacionalidade', p0.nacionalidade), estado_civil: v('ct_estado_civil', p0.estado_civil),
+          endereco: v('ct_end_res', p0.endereco), email: v('ct_email', p0.email) };
+        if (c.ct_outro !== 'sim' || !c.ct2_nome) return [prim, ...ps.slice(1)];
+        const p1 = ps[1] || vazia();
+        const seg = { ...p1, nome: c.ct2_nome, doc: v('ct2_cpf', p1.doc), rg: v('ct2_rg', p1.rg), estado_civil: v('ct2_estado_civil', p1.estado_civil),
+          telefone: v('ct2_cel', p1.telefone), email: v('ct2_email', p1.email), endereco: p1.endereco || prim.endereco };
+        return [prim, seg, ...ps.slice(2)];
+      });
+    }
+    setImovel((im) => ({ ...im, endereco: l.endereco || im.endereco, bairro: l.bairro || im.bairro, tipo: l.tipo || im.tipo,
+      valor: v('ct_valor', im.valor), matricula: v('ct_matricula', im.matricula), cartorio: v('ct_cartorio', im.cartorio),
+      iptu: v('iptu', im.iptu), observacoes: v('ct_obs', im.observacoes) }));
   }
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfDe, setPdfDe] = useState<string>('');
