@@ -4,6 +4,7 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { LOGO_DIPLOMA_B64 } from '@/lib/diploma-logo';
+import { ASSINATURA_B64 } from '@/lib/certificado-assinatura';
 
 export type DadosCertificado = {
   nome: string;
@@ -145,6 +146,10 @@ export async function gerarCertificadoPDF(d: DadosCertificado): Promise<Uint8Arr
 
   // assinatura
   const ay = 78;
+  const ass = await pdf.embedPng(Buffer.from(ASSINATURA_B64, 'base64'));
+  const sw = 190;
+  const sh = (ass.height / ass.width) * sw;
+  page.drawImage(ass, { x: (W - sw) / 2, y: ay + 12, width: sw, height: sh });
   page.drawLine({ start: { x: W / 2 - 120, y: ay + 16 }, end: { x: W / 2 + 120, y: ay + 16 }, thickness: 0.8, color: NAVY });
   centro(page, 'Guilherme Biliazzi', ay, 12, bold, NAVY);
   centro(page, 'Broker · REMAX Ville', ay - 15, 10, reg, CINZA);
