@@ -8,6 +8,7 @@ import {
   type Oficina, type Monitor, type Material, type CheckItem,
 } from '@/lib/oficinas';
 import { marcarAplicacao } from './actions';
+import { tokenCertificado } from '@/lib/certificado';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Oficinas — REMAX Ville' };
@@ -47,6 +48,7 @@ export default async function OficinasPage({ searchParams }: { searchParams: Pro
   const doMon = (id: number) => monitores.filter((m) => Number(m.oficina_id) === id);
   const meu = a.meuId ? (await progressoCorretores([a.meuId])).get(a.meuId) : undefined;
   const feitas = meu ? todas.filter((o) => meu.presencas.has(Number(o.id))).length : 0;
+  const certificado = a.meuId && todas.length && feitas === todas.length ? await tokenCertificado(a.meuId) : null;
   const pendentes = semPresenca(
     monitores.filter((m) => gerencio.some((o) => Number(o.id) === Number(m.oficina_id))),
     presencas,
@@ -103,6 +105,16 @@ export default async function OficinasPage({ searchParams }: { searchParams: Pro
             <p className="mt-0.5 text-xs text-slate-500">
               A presença é registrada pelo monitor. Depois de cada oficina, marque aqui o que você aplicou. Passar por todas é requisito para ser padrinho.
             </p>
+            {certificado && (
+              <a
+                href={`/certificado/${certificado}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+              >
+                🎓 Baixar meu certificado de participação
+              </a>
+            )}
             <ul className="mt-4 divide-y divide-slate-100">
               {todas.map((o) => {
                 const datas = meu.presencas.get(Number(o.id)) ?? [];
