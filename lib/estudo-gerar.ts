@@ -142,11 +142,15 @@ export function dadosContrato(tipo: TipoFicha, vals: Vals): Record<string, strin
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(vals)) {
     const id = k.slice(tipo.length + 1);
-    if (!/^ct2?_[a-z_]+$/.test(id) || typeof v !== 'string' || !v.trim()) continue;
+    if (!/^ct[234]?_[a-z_]+$/.test(id) || typeof v !== 'string' || !v.trim()) continue;
     out[id] = v.trim().slice(0, 500);
   }
   const { g } = ficha(tipo, vals);
-  if (Object.keys(out).length && g('sql')) out.iptu = g('sql');
+  if (!Object.keys(out).length) return out;
+  // o que a ficha já tem e o contrato usa
+  if (g('sql')) out.iptu = g('sql');
+  if (g('bairro')) out.bairro_ficha = g('bairro');
+  if (tipo === 'sala' && g('conjunto') && !out.ct_complemento) out.ct_complemento = 'conj. ' + g('conjunto');
   return out;
 }
 
