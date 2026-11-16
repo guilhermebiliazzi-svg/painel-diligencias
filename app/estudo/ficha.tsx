@@ -25,7 +25,8 @@ type Campo = {
   placeholder?: string;
   hint?: string;
 };
-type Secao = { num: string; h: string; note?: string; hint?: string; fields: Campo[] };
+// 16/11: destaque = caixa separada (dados do contrato de representação)
+type Secao = { num: string; h: string; note?: string; hint?: string; destaque?: string; fields: Campo[] };
 type Valor = string | string[];
 
 const F = (id: string, label: string, o: Partial<Campo> = {}): Campo => ({ id, label, type: 'text', ...o });
@@ -49,14 +50,49 @@ const MERCADO: Secao = {
   ],
 };
 // 15/11: todo estudo vira lead de captação do corretor, com a V2 (apresentação do estudo) na agenda.
+// 16/11: só o nome do proprietário e o dia e hora da V2 são obrigatórios; o celular é opcional e a V2
+// pode ser uma previsão "a confirmar".
 const PROP: Secao = {
   num: '', h: 'Proprietário e apresentação (V2)',
-  note: 'Obrigatório. O estudo vira um lead de captação seu no Funil do SDR, com a V2 agendada (e na sua agenda, se estiver integrada). A Eva não fala com o proprietário.',
+  note: 'O estudo vira um lead de captação seu no Funil do SDR, com a V2 agendada (e na sua agenda, se estiver integrada). Obrigatórios: nome do proprietário e dia e hora da V2. A Eva não fala com o proprietário.',
+  hint: 'Ainda não sabe o dia da V2? Coloque uma previsão e marque “a confirmar”.',
   fields: [
     F('prop_nome', 'Nome do proprietário', { full: true, req: true }),
-    F('prop_cel', 'Celular do proprietário (com DDD)', { type: 'tel', full: true, req: true, placeholder: '(11) 99999-9999' }),
+    F('prop_cel', 'Celular do proprietário (com DDD)', { type: 'tel', full: true, placeholder: '(11) 99999-9999', hint: 'opcional' }),
     F('v2_data', 'Dia da V2', { type: 'date', half: true, req: true }),
     F('v2_hora', 'Hora da V2', { type: 'time', half: true, req: true }),
+    yn('v2_confirmar', 'Essa data é uma previsão a confirmar?'),
+  ],
+};
+// 16/11: dados do contrato de representação, todos opcionais. Ficam salvos no lead de captação e
+// preenchem o contrato quando o corretor puxa esse lead em "Contrato de representação".
+const EST_CIVIL = ['', 'solteiro(a)', 'casado(a)', 'divorciado(a)', 'separado(a)', 'viúvo(a)', 'união estável'];
+const CONTRATO: Secao = {
+  num: '', h: 'Dados para o contrato de representação', destaque: 'CONTRATO · TUDO OPCIONAL',
+  note: 'Preencha o que já tiver. Fica salvo no lead de captação e já entra no contrato quando você puxar esse lead em “Contrato de representação”.',
+  fields: [
+    yn('ct_pj', 'O proprietário é empresa (PJ)?'),
+    F('ct_razao', 'Razão social', { showIf: ['ct_pj', 'sim'], full: true }),
+    F('ct_cnpj', 'CNPJ', { showIf: ['ct_pj', 'sim'], half: true }),
+    F('ct_ie', 'Inscrição estadual', { showIf: ['ct_pj', 'sim'], half: true }),
+    F('ct_sede', 'Endereço da sede', { showIf: ['ct_pj', 'sim'], full: true }),
+    F('ct_cpf', 'CPF do proprietário', { half: true }),
+    F('ct_rg', 'RG', { half: true }),
+    F('ct_nacionalidade', 'Nacionalidade', { half: true, placeholder: 'brasileira' }),
+    sel('ct_estado_civil', 'Estado civil', EST_CIVIL, { half: true }),
+    F('ct_end_res', 'Endereço residencial', { full: true }),
+    F('ct_email', 'E-mail (recebe o link para assinar)', { full: true }),
+    yn('ct_outro', 'Mais alguém assina (cônjuge ou coproprietário)?'),
+    F('ct2_nome', 'Nome completo de quem também assina', { showIf: ['ct_outro', 'sim'], full: true }),
+    F('ct2_cpf', 'CPF', { showIf: ['ct_outro', 'sim'], half: true }),
+    F('ct2_rg', 'RG', { showIf: ['ct_outro', 'sim'], half: true }),
+    sel('ct2_estado_civil', 'Estado civil', EST_CIVIL, { showIf: ['ct_outro', 'sim'], half: true }),
+    F('ct2_cel', 'Celular', { type: 'tel', showIf: ['ct_outro', 'sim'], half: true }),
+    F('ct2_email', 'E-mail (recebe o link para assinar)', { showIf: ['ct_outro', 'sim'], full: true }),
+    money('ct_valor', 'Valor de venda no contrato', '', { full: true }),
+    F('ct_matricula', 'Matrícula', { half: true }),
+    F('ct_cartorio', 'Cartório de registro', { half: true, placeholder: 'ex.: 4º RI de São Paulo' }),
+    F('ct_obs', 'Observações para o contrato', { type: 'textarea', full: true }),
   ],
 };
 const CONCORR: Secao = {
@@ -102,7 +138,7 @@ const FORMS: Record<Tipo, { label: string; sections: Secao[] }> = {
         yn('porteira', 'Venda porteira fechada (mobília inclusa)?'),
         money('mobilia', 'Valor estimado da mobília', '', { showIf: ['porteira', 'sim'], full: true }),
       ] },
-      MERCADO, CONCORR,
+      MERCADO, CONCORR, CONTRATO,
     ],
   },
   casa: {
@@ -144,7 +180,7 @@ const FORMS: Record<Tipo, { label: string; sections: Secao[] }> = {
         yn('porteira', 'Venda porteira fechada (mobília inclusa)?'),
         money('mobilia', 'Valor estimado da mobília', '', { showIf: ['porteira', 'sim'], full: true }),
       ] },
-      MERCADO, CONCORR,
+      MERCADO, CONCORR, CONTRATO,
     ],
   },
   sala: {
@@ -183,7 +219,7 @@ const FORMS: Record<Tipo, { label: string; sections: Secao[] }> = {
         yn('porteira', 'Venda porteira fechada (mobiliário incluso)?'),
         money('mobilia', 'Valor estimado do mobiliário', '', { showIf: ['porteira', 'sim'], full: true }),
       ] },
-      MERCADO, CONCORR,
+      MERCADO, CONCORR, CONTRATO,
     ],
   },
 };
@@ -214,7 +250,7 @@ function montarMensagem(tipo: Tipo, vals: Record<string, Valor>): string {
   L.push('*Endereço:* ' + (g('endereco') || ''));
   // 15/11: proprietário e V2 (a Eva registra o lead de captação com a V2 agendada)
   if (g('prop_nome') || g('prop_cel')) L.push('*Proprietário:* ' + line([g('prop_nome'), g('prop_cel')]));
-  if (g('v2_data')) L.push('*Apresentação do estudo (V2):* ' + dataBR(g('v2_data')!) + (g('v2_hora') ? ' às ' + g('v2_hora') : ''));
+  if (g('v2_data')) L.push('*Apresentação do estudo (V2):* ' + dataBR(g('v2_data')!) + (g('v2_hora') ? ' às ' + g('v2_hora') : '') + (g('v2_confirmar') === 'sim' ? ' (previsão, a confirmar)' : ''));
   const cond = tipo === 'sala' ? g('edificio') : g('condominio');
   if (cond || g('bairro')) L.push(line([cond && '*' + (tipo === 'sala' ? 'Edifício' : 'Condomínio') + ':* ' + cond, g('bairro') && '*Bairro:* ' + g('bairro')]));
   if (tipo === 'casa') {
@@ -272,6 +308,21 @@ function montarMensagem(tipo: Tipo, vals: Record<string, Valor>): string {
     L.push('');
     L.push('*Concorrentes a incluir:*');
     L.push(g('concorrentes')!);
+  }
+  // 16/11: dados do contrato de representação (opcionais)
+  const ct: string[] = [];
+  if (g('ct_pj') === 'sim') ct.push(line([g('ct_razao') && '*Empresa:* ' + g('ct_razao'), g('ct_cnpj') && 'CNPJ ' + g('ct_cnpj'), g('ct_ie') && 'IE ' + g('ct_ie')]), g('ct_sede') ? '*Sede:* ' + g('ct_sede') : '');
+  ct.push(line([g('ct_cpf') && '*CPF:* ' + g('ct_cpf'), g('ct_rg') && 'RG ' + g('ct_rg'), g('ct_nacionalidade'), g('ct_estado_civil')]));
+  if (g('ct_end_res')) ct.push('*Endereço residencial:* ' + g('ct_end_res'));
+  if (g('ct_email')) ct.push('*E-mail:* ' + g('ct_email'));
+  if (g('ct_outro') === 'sim' && g('ct2_nome')) ct.push('*Também assina:* ' + line([g('ct2_nome'), g('ct2_cpf') && 'CPF ' + g('ct2_cpf'), g('ct2_rg') && 'RG ' + g('ct2_rg'), g('ct2_estado_civil'), g('ct2_cel'), g('ct2_email')]));
+  ct.push(line([g('ct_valor') && '*Valor no contrato:* ' + R$(g('ct_valor')!), g('ct_matricula') && 'matrícula ' + g('ct_matricula'), g('ct_cartorio')]));
+  if (g('ct_obs')) ct.push('*Obs. do contrato:* ' + g('ct_obs'));
+  const ctOk = ct.filter(Boolean);
+  if (ctOk.length) {
+    L.push('');
+    L.push('*Dados para o contrato:*');
+    L.push(...ctOk);
   }
   L.push('');
   L.push('Esses são os dados da captação. Me faz o estudo de mercado completo, por favor.');
@@ -393,7 +444,8 @@ export default function Ficha() {
 
         <form autoComplete="off" onSubmit={(e) => e.preventDefault()}>
           {cfg.sections.map((sec, si) => (
-            <section key={tipo + si}>
+            <section key={tipo + si} className={sec.destaque ? 'fe-ct' : undefined}>
+              {sec.destaque && <div className="fe-ctkick">{sec.destaque}</div>}
               <div className="fe-shead"><span className="fe-snum">{si + 1}</span><h2>{sec.h}</h2></div>
               {sec.note && <p className="fe-snote">{sec.note}</p>}
               <div className="fe-grid">
@@ -652,8 +704,9 @@ function faltaGerar(tipo: Tipo, vals: Record<string, Valor>): string[] {
   const out: string[] = [];
   if (!/\d/.test(g('endereco'))) out.push('endereço com número');
   if (g('prop_nome').length < 2) out.push('nome do proprietário');
+  // 16/11: celular opcional; se vier, precisa ter DDD
   const cel = g('prop_cel').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '');
-  if (cel.length < 10 || cel.length > 11) out.push('celular do proprietário com DDD');
+  if (cel && (cel.length < 10 || cel.length > 11)) out.push('celular do proprietário com DDD (ou deixe em branco)');
   if (!g('v2_data') || !g('v2_hora')) out.push('dia e hora da V2');
   else if (new Date(g('v2_data') + 'T' + g('v2_hora') + ':00-03:00').getTime() < Date.now() - 3600e3) out.push('V2 de hoje em diante');
   if (tipo === 'casa') { if (!pos('area_terreno')) out.push('área do terreno'); }
@@ -880,6 +933,11 @@ const CSS = `
 .fe-snum{font:800 12px/1 var(--head);color:var(--red);letter-spacing:.08em}
 .fe-shead h2{font:700 16px/1.25 var(--head);color:var(--navy);margin:0}
 .fe-snote{color:var(--muted);font-size:12.5px;margin:2px 0 12px}
+.fe section.fe-ct{background:var(--ice);border:2px solid var(--navy);margin-top:28px}
+.fe-ctkick{display:inline-block;background:var(--navy);color:var(--on-ink);font:700 10.5px/1 var(--head);letter-spacing:.16em;padding:6px 9px;border-radius:6px;margin:0 0 10px}
+.fe section.fe-ct .fe-in{background:var(--card)}
+.fe section.fe-ct .fe-yn button{background:var(--card)}
+.fe section.fe-ct .fe-yn button[aria-pressed="true"]{background:var(--on)}
 .fe-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0 14px}
 .fe-f{min-width:0}
 .fe-f.full{grid-column:1/-1}
