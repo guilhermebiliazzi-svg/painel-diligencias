@@ -52,7 +52,8 @@ export type FormRepresentacao = {
   lead_id?: string | null;
 };
 
-export type LeadCaptacao = { id: string; nome: string; telefone: string; endereco: string; bairro: string; tipo: string; v2: string | null };
+// 16/11: contrato = dados do contrato preenchidos na ficha do estudo (chaves ct_*, ct2_* e iptu)
+export type LeadCaptacao = { id: string; nome: string; telefone: string; endereco: string; bairro: string; tipo: string; v2: string | null; contrato: Record<string, string> };
 
 export type CorretorOpcao = { id: number; nome: string; creci: string; cpf: string; temEmail: boolean; temFone: boolean };
 
@@ -288,10 +289,10 @@ export async function leadsDeCaptacao(corretorId: number | null): Promise<LeadCa
     const fim = c.phone.slice(-8);
     if (fim.length < 8) return [];
     const sb = supabaseAdmin();
-    const { data } = await sb.from('sdr_leads').select('id,nome,telefone,imovel_anuncio_endereco,bairros,tipologia,corretor_phone,created_at')
+    const { data } = await sb.from('sdr_leads').select('id,nome,telefone,imovel_anuncio_endereco,bairros,tipologia,corretor_phone,created_at,dados_contrato')
       .ilike('fonte', 'capta%').not('status', 'in', '(arquivado,encerrado)').ilike('corretor_phone', '%' + fim)
       .order('created_at', { ascending: false }).limit(50);
-    const leads = ((data ?? []) as { id: string; nome: string | null; telefone: string; imovel_anuncio_endereco: string | null; bairros: string[] | null; tipologia: string | null; corretor_phone: string | null }[])
+    const leads = ((data ?? []) as { id: string; nome: string | null; telefone: string; imovel_anuncio_endereco: string | null; bairros: string[] | null; tipologia: string | null; corretor_phone: string | null; dados_contrato: Record<string, unknown> | null }[])
       .filter((l) => dig(l.corretor_phone).slice(-8) === fim);
     const v2 = new Map<string, string>();
     if (leads.length) {
@@ -300,8 +301,9 @@ export async function leadsDeCaptacao(corretorId: number | null): Promise<LeadCa
     }
     const tipo = (t: string | null) => { const x = String(t || '').toLowerCase(); return /sala/.test(x) ? 'Sala comercial' : /terreno/.test(x) ? 'Terreno' : /casa/.test(x) ? 'Casa' : /apart/.test(x) ? 'Apartamento' : ''; };
     return leads.map((l) => ({
-      id: l.id, nome: txt(l.nome), telefone: dig(l.telefone).replace(/^55(?=\d{10,11}$)/, ''), endereco: txt(l.imovel_anuncio_endereco),
+      id: l.id, nome: txt(l.nome), telefone: l.telefone.startsWith('sem-telefone') ? '' : dig(l.telefone).replace(/^55(?=\d{10,11}$)/, ''), endereco: txt(l.imovel_anuncio_endereco),
       bairro: txt((l.bairros || [])[0]), tipo: tipo(l.tipologia), v2: v2.get(l.id) ?? null,
+      contrato: Object.fromEntries(Object.entries(l.dados_contrato || {}).map(([k, v]) => [k, txt(v)]).filter(([, v]) => v)),
     }));
   } catch {
     return [];
