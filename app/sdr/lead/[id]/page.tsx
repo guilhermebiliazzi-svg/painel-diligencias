@@ -201,7 +201,7 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
           </div>
           <dl className="mt-3 divide-y divide-slate-100">
             {/* 08/11: lead que chegou sem telefone não tem WhatsApp nem conversa */}
-            <Linha k="Telefone" v={l.telefone.startsWith('sem-telefone') ? <span className="text-slate-500">sem telefone (o portal mandou só nome/e-mail)</span> : <><a href={wa} target="_blank" className="text-blue-700 underline">{telFmt(l.telefone)}</a> · <Link href={'/sdr/conversa/' + l.telefone.replace(/\D/g, '')} className="text-blue-700 underline">conversa completa</Link></>} />
+            <Linha k="Telefone" v={l.telefone.startsWith('sem-telefone') ? <span className="text-slate-500">{/^capta/i.test(l.fonte || '') ? 'sem telefone (não informado na ficha do estudo)' : 'sem telefone (o portal mandou só nome/e-mail)'}</span> : <><a href={wa} target="_blank" className="text-blue-700 underline">{telFmt(l.telefone)}</a> · <Link href={'/sdr/conversa/' + l.telefone.replace(/\D/g, '')} className="text-blue-700 underline">conversa completa</Link></>} />
             <Linha k="Quer" v={[l.intencao ? INTENCAO[l.intencao] ?? l.intencao : null, l.tipologia, (l.bairros ?? []).join(', ')].filter(Boolean).join(' · ')} />
             <Linha k="Imóvel" v={l.imovel_anuncio_endereco ? (
               <>
