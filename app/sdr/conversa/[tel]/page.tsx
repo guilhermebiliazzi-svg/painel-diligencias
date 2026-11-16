@@ -82,7 +82,10 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
 
   // status de entrega das mensagens do sistema e das respostas da Eva (29/10: eva_envios)
   const envios = await enviosDaEva(sb, dig.slice(-8));
-  const idsConhecidos = [...((msgs ?? []) as { wa_message_id: string | null }[]).map((m) => m.wa_message_id), ...envios.map((e) => e.wa_message_id)];
+  // 16/11: abertura da Eva para candidato do recrutamento (mensagem-modelo mandada antes de a pessoa escrever)
+  const { data: recEnv } = await sb.from('recrutamento_leads').select('criado_em,payload').like('telefone', '%' + dig.slice(-8)).eq('evento', 'abertura_form').order('criado_em', { ascending: true }).limit(10);
+  const aberturas = (recEnv ?? []) as { criado_em: string; payload: { wa_message_id?: string; texto?: string; erro?: string } | null }[];
+  const idsConhecidos = [...((msgs ?? []) as { wa_message_id: string | null }[]).map((m) => m.wa_message_id), ...envios.map((e) => e.wa_message_id), ...aberturas.map((a) => a.payload?.wa_message_id ?? null)];
   const avulsas = await mensagensAvulsas(sb, dig.slice(-8), undefined, idsConhecidos);
   const stPor = await statusDasMensagens(sb, [...idsConhecidos, ...avulsas.map((e) => e.wa_message_id)]);
 
@@ -112,6 +115,7 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
   const limpa = (c: string) => c.replace(/^(\s*\[[^\]]*\]\s*)+/, '').replace(/\n+IMPORTANTE:[\s\S]*$/, '').trim();
   const norm = (x: string) => x.toLowerCase().replace(/\s+/g, ' ').trim();
   let ptr = 0; let tRef: number | null = null; let seq = 0;
+  const semRef: string[] = []; // mensagens da Eva antes de a pessoa escrever (aberturas)
   for (const h of (hist ?? []) as { id: number; message: { type?: string; content?: string } }[]) {
     const c = String(h.message?.content ?? '');
     if (h.message?.type === 'human') {
@@ -126,6 +130,8 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
         const casa = nb === nt || (Math.min(nb.length, nt.length) >= 20 && (nt.includes(nb) || nb.includes(nt)));
         if (casa) { tRef = new Date(bufs[i].processado_em || bufs[i].created_at).getTime(); ptr = i + 1; break; }
       }
+    } else if (h.message?.type === 'ai' && tRef == null) {
+      semRef.push(c.trim());
     } else if (h.message?.type === 'ai' && tRef != null) {
       const tx = c.trim();
       if (!tx || tx.startsWith('[Aviso do sistema') || sistema.has(tx)) continue;
@@ -135,6 +141,13 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
   }
   // 29/10: respostas da Eva gravadas no envio que não casaram com o histórico (ex.: fluxos sem memória) entram assim mesmo.
   for (const e of envios) if (!e.usado && !sistema.has(String(e.texto ?? '').trim())) eventos.push({ k: 'e' + e.wa_message_id, t: new Date(e.enviado_em).getTime(), lado: 'eva', rotulo: 'Eva', texto: String(e.texto ?? ''), status: rotuloStatus(stPor, e.wa_message_id) });
+  for (const a of aberturas) {
+    const wid = a.payload?.wa_message_id ?? null;
+    if (wid && envios.some((e) => e.wa_message_id === wid)) continue;
+    const tx = String(a.payload?.texto ?? '').trim() || semRef.shift() || '';
+    if (!tx) continue;
+    eventos.push({ k: 'r' + a.criado_em, t: new Date(a.criado_em).getTime(), lado: 'eva', rotulo: 'Eva · abertura (mensagem-modelo)', texto: tx, status: rotuloStatus(stPor, wid, !!a.payload?.erro) });
+  }
   eventos.sort((a, b) => a.t - b.t);
   if (desdeCorretor != null) for (let i = eventos.length - 1; i >= 0; i--) if (eventos[i].t < desdeCorretor) eventos.splice(i, 1);
 
