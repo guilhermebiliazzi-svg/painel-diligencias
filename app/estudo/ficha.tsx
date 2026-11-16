@@ -69,29 +69,60 @@ const PROP: Secao = {
 const EST_CIVIL = ['', 'solteiro(a)', 'casado(a)', 'divorciado(a)', 'separado(a)', 'viúvo(a)', 'união estável'];
 const CONTRATO: Secao = {
   num: '', h: 'Dados para o contrato de representação', destaque: 'CONTRATO · TUDO OPCIONAL',
-  note: 'Preencha o que já tiver. Fica salvo no lead de captação e já entra no contrato quando você puxar esse lead em “Contrato de representação”.',
+  note: 'São os campos do contrato de representação. Preencha o que já tiver: fica salvo no lead de captação e já entra no contrato quando você puxar esse lead em “Contrato de representação”.',
   fields: [
+    // imóvel
+    F('ct_complemento', 'Complemento do imóvel', { half: true, placeholder: 'ex.: ap 91, bloco B' }),
+    F('ct_bairro', 'Bairro do imóvel', { half: true, placeholder: 'em branco = o da ficha' }),
+    F('ct_municipio', 'Município', { half: true, placeholder: 'São Paulo' }),
+    F('ct_uf', 'Estado (UF)', { half: true, placeholder: 'SP' }),
+    money('ct_valor', 'Valor de venda no contrato', '', { full: true }),
+    F('ct_matricula', 'Matrícula', { half: true }),
+    F('ct_cartorio', 'Cartório de registro', { half: true, placeholder: 'ex.: 4º RI de São Paulo' }),
+    // proprietário
     yn('ct_pj', 'O proprietário é empresa (PJ)?'),
     F('ct_razao', 'Razão social', { showIf: ['ct_pj', 'sim'], full: true }),
     F('ct_cnpj', 'CNPJ', { showIf: ['ct_pj', 'sim'], half: true }),
     F('ct_ie', 'Inscrição estadual', { showIf: ['ct_pj', 'sim'], half: true }),
     F('ct_sede', 'Endereço da sede', { showIf: ['ct_pj', 'sim'], full: true }),
-    F('ct_cpf', 'CPF do proprietário', { half: true }),
-    F('ct_rg', 'RG', { half: true }),
-    F('ct_nacionalidade', 'Nacionalidade', { half: true, placeholder: 'brasileira' }),
-    sel('ct_estado_civil', 'Estado civil', EST_CIVIL, { half: true }),
-    F('ct_end_res', 'Endereço residencial', { full: true }),
-    F('ct_email', 'E-mail (recebe o link para assinar)', { full: true }),
-    yn('ct_outro', 'Mais alguém assina (cônjuge ou coproprietário)?'),
-    F('ct2_nome', 'Nome completo de quem também assina', { showIf: ['ct_outro', 'sim'], full: true }),
+    F('ct_sede_compl', 'Complemento da sede', { showIf: ['ct_pj', 'sim'], half: true }),
+    F('ct_sede_bairro', 'Bairro da sede', { showIf: ['ct_pj', 'sim'], half: true }),
+    F('ct_sede_municipio', 'Município da sede', { showIf: ['ct_pj', 'sim'], half: true }),
+    F('ct_sede_uf', 'UF da sede', { showIf: ['ct_pj', 'sim'], half: true }),
+    F('ct_cpf', 'CPF do proprietário', { showIf: ['ct_pj', '!sim'], half: true }),
+    F('ct_rg', 'RG', { showIf: ['ct_pj', '!sim'], half: true }),
+    F('ct_nacionalidade', 'Nacionalidade', { showIf: ['ct_pj', '!sim'], half: true, placeholder: 'brasileira' }),
+    sel('ct_estado_civil', 'Estado civil', EST_CIVIL, { showIf: ['ct_pj', '!sim'], half: true }),
+    F('ct_end_res', 'Endereço residencial', { showIf: ['ct_pj', '!sim'], full: true }),
+    F('ct_email', 'E-mail de quem assina (recebe o link)', { full: true }),
+    // outros que assinam (cônjuge ou coproprietários; até 4 pessoas no total)
+    yn('ct_outro', 'Mais alguém assina (cônjuge ou coproprietário)?', { showIf: ['ct_pj', '!sim'] }),
+    F('ct2_nome', '2ª pessoa — nome completo', { showIf: ['ct_outro', 'sim'], full: true }),
     F('ct2_cpf', 'CPF', { showIf: ['ct_outro', 'sim'], half: true }),
     F('ct2_rg', 'RG', { showIf: ['ct_outro', 'sim'], half: true }),
+    F('ct2_nacionalidade', 'Nacionalidade', { showIf: ['ct_outro', 'sim'], half: true, placeholder: 'brasileira' }),
     sel('ct2_estado_civil', 'Estado civil', EST_CIVIL, { showIf: ['ct_outro', 'sim'], half: true }),
+    F('ct2_end_res', 'Endereço residencial', { showIf: ['ct_outro', 'sim'], full: true, placeholder: 'em branco = o mesmo do proprietário' }),
     F('ct2_cel', 'Celular', { type: 'tel', showIf: ['ct_outro', 'sim'], half: true }),
-    F('ct2_email', 'E-mail (recebe o link para assinar)', { showIf: ['ct_outro', 'sim'], full: true }),
-    money('ct_valor', 'Valor de venda no contrato', '', { full: true }),
-    F('ct_matricula', 'Matrícula', { half: true }),
-    F('ct_cartorio', 'Cartório de registro', { half: true, placeholder: 'ex.: 4º RI de São Paulo' }),
+    F('ct2_email', 'E-mail (recebe o link)', { showIf: ['ct_outro', 'sim'], half: true }),
+    yn('ct3_tem', 'Uma 3ª pessoa assina?', { showIf: ['ct_outro', 'sim'] }),
+    F('ct3_nome', '3ª pessoa — nome completo', { showIf: ['ct3_tem', 'sim'], full: true }),
+    F('ct3_cpf', 'CPF', { showIf: ['ct3_tem', 'sim'], half: true }),
+    F('ct3_rg', 'RG', { showIf: ['ct3_tem', 'sim'], half: true }),
+    F('ct3_nacionalidade', 'Nacionalidade', { showIf: ['ct3_tem', 'sim'], half: true, placeholder: 'brasileira' }),
+    sel('ct3_estado_civil', 'Estado civil', EST_CIVIL, { showIf: ['ct3_tem', 'sim'], half: true }),
+    F('ct3_end_res', 'Endereço residencial', { showIf: ['ct3_tem', 'sim'], full: true, placeholder: 'em branco = o mesmo do proprietário' }),
+    F('ct3_cel', 'Celular', { type: 'tel', showIf: ['ct3_tem', 'sim'], half: true }),
+    F('ct3_email', 'E-mail (recebe o link)', { showIf: ['ct3_tem', 'sim'], half: true }),
+    yn('ct4_tem', 'Uma 4ª pessoa assina?', { showIf: ['ct3_tem', 'sim'] }),
+    F('ct4_nome', '4ª pessoa — nome completo', { showIf: ['ct4_tem', 'sim'], full: true }),
+    F('ct4_cpf', 'CPF', { showIf: ['ct4_tem', 'sim'], half: true }),
+    F('ct4_rg', 'RG', { showIf: ['ct4_tem', 'sim'], half: true }),
+    F('ct4_nacionalidade', 'Nacionalidade', { showIf: ['ct4_tem', 'sim'], half: true, placeholder: 'brasileira' }),
+    sel('ct4_estado_civil', 'Estado civil', EST_CIVIL, { showIf: ['ct4_tem', 'sim'], half: true }),
+    F('ct4_end_res', 'Endereço residencial', { showIf: ['ct4_tem', 'sim'], full: true, placeholder: 'em branco = o mesmo do proprietário' }),
+    F('ct4_cel', 'Celular', { type: 'tel', showIf: ['ct4_tem', 'sim'], half: true }),
+    F('ct4_email', 'E-mail (recebe o link)', { showIf: ['ct4_tem', 'sim'], half: true }),
     F('ct_obs', 'Observações para o contrato', { type: 'textarea', full: true }),
   ],
 };
@@ -311,12 +342,24 @@ function montarMensagem(tipo: Tipo, vals: Record<string, Valor>): string {
   }
   // 16/11: dados do contrato de representação (opcionais)
   const ct: string[] = [];
-  if (g('ct_pj') === 'sim') ct.push(line([g('ct_razao') && '*Empresa:* ' + g('ct_razao'), g('ct_cnpj') && 'CNPJ ' + g('ct_cnpj'), g('ct_ie') && 'IE ' + g('ct_ie')]), g('ct_sede') ? '*Sede:* ' + g('ct_sede') : '');
-  ct.push(line([g('ct_cpf') && '*CPF:* ' + g('ct_cpf'), g('ct_rg') && 'RG ' + g('ct_rg'), g('ct_nacionalidade'), g('ct_estado_civil')]));
-  if (g('ct_end_res')) ct.push('*Endereço residencial:* ' + g('ct_end_res'));
-  if (g('ct_email')) ct.push('*E-mail:* ' + g('ct_email'));
-  if (g('ct_outro') === 'sim' && g('ct2_nome')) ct.push('*Também assina:* ' + line([g('ct2_nome'), g('ct2_cpf') && 'CPF ' + g('ct2_cpf'), g('ct2_rg') && 'RG ' + g('ct2_rg'), g('ct2_estado_civil'), g('ct2_cel'), g('ct2_email')]));
+  ct.push(line([g('ct_complemento') && '*Complemento:* ' + g('ct_complemento'), g('ct_bairro'), g('ct_municipio'), g('ct_uf')]));
   ct.push(line([g('ct_valor') && '*Valor no contrato:* ' + R$(g('ct_valor')!), g('ct_matricula') && 'matrícula ' + g('ct_matricula'), g('ct_cartorio')]));
+  if (g('ct_pj') === 'sim') {
+    ct.push(line([g('ct_razao') && '*Empresa:* ' + g('ct_razao'), g('ct_cnpj') && 'CNPJ ' + g('ct_cnpj'), g('ct_ie') && 'IE ' + g('ct_ie')]));
+    ct.push(line([g('ct_sede') && '*Sede:* ' + g('ct_sede'), g('ct_sede_compl'), g('ct_sede_bairro'), g('ct_sede_municipio'), g('ct_sede_uf')]));
+  } else {
+    ct.push(line([g('ct_cpf') && '*CPF:* ' + g('ct_cpf'), g('ct_rg') && 'RG ' + g('ct_rg'), g('ct_nacionalidade'), g('ct_estado_civil')]));
+    if (g('ct_end_res')) ct.push('*Endereço residencial:* ' + g('ct_end_res'));
+  }
+  if (g('ct_email')) ct.push('*E-mail:* ' + g('ct_email'));
+  if (g('ct_pj') !== 'sim' && g('ct_outro') === 'sim') {
+    for (const n of [2, 3, 4]) {
+      if (n > 2 && g('ct' + n + '_tem') !== 'sim') break;
+      if (!g('ct' + n + '_nome')) continue;
+      ct.push('*Também assina:* ' + line([g('ct' + n + '_nome'), g('ct' + n + '_cpf') && 'CPF ' + g('ct' + n + '_cpf'), g('ct' + n + '_rg') && 'RG ' + g('ct' + n + '_rg'),
+        g('ct' + n + '_nacionalidade'), g('ct' + n + '_estado_civil'), g('ct' + n + '_end_res'), g('ct' + n + '_cel'), g('ct' + n + '_email')]));
+    }
+  }
   if (g('ct_obs')) ct.push('*Obs. do contrato:* ' + g('ct_obs'));
   const ctOk = ct.filter(Boolean);
   if (ctOk.length) {
@@ -450,7 +493,8 @@ export default function Ficha() {
               {sec.note && <p className="fe-snote">{sec.note}</p>}
               <div className="fe-grid">
                 {sec.fields.map((f) => {
-                  if (f.showIf && get(f.showIf[0]) !== f.showIf[1]) return null;
+                  // 16/11: '!valor' = mostra quando NÃO é esse valor
+                  if (f.showIf && (f.showIf[1].startsWith('!') ? get(f.showIf[0]) === f.showIf[1].slice(1) : get(f.showIf[0]) !== f.showIf[1])) return null;
                   const v = get(f.id);
                   const sv = typeof v === 'string' ? v : '';
                   if (f.type === 'iptu') {
