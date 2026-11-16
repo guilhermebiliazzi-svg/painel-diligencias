@@ -115,24 +115,39 @@ export function faltandoParaGerar(tipo: TipoFicha, vals: Vals): string[] {
     if (!(Number(n('area_util')) > 0)) out.push('área útil');
     if (!(Number(n('area_iptu')) > 0)) out.push('área total (IPTU) — use “Achar pelo endereço” ou a certidão');
   }
-  // 15/11: todo estudo vira lead de captação: nome e celular do proprietário e a data da V2 são obrigatórios
+  // 15/11: todo estudo vira lead de captação. 16/11: obrigatórios só o nome do proprietário e a data da V2
+  // (pode ser previsão "a confirmar"); o celular é opcional, mas se vier precisa ter DDD.
   const pr = proprietario(tipo, vals);
   if (!pr.nome) out.push('nome do proprietário');
-  if (!pr.tel) out.push('celular do proprietário (com DDD)');
+  if (pr.telInvalido) out.push('celular do proprietário com DDD (ou deixe em branco)');
   if (!pr.v2) out.push('dia e hora da apresentação (V2)');
   else if (new Date(pr.v2).getTime() < Date.now() - 3600e3) out.push('data da V2 de hoje em diante');
   return out;
 }
 
 /** 15/11: proprietário e V2 da ficha. v2 em ISO com o fuso de São Paulo (-03:00). */
-export function proprietario(tipo: TipoFicha, vals: Vals): { nome: string; tel: string; v2: string } {
+export function proprietario(tipo: TipoFicha, vals: Vals): { nome: string; tel: string; telInvalido: boolean; v2: string; v2Confirmar: boolean } {
   const { g } = ficha(tipo, vals);
   const nome = g('prop_nome').replace(/\s+/g, ' ').trim().slice(0, 120);
   let tel = g('prop_cel').replace(/\D/g, '');
   if (tel.startsWith('55') && tel.length >= 12) tel = tel.slice(2);
   const data = g('v2_data'); const hora = g('v2_hora');
   const v2 = /^\d{4}-\d{2}-\d{2}$/.test(data) && /^\d{2}:\d{2}$/.test(hora) ? `${data}T${hora}:00-03:00` : '';
-  return { nome: nome.length >= 2 ? nome : '', tel: tel.length === 10 || tel.length === 11 ? '55' + tel : '', v2 };
+  const telOk = tel.length === 10 || tel.length === 11;
+  return { nome: nome.length >= 2 ? nome : '', tel: telOk ? '55' + tel : '', telInvalido: !!tel && !telOk, v2, v2Confirmar: g('v2_confirmar') === 'sim' };
+}
+
+/** 16/11: dados do contrato de representação preenchidos na ficha (todos opcionais), sem os vazios. */
+export function dadosContrato(tipo: TipoFicha, vals: Vals): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(vals)) {
+    const id = k.slice(tipo.length + 1);
+    if (!/^ct2?_[a-z_]+$/.test(id) || typeof v !== 'string' || !v.trim()) continue;
+    out[id] = v.trim().slice(0, 500);
+  }
+  const { g } = ficha(tipo, vals);
+  if (Object.keys(out).length && g('sql')) out.iptu = g('sql');
+  return out;
 }
 
 // ------------------------------------------------------------------ prévia: ITBI do prédio
