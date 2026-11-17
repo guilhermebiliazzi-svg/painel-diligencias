@@ -65,6 +65,17 @@ async function captacao(email: string, tipo: TipoFicha, vals: Vals, simular: boo
   return (data || { ok: false, erro: 'Não consegui registrar o lead do proprietário.' }) as Captacao;
 }
 
+// 17/11: apartamento/sala reformado (nos últimos 10 anos) precisa de anúncios comparáveis — as vendas do prédio não
+// dizem o estado das unidades e, sozinhas, levam a "venda + custo da obra" (decisão Guilherme 17/11).
+function reformadoRecente(tipo: TipoFicha, vals: Vals): boolean {
+  if (tipo === 'casa') return false;
+  const { g, n } = ficha(tipo, vals);
+  if (g('reformado') !== 'sim') return false;
+  const ano = Number(n('reforma_ano'));
+  return !(ano > 1900) || ano >= new Date().getFullYear() - 9;
+}
+const MSG_REFORMADO = 'Imóvel reformado: cole em “Concorrentes” links de anúncios parecidos à venda (de preferência reformados). As vendas do prédio não dizem o estado das unidades e não bastam para precificar a reforma.';
+
 const chaves = (x: unknown) => (Array.isArray(x) ? x.slice(0, 60).map((s) => String(s).slice(0, 80)) : []);
 
 function lerAnuncios(x: unknown): Anuncio[] {
@@ -104,6 +115,7 @@ export async function POST(req: Request) {
   const { g, n } = ficha(tipo, vals);
 
   if (body.acao === 'previa') {
+    if (reformadoRecente(tipo, vals) && !g('concorrentes')) return erro(MSG_REFORMADO, 409);
     const cap = await captacao(s.email, tipo, vals, true);
     if (!cap.ok) return erro(cap.erro || 'Não consegui conferir o proprietário.', 409);
     const area = tipo === 'casa' ? n('area_construida') : n('area_util');
@@ -127,6 +139,7 @@ export async function POST(req: Request) {
     const anuncios = lerAnuncios(body.anuncios).filter((a) => tipo !== 'casa' || a.origem === 'site'); // casa: só o site
     const esc = { itbi_manter: chaves(body.itbi_manter), itbi_excluir: chaves(body.itbi_excluir), anuncios };
     if (tipo !== 'casa' && !esc.itbi_manter.length) return erro('Deixe pelo menos uma venda do ITBI marcada.');
+    if (reformadoRecente(tipo, vals) && !anuncios.length) return erro(MSG_REFORMADO + ' Deixe pelo menos um anúncio marcado.', 409);
     const cap = await captacao(s.email, tipo, vals, false);
     if (!cap.ok || !cap.lead_id) return erro(cap.erro || 'Não consegui registrar o lead do proprietário.', 409);
     const payload = {
