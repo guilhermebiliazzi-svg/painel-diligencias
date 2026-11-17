@@ -1411,6 +1411,7 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
 
     assumidos = 0
     assumidos_repetidos = 0
+    codigos_proprios = set()   # 17/11: codigos do iList PROPRIO de cada sucursal
     for nome, cfg in SUCURSAIS.items():
         n = 0
         for origem, bloco in blocos_ilist(cfg, com_origem=True):
@@ -1434,7 +1435,10 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                 if cf:
                     for pos_x, (dono_x, cod_x, chave_x, cf_x) in enumerate(
                             por_fato.get(indice_fato(cf), ())):
-                        if dono_x == nome and caracteristicas_compativeis(cf, cf_x):
+                        # so compara com o iList PROPRIO: dois anuncios iguais do
+                        # iList assumido sao unidades diferentes (mesma regra de sempre)
+                        if (dono_x == nome and cod_x in codigos_proprios
+                                and caracteristicas_compativeis(cf, cf_x)):
                             mesmo = cod_x
                             break
                 preferir = next((x.get("preferir", ()) for x in cfg.get("ilist_extra", [])
@@ -1457,6 +1461,8 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                           f"como {mesmo}; fica o da {nome}")
                     continue
                 assumidos += 1
+            else:
+                codigos_proprios.add(codigo)
             # So e conflito quando as sucursais sao DIFERENTES. Dentro da mesma,
             # dois anuncios com o mesmo endereco, area, comodos e preco sao dois
             # apartamentos iguais no mesmo predio — o CRM deu codigos distintos
