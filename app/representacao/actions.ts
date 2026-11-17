@@ -238,6 +238,56 @@ export async function gerarPdf(f: FormRepresentacao): Promise<{ ok: boolean; pdf
   }
 }
 
+/** 17/11: PDF do contrato direto da ficha do estudo (caixa "Dados para o contrato"). Monta o mesmo formulário
+ *  que "Puxar de um lead de captação" monta em Contrato de representação e gera pelo mesmo caminho (gerarPdf).
+ *  Só gera para conferir: o envio para assinatura continua em Contrato de representação. */
+export async function gerarPdfDaFicha(tipoFicha: string, d: Record<string, string>): Promise<{ ok: boolean; pdf?: string; titulo?: string; erro?: string }> {
+  try {
+    const v = (k: string) => txt(d?.[k]);
+    const pj = v('ct_pj') === 'sim';
+    const fone = dig(v('prop_cel')).replace(/^55(?=\d{10,11}$)/, '');
+    const vaz = (): Pessoa => ({ nome: '', doc: '', rg: '', nacionalidade: '', estado_civil: '', endereco: '', email: '', telefone: '', ie: '', complemento: '', bairro: '', municipio: '', estado: '' });
+    const pessoas: Pessoa[] = [];
+    if (pj) {
+      pessoas.push({ ...vaz(), nome: v('ct_razao'), doc: v('ct_cnpj'), ie: v('ct_ie'), endereco: v('ct_sede'), complemento: v('ct_sede_compl'),
+        bairro: v('ct_sede_bairro'), municipio: v('ct_sede_municipio'), estado: v('ct_sede_uf'), email: v('ct_email'), telefone: fone });
+    } else {
+      const prim: Pessoa = { ...vaz(), nome: v('prop_nome'), doc: v('ct_cpf'), rg: v('ct_rg'), nacionalidade: v('ct_nacionalidade') || 'brasileira',
+        estado_civil: v('ct_estado_civil'), endereco: v('ct_end_res'), email: v('ct_email'), telefone: fone };
+      pessoas.push(prim);
+      if (v('ct_outro') === 'sim') {
+        for (const n of [2, 3, 4]) {
+          if (n > 2 && v('ct' + n + '_tem') !== 'sim') break;
+          if (!v('ct' + n + '_nome')) continue;
+          pessoas.push({ ...vaz(), nome: v('ct' + n + '_nome'), doc: v('ct' + n + '_cpf'), rg: v('ct' + n + '_rg'),
+            nacionalidade: v('ct' + n + '_nacionalidade') || prim.nacionalidade, estado_civil: v('ct' + n + '_estado_civil'),
+            endereco: v('ct' + n + '_end_res') || prim.endereco, telefone: dig(v('ct' + n + '_cel')), email: v('ct' + n + '_email') });
+        }
+      }
+    }
+    const ct = v('casa_tipo');
+    const tipoImovel = tipoFicha === 'casa' ? (/condom/i.test(ct) ? 'Casa em condomínio' : /vila/i.test(ct) ? 'Casa de vila'
+      : /sobrado/i.test(ct) ? 'Sobrado' : /terreno/i.test(ct) ? 'Terreno' : 'Casa')
+      : tipoFicha === 'sala' ? (/loja/i.test(v('sala_tipo')) ? 'Loja' : 'Sala comercial') : 'Apartamento';
+    // admin: usa o cadastro de corretor do próprio usuário (na tela de contratos ele escolhe o corretor)
+    let corretorId: number | null = null;
+    const { perfil } = await getSessaoPerfil();
+    if (perfil?.is_admin) corretorId = (await corretorDaPessoa(perfil.email))?.id ?? null;
+    return await gerarPdf({
+      tipo: pj ? 'pj' : 'pf',
+      imovel: {
+        tipo: tipoImovel, endereco: v('endereco'),
+        complemento: v('ct_complemento') || (tipoFicha === 'sala' && v('conjunto') ? 'conj. ' + v('conjunto') : ''),
+        bairro: v('ct_bairro') || v('bairro'), municipio: v('ct_municipio') || 'São Paulo', estado: v('ct_uf') || 'SP',
+        valor: v('ct_valor'), matricula: v('ct_matricula'), cartorio: v('ct_cartorio'), iptu: v('sql'), observacoes: v('ct_obs'),
+      },
+      pessoas, corretor_id: corretorId, corretor_cpf: '',
+    });
+  } catch (e) {
+    return { ok: false, erro: (e as Error).message };
+  }
+}
+
 // O envio roda em segundo plano no n8n: o Clicksign às vezes recusa a conexão
 // por alguns minutos, e o n8n espera e continua sozinho. Aqui só registramos o
 // pedido; a tela acompanha por statusEnvio().
