@@ -6,6 +6,7 @@ import { pool } from '@/lib/db';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import type { CorretorDaPessoa } from '@/lib/perfil';
 import AtualizarLead from './atualizar-lead';
+import AtualizarCaptacao from './atualizar-captacao';
 
 const fim8 = (t: string | null | undefined) => String(t ?? '').replace(/\D/g, '').slice(-8);
 const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
@@ -275,7 +276,7 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
                   </li>
                 ))}
               </ol>
-              <p className="mt-4 text-xs text-slate-500">{ehProp ? 'Contato feito e as etapas da captação contam o que você registrou com a Eva pelo WhatsApp.' : 'Contato feito, visita e proposta contam o que você registrou com a Eva pelo WhatsApp.'}</p>
+              <p className="mt-4 text-xs text-slate-500">{ehProp ? 'Contato feito e as etapas da captação contam o que você registrou com a Eva pelo WhatsApp ou no botão Atualizar.' : 'Contato feito, visita e proposta contam o que você registrou com a Eva pelo WhatsApp.'}</p>
             </section>
 
             <section style={{ backgroundColor: '#ffffff' }} className="mt-4 rounded-2xl border border-slate-200 p-5 shadow-sm">
@@ -322,6 +323,8 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
                               {estudoDo.has(l.id) && <a href={'/api/estudo/arquivo?id=' + estudoDo.get(l.id)} className="block text-xs font-medium text-blue-700 underline">Baixar o estudo de mercado</a>}
                               {/* 15/11: Atualizar = registrar/remarcar visita, visita feita, novo contato, arquivar */}
                               {!ehProp && !fechado && <AtualizarLead id={l.id} nome={l.nome || ''} visita={vis ?? null} hoje={hoje} />}
+                              {/* 17/11: captação — agendar/remarcar V1 e V2, etapas, novo contato e encerrar */}
+                              {ehProp && !fechado && <AtualizarCaptacao id={l.id} nome={l.nome || ''} ultima={nv >= 0 ? ETAPAS_CAP[nv].k : ''} hoje={hoje} />}
                             </td>
                             <td className="py-2 pr-3 text-slate-600">{INTENCAO[l.intencao ?? ''] ?? (l.intencao || '—')}</td>
                             <td className="py-2 pr-3 text-slate-600">
