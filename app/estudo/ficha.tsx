@@ -7,6 +7,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { gerarPdfDaFicha } from '@/app/representacao/actions';
 
 const EVA_PHONE = '5511930837789';
 const DRAFT_KEY = 'ficha_eva_draft';
@@ -549,6 +550,7 @@ export default function Ficha() {
                 })}
               </div>
               {sec.hint && <div className="fe-hint"><span>💡</span><span>{sec.hint}</span></div>}
+              {sec.destaque && <ContratoPdf tipo={tipo} vals={vals} />}
             </section>
           ))}
         </form>
@@ -588,6 +590,48 @@ type Aviso = { tom: 'ok' | 'alerta' | 'erro'; texto: string; link?: { href: stri
 
 // 14/11: quando a busca automática não acha o SQL, o corretor procura no site da Prefeitura (CIT),
 // que lista as ruas com esse nome e, escolhida a rua e digitado o número, mostra o SQL de cada unidade.
+// 17/11: PDF do contrato de representação direto da ficha, com o que já foi preenchido (para conferir
+// ou imprimir). O envio para assinatura continua em "Contrato de representação".
+const CT_PDF = /^(ct[234]?_[a-z_]+|prop_nome|prop_cel|endereco|bairro|sql|conjunto|casa_tipo|sala_tipo)$/;
+function ContratoPdf({ tipo, vals }: { tipo: Tipo; vals: Record<string, Valor> }) {
+  const [gerando, setGerando] = useState(false);
+  const [erro, setErro] = useState('');
+  const [pdf, setPdf] = useState<{ href: string; nome: string } | null>(null);
+  async function gerar() {
+    setErro('');
+    setGerando(true);
+    const d: Record<string, string> = {};
+    for (const [k, v] of Object.entries(vals)) {
+      if (!k.startsWith(tipo + '.') || typeof v !== 'string' || !v.trim()) continue;
+      const id = k.slice(tipo.length + 1);
+      if (CT_PDF.test(id)) d[id] = v.trim();
+    }
+    try {
+      const r = await gerarPdfDaFicha(tipo, d);
+      if (!r.ok || !r.pdf) { setErro(r.erro || 'Não consegui gerar o PDF.'); return; }
+      const bytes = Uint8Array.from(atob(r.pdf), (c) => c.charCodeAt(0));
+      const href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+      const nome = 'Contrato de representação - ' + (d.endereco || 'imóvel').replace(/[\\/:*?"<>|]/g, '').slice(0, 60).trim() + '.pdf';
+      if (pdf) URL.revokeObjectURL(pdf.href);
+      setPdf({ href, nome });
+      const a = document.createElement('a');
+      a.href = href; a.download = nome; document.body.appendChild(a); a.click(); a.remove();
+    } catch {
+      setErro('Não consegui gerar o PDF agora. Tente de novo em instantes.');
+    } finally {
+      setGerando(false);
+    }
+  }
+  return (
+    <div className="fe-ctpdf">
+      <button className="fe-gen" type="button" onClick={gerar} disabled={gerando}>{gerando ? 'Gerando o PDF…' : 'Gerar PDF do contrato'}</button>
+      <p className="fe-snote">Para conferir ou imprimir. Para o PDF precisa: nome e CPF (ou razão social e CNPJ), endereço e bairro, valor, matrícula e cartório. Para enviar para assinatura, use “Contrato de representação”.</p>
+      {pdf && <p className="fe-ctok">PDF baixado. <a href={pdf.href} download={pdf.nome}>Baixar de novo</a></p>}
+      {erro && <p className="fe-cterr">{erro}</p>}
+    </div>
+  );
+}
+
 function linkCit(endereco: string): { href: string; rotulo: string } {
   const nome = String(endereco || '').split(/[,\d]/)[0]
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()
@@ -982,6 +1026,12 @@ const CSS = `
 .fe section.fe-ct .fe-in{background:var(--card)}
 .fe section.fe-ct .fe-yn button{background:var(--card)}
 .fe section.fe-ct .fe-yn button[aria-pressed="true"]{background:var(--on)}
+.fe-ctpdf{margin-top:16px;border-top:1px solid var(--line);padding-top:16px}
+.fe-ctpdf .fe-gen{width:100%;flex:none}
+.fe-ctpdf .fe-snote{margin:8px 0 0}
+.fe-ctok{margin:8px 0 0;font-size:13px;color:var(--wa);font-weight:600}
+.fe-ctok a{color:var(--navy)}
+.fe-cterr{margin:8px 0 0;background:#FDECEC;color:var(--danger);border-radius:9px;padding:9px 12px;font-size:13px}
 .fe-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0 14px}
 .fe-f{min-width:0}
 .fe-f.full{grid-column:1/-1}
