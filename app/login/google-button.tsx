@@ -1,10 +1,26 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/client';
 
 export default function GoogleButton({ next }: { next: string }) {
   const [carregando, setCarregando] = useState(false);
+
+  // 17/11: no app instalado (PWA) e ao voltar do Google pelo "voltar", a página era restaurada com o botão
+  // travado em "Redirecionando…" e desabilitado. Destrava quando a página volta a aparecer e, por garantia,
+  // depois de 12 s sem sair da página.
+  useEffect(() => {
+    const destravar = () => setCarregando(false);
+    const aoVoltar = () => { if (document.visibilityState === 'visible') destravar(); };
+    window.addEventListener('pageshow', destravar);
+    document.addEventListener('visibilitychange', aoVoltar);
+    return () => { window.removeEventListener('pageshow', destravar); document.removeEventListener('visibilitychange', aoVoltar); };
+  }, []);
+  useEffect(() => {
+    if (!carregando) return;
+    const t = setTimeout(() => setCarregando(false), 12_000);
+    return () => clearTimeout(t);
+  }, [carregando]);
 
   async function entrar() {
     setCarregando(true);
