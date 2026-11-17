@@ -81,7 +81,7 @@ const INTENCAO: Record<string, string> = {
 
 type Atr = { lead_id: string; corretor_phone: string; resposta: string | null; oferecido_em: string | null; prazo_em: string | null; respondido_em: string | null };
 type LeadMin = { id: string; telefone: string | null; nome: string | null; status: string; intencao: string | null; corretor_phone: string | null; atribuido_em: string | null; feito_em: string | null; created_at: string; fonte: string | null };
-type Funil = { id: string; endereco: string | null; valor: number | null; visita_agendada: boolean; proposta: boolean };
+type Funil = { id: string; endereco: string | null; valor: number | null; visita_agendada: boolean; visitou: boolean; proposta: boolean };
 
 // comoAdmin: o administrador vendo o funil de um corretor ("Ver como corretor").
 export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK }: { cor: CorretorDaPessoa | null; nome: string; periodo: string; comoAdmin?: boolean; seletor?: React.ReactNode; funilK?: string }) {
@@ -132,7 +132,7 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
       }
       if (ids.length) {
         const { rows } = await pool.query<Funil>(
-          `select id, endereco, valor, visita_agendada, proposta from public.v_painel_sdr_funil where id = any($1::uuid[])`,
+          `select id, endereco, valor, visita_agendada, visitou, proposta from public.v_painel_sdr_funil where id = any($1::uuid[])`,
           [ids]
         );
         funil = new Map(rows.map((r) => [r.id, { ...r, valor: r.valor == null ? null : Number(r.valor) }]));
@@ -161,7 +161,9 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
   const semResposta = [...ofertados].filter((id) => !meusIds.has(id) && !recusou.has(id)).length;
 
   const contato = (l: LeadMin) => !!l.feito_em || !!funil.get(l.id)?.visita_agendada || !!funil.get(l.id)?.proposta;
-  const visita = (l: LeadMin) => !!funil.get(l.id)?.visita_agendada || !!funil.get(l.id)?.proposta;
+  const visita = (l: LeadMin) => !!funil.get(l.id)?.visita_agendada || !!funil.get(l.id)?.visitou || !!funil.get(l.id)?.proposta;
+  // 17/11: visita realizada = "Visita feita" registrada (visitou ou visitou e fez proposta)
+  const visitou = (l: LeadMin) => !!funil.get(l.id)?.visitou || !!funil.get(l.id)?.proposta;
   const proposta = (l: LeadMin) => !!funil.get(l.id)?.proposta;
   const ehProp = fk === 'prop_venda' || fk === 'prop_locacao';
   const nivel = (l: LeadMin) => nivelCap.get(l.id) ?? -1;
@@ -179,6 +181,7 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
         ? []
         : [
             { rotulo: 'Visita agendada', n: comVoce.filter(visita).length, base: baseCom },
+            { rotulo: 'Visita realizada', n: comVoce.filter(visitou).length, base: baseCom },
             { rotulo: 'Proposta', n: comVoce.filter(proposta).length, base: baseCom },
           ]),
   ];
@@ -302,7 +305,7 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
                         const fechado = ['arquivado', 'encerrado'].includes(l.status);
                         const andamento = fechado ? (l.status === 'arquivado' ? 'Arquivado' : 'Encerrado') : ehProp
                           ? nv >= 0 ? ETAPAS_CAP[nv].rotulo : l.feito_em ? 'Contato feito' : 'Aguardando contato'
-                          : proposta(l) ? 'Proposta' : visita(l) ? 'Visita agendada' : contato(l) ? 'Contato feito' : 'Aguardando contato';
+                          : proposta(l) ? 'Proposta' : visitou(l) ? 'Visita realizada' : visita(l) ? 'Visita agendada' : contato(l) ? 'Contato feito' : 'Aguardando contato';
                         const tom = fechado ? 'bg-slate-100 text-slate-600' : (ehProp ? nv >= 0 : proposta(l) || visita(l)) ? 'bg-emerald-100 text-emerald-700' : (ehProp ? !!l.feito_em : contato(l)) ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700';
                         const vis = pend.visita.get(l.id);
                         const lemb = pend.lembrete.get(l.id);
