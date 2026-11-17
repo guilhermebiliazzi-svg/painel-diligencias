@@ -349,7 +349,10 @@ def carregar_primeira_vez():
         vistos, linhas = set(), []
         for nome, cfg in uf.SUCURSAIS.items():
             for origem in ("ilist", "nonstop"):
-                for bloco in uf.blocos_imovel(uf.obter(cfg[origem])):
+                # 17/11: blocos_ilist inclui o iList da Homemark, assumido pela Ville
+                blocos = (uf.blocos_ilist(cfg) if origem == "ilist"
+                          else uf.blocos_imovel(uf.obter(cfg[origem])))
+                for bloco in blocos:
                     m = uf.RE_COD.search(bloco)
                     if not m:
                         continue
