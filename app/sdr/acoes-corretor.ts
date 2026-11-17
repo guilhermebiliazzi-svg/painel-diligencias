@@ -108,3 +108,30 @@ export async function novoContato(leadId: string, data: string, hora: string, no
   const dia = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long', day: '2-digit', month: '2-digit' }).format(quando);
   return { ok: true, msg: `Combinado: a Eva te lembra de ${(a.lead.nome || 'o cliente').split(' ')[0]} ${dia}, às ${h}h. Até lá ela não manda nada ao cliente nem te cobra.` };
 }
+
+/** 17/11: etapa da captação (proprietário) pelo painel: V1/V2 agendada ou remarcada (com dia e hora), V1/V2 realizada,
+ *  contrato assinado ou encerrada (cancelada, com motivo). O n8n (SDR-12 → SDR-02) grava do mesmo jeito que os botões
+ *  da Eva no WhatsApp: etapa, agenda do captador e aviso ao Guilherme no contrato/encerramento. */
+const ETAPAS_CAPTACAO = ['v1_agendada', 'v1_realizada', 'v2_agendada', 'v2_realizada', 'contrato_assinado', 'cancelada'];
+export async function captacaoEtapa(leadId: string, etapa: string, data: string, hora: string, minuto: string, nota: string): Promise<ResAcao> {
+  if (!ETAPAS_CAPTACAO.includes(etapa)) return { ok: false, erro: 'Etapa inválida.' };
+  let quando = '';
+  if (/_agendada$/.test(etapa)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) return { ok: false, erro: 'Escolha o dia.' };
+    const h = Number(hora); const m = Number(minuto);
+    if (!Number.isInteger(h) || h < 7 || h > 21 || ![0, 15, 30, 45].includes(m)) return { ok: false, erro: 'Escolha o horário.' };
+    const d = new Date(`${data}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00-03:00`);
+    if (isNaN(d.getTime()) || d.getTime() < Date.now() - 6 * 3600e3) return { ok: false, erro: 'Escolha um horário a partir de hoje.' };
+    if (d.getTime() > Date.now() + 120 * 864e5) return { ok: false, erro: 'Escolha uma data em até 4 meses.' };
+    quando = d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+  }
+  const obs = String(nota || '').replace(/\s+/g, ' ').replace(/[|]/g, '/').trim().slice(0, 250);
+  if (etapa === 'cancelada' && obs.length < 3) return { ok: false, erro: 'Escolha o motivo.' };
+  const a = await autorizar(leadId);
+  if ('erro' in a) return { ok: false, erro: a.erro };
+  const { data: l } = await supabaseAdmin().from('sdr_leads').select('fonte').eq('id', leadId).maybeSingle();
+  if (!/^capta/i.test(String((l as { fonte: string | null } | null)?.fonte ?? ''))) return { ok: false, erro: 'Este lead não é de captação.' };
+  const r = await n8n({ tipo: 'captacao', lead_id: leadId, etapa, quando, nota: obs, corretor_phone: a.lead.corretor_phone, por: a.email });
+  if (r.ok) revalidatePath('/sdr');
+  return r;
+}
