@@ -299,23 +299,52 @@ async function lerBuscaSite(site: string[], area: number | null, tolerancia = 0.
 const RENDER = 'https://eva-estudo-render.onrender.com';
 const MAX_OUTROS = 6;
 
+// 17/11: portais que bloqueiam a leitura simples (Imovelweb, Zap, VivaReal, QuintoAndar) vão pelo mesmo leitor da
+// Eva no n8n (Jina e, se bloquear, scrape.do), em modo só leitura — sem indicação nem aviso ao corretor do anúncio.
+const PORTAL_DIFICIL = /^https:\/\/(www\.)?(imovelweb|zapimoveis|vivareal|quintoandar)\./i;
+const WEBHOOK_LER = 'https://villejds.app.n8n.cloud/webhook/painel-ler-anuncio';
+const CHAVE_LER = 'ville-sdr-painel-7c2e9a41f0b84d6e';
+
+async function lerPeloN8n(link: string, subject: { predio_curto?: string; bairro?: string }): Promise<Record<string, unknown> | null> {
+  try {
+    const r = await fetch(WEBHOOK_LER, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-chave': CHAVE_LER },
+      body: JSON.stringify({ url: link, subject }),
+      signal: AbortSignal.timeout(100_000),
+      cache: 'no-store',
+    });
+    const j = (await r.json().catch(() => ({}))) as { amostra?: Record<string, unknown> | null };
+    return j.amostra ? { ...j.amostra, link } : null;
+  } catch {
+    return null;
+  }
+}
+
 async function lerOutrosPortais(links: string[], area: number | null, subject: { predio_curto?: string; bairro?: string }) {
   const vazio = { outros: [] as Anuncio[], outros_falha: [] as string[], outros_fora: 0 };
   if (!links.length) return vazio;
   let lidos: Record<string, unknown>[] = [];
-  try {
-    const r = await fetch(RENDER + '/amostras', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ avaliando: null, urls: links, subject }), // sem phone: não grava sessão da EVA
-      signal: AbortSignal.timeout(95_000),
-      cache: 'no-store',
-    });
-    const j = (await r.json().catch(() => ({}))) as { amostras?: Record<string, unknown>[] };
-    lidos = Array.isArray(j.amostras) ? j.amostras : [];
-  } catch {
-    return { ...vazio, outros_falha: links };
-  }
+  const dificeis = links.filter((l) => PORTAL_DIFICIL.test(l));
+  const simples = links.filter((l) => !PORTAL_DIFICIL.test(l));
+  const pelaRender = async (): Promise<Record<string, unknown>[]> => {
+    if (!simples.length) return [];
+    try {
+      const r = await fetch(RENDER + '/amostras', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ avaliando: null, urls: simples, subject }), // sem phone: não grava sessão da EVA
+        signal: AbortSignal.timeout(95_000),
+        cache: 'no-store',
+      });
+      const j = (await r.json().catch(() => ({}))) as { amostras?: Record<string, unknown>[] };
+      return Array.isArray(j.amostras) ? j.amostras : [];
+    } catch {
+      return [];
+    }
+  };
+  const [daRender, doN8n] = await Promise.all([pelaRender(), Promise.all(dificeis.map((l) => lerPeloN8n(l, subject)))]);
+  lidos = [...daRender, ...doN8n.filter((x): x is Record<string, unknown> => !!x)];
   const num = (v: unknown) => { const m = String(v ?? '').match(/\d+(?:[.,]\d+)?/); const x = m ? Number(m[0].replace(',', '.')) : NaN; return Number.isFinite(x) && x > 0 ? x : null; };
   const out = { ...vazio };
   for (const link of links) {
