@@ -9,6 +9,7 @@ import Resgatar from './resgatar';
 import MensagemEva, { type DestinoMsg } from './mensagem';
 import ArquivarForaPerfil from '../../fora-perfil';
 import Encerrar from './encerrar';
+import AtualizarCaptacao from '../../atualizar-captacao';
 import { statusDasMensagens, enviosDaEva, casarEnvio, rotuloStatus, mensagensAvulsas, casarAvulsa } from '@/lib/wa-status';
 
 export const dynamic = 'force-dynamic';
@@ -166,6 +167,10 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
     dm.janela = (a ?? 0) + (b ?? 0) > 0;
   }));
   const st = STATUS[l.status] ?? { t: l.status, c: 'bg-slate-100 text-slate-700' };
+  // 17/11: captação (proprietário): etapa mais adiantada registrada, para o botão Atualizar captação
+  const ehCaptacao = /^capta/i.test(String(l.fonte ?? ''));
+  const ORDEM_CAP = ['v1_agendada', 'v1_realizada', 'v2_agendada', 'v2_realizada', 'contrato_assinado'];
+  const ultimaCap = ORDEM_CAP[Math.max(-1, ...((etapasCap ?? []) as { etapa: string }[]).map((e) => ORDEM_CAP.indexOf(e.etapa)))] ?? '';
   const aberto = ['aguardando_guilherme', 'em_cascata'].includes(l.status) && !l.corretor_phone;
   // Encaminhar está sempre disponível; fora de "esperando você"/"ofertando" ele reabre o lead.
   const reabre = !aberto;
@@ -271,8 +276,16 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
           imoveisRef={imoveisRef}
         />
 
+        {/* 17/11: lead de captação — etapas V1/V2/contrato, agenda do captador, novo contato e encerrar */}
+        {ehCaptacao && l.corretor_phone && !['arquivado', 'encerrado'].includes(l.status) && (
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="text-sm font-semibold text-slate-900">Captação</h2>
+            <p className="mt-1 text-xs text-slate-500">Registre a V1, a V2 e o contrato como o captador faria pelos botões da Eva. Agendamentos vão para a agenda do captador.</p>
+            <AtualizarCaptacao id={l.id} nome={l.nome || ''} ultima={ultimaCap} hoje={new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date())} rotuloBotao="Atualizar captação" />
+          </section>
+        )}
         {/* 14/11: registrar a visita pelo painel (mesmo formulário do link da Eva) */}
-        {l.corretor_phone && !['arquivado', 'encerrado'].includes(l.status) && (
+        {!ehCaptacao && l.corretor_phone && !['arquivado', 'encerrado'].includes(l.status) && (
           <a href={`/sdr/visita/${l.id}`} className="block w-full rounded-xl bg-emerald-600 px-4 py-3 text-center text-sm font-semibold text-white hover:bg-emerald-700">
             Registrar visita
           </a>
