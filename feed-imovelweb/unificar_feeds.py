@@ -42,7 +42,12 @@ SUCURSAIS = {
         "ilist_extra": [
             {"origem": "homemark",
              "url": "https://feeds.goiconnect.com/RemaxBrazil_Imovelweb/1C94D1D6-CA17-45CE-AEB0-BBAC413D5683/Remax_60227.xml",
-             "so_venda": True},
+             "so_venda": True,
+             # 17/11/2026: excecoes. Locacao da Homemark que entra mesmo assim e
+             # anuncio da Homemark que fica no lugar do da Ville (mesmo imovel,
+             # fotos melhores). Gestor no SDR: Rodrigo Valente (o captador na Ville).
+             "incluir": ["602271002-58"],
+             "preferir": ["602271002-58"]},
         ],
     },
     "alcance": {
@@ -72,7 +77,9 @@ def blocos_ilist(cfg, com_origem=False):
     for extra in cfg.get("ilist_extra", []):
         for bloco in blocos_imovel(obter(extra["url"])):
             if extra.get("so_venda") and operacao_de(bloco) != "VENDA":
-                continue
+                m = RE_COD.search(bloco)
+                if not (m and m.group(1).strip() in extra.get("incluir", ())):
+                    continue
             yield (extra["origem"], bloco) if com_origem else bloco
 
 # Padrao do codigo RE/MAX inserido na descricao do Nonstop.
@@ -1425,10 +1432,24 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                 # imovel ja esta no iList proprio da sucursal, fica o proprio.
                 mesmo = None
                 if cf:
-                    for dono_x, cod_x, chave_x, cf_x in por_fato.get(indice_fato(cf), ()):
+                    for pos_x, (dono_x, cod_x, chave_x, cf_x) in enumerate(
+                            por_fato.get(indice_fato(cf), ())):
                         if dono_x == nome and caracteristicas_compativeis(cf, cf_x):
                             mesmo = cod_x
                             break
+                preferir = next((x.get("preferir", ()) for x in cfg.get("ilist_extra", [])
+                                 if x["origem"] == origem), ())
+                if mesmo and codigo in preferir:
+                    # o anuncio assumido fica no lugar do da sucursal
+                    del carteira[chave_x]
+                    traducao[chave_x] = codigo
+                    carteira[chave] = (nome, bloco)
+                    traducao[chave] = codigo
+                    por_fato[indice_fato(cf)][pos_x] = (nome, codigo, chave, cf)
+                    fatos_carteira[cf] = (nome, codigo)
+                    assumidos += 1
+                    print(f"  iList {origem}: {codigo} fica no lugar de {mesmo} ({nome})")
+                    continue
                 if mesmo:
                     assumidos_repetidos += 1
                     traducao[chave] = mesmo
