@@ -37,6 +37,7 @@ type Lead = {
   motivo_arquivamento: string | null;
   corretor: string | null;
   visita_agendada: boolean;
+  visitou: boolean; // 17/11: visita realizada (visitou ou visitou e fez proposta)
   proposta: boolean;
   min_ate_cartao: number | null;
   min_ate_atribuicao: number | null;
@@ -311,8 +312,8 @@ async function FunilCliente({ dias, ate = null, intencao }: { dias: number | nul
   // "Corretor assumiu" = lead com corretor atribuído (o mesmo critério da tabela de aceite).
   const assumiu = (l: Lead) => !!l.atribuido_em && !!l.corretor_phone;
   const cartao = (l: Lead) => !!l.cartao_enviado_em || assumiu(l);
-  const contato = (l: Lead) => assumiu(l) && (l.feito || l.visita_agendada || l.proposta);
-  const visita = (l: Lead) => assumiu(l) && (l.visita_agendada || l.proposta);
+  const contato = (l: Lead) => assumiu(l) && (l.feito || l.visita_agendada || l.visitou || l.proposta);
+  const visita = (l: Lead) => assumiu(l) && (l.visita_agendada || l.visitou || l.proposta);
   const itensDe = (xs: Lead[]): ItemEtapa[] => xs.map((l) => ({ id: l.id, href: '/sdr/lead/' + l.id, nome: (l.nome || 'Cliente') + (l.intencao ? '' : ' (intenção não informada)'),
     sub: [l.corretor, l.endereco, fmtData.format(new Date(l.created_at))].filter(Boolean).join(' · ') }));
   const etapa = (rotulo: string, f: (l: Lead) => boolean): Etapa => { const xs = sdr.filter(f); return { rotulo, n: xs.length, itens: itensDe(xs) }; };
@@ -322,12 +323,13 @@ async function FunilCliente({ dias, ate = null, intencao }: { dias: number | nul
     etapa('Corretor assumiu', assumiu),
     etapa('Contato feito', contato),
     etapa('Visita agendada', visita),
+    etapa('Visita realizada', (l) => assumiu(l) && (l.visitou || l.proposta)),
     etapa('Proposta', (l) => assumiu(l) && l.proposta),
   ];
   const responderam = sdr.filter((l) => l.respondeu).length;
   // Funil dos leads que foram direto ao gestor (imóvel da carteira Ville) — 23/10.
-  const dContato = (l: Lead) => l.feito || l.visita_agendada || l.proposta;
-  const dVisita = (l: Lead) => l.visita_agendada || l.proposta;
+  const dContato = (l: Lead) => l.feito || l.visita_agendada || l.visitou || l.proposta;
+  const dVisita = (l: Lead) => l.visita_agendada || l.visitou || l.proposta;
   const itensDir = (xs: Lead[]): ItemEtapa[] => xs.map((l) => ({ id: l.id, href: '/sdr/lead/' + l.id, nome: (l.nome || 'Cliente') + (l.intencao ? '' : ' (intenção não informada)'),
     sub: [l.corretor, l.endereco, fmtData.format(new Date(l.created_at))].filter(Boolean).join(' · ') }));
   const etapaDir = (rotulo: string, f: (l: Lead) => boolean): Etapa => { const xs = diretos.filter(f); return { rotulo, n: xs.length, itens: itensDir(xs) }; };
@@ -337,13 +339,14 @@ async function FunilCliente({ dias, ate = null, intencao }: { dias: number | nul
     etapaDir('Cliente respondeu à Eva', (l) => l.respondeu),
     etapaDir('Gestor fez contato', dContato),
     etapaDir('Visita agendada', dVisita),
+    etapaDir('Visita realizada', (l) => l.visitou || l.proposta),
     etapaDir('Proposta', (l) => l.proposta),
   ];
-  const porGestor = new Map<string, { recebidos: number; contato: number; visita: number; proposta: number }>();
+  const porGestor = new Map<string, { recebidos: number; contato: number; visita: number; realizada: number; proposta: number }>();
   for (const l of diretos) {
     const g = l.corretor || 'sem gestor cadastrado';
-    const r = porGestor.get(g) ?? { recebidos: 0, contato: 0, visita: 0, proposta: 0 };
-    r.recebidos++; if (dContato(l)) r.contato++; if (dVisita(l)) r.visita++; if (l.proposta) r.proposta++;
+    const r = porGestor.get(g) ?? { recebidos: 0, contato: 0, visita: 0, realizada: 0, proposta: 0 };
+    r.recebidos++; if (dContato(l)) r.contato++; if (dVisita(l)) r.visita++; if (l.visitou || l.proposta) r.realizada++; if (l.proposta) r.proposta++;
     porGestor.set(g, r);
   }
   const tabGestor = [...porGestor.entries()].sort((a, b) => b[1].recebidos - a[1].recebidos);
@@ -438,6 +441,7 @@ async function FunilCliente({ dias, ate = null, intencao }: { dias: number | nul
                       <th className="py-1 pr-2 text-right font-medium">Leads</th>
                       <th className="py-1 pr-2 text-right font-medium">Contato</th>
                       <th className="py-1 pr-2 text-right font-medium">Visita</th>
+                      <th className="py-1 pr-2 text-right font-medium">Realizada</th>
                       <th className="py-1 text-right font-medium">Proposta</th>
                     </tr>
                   </thead>
@@ -448,6 +452,7 @@ async function FunilCliente({ dias, ate = null, intencao }: { dias: number | nul
                         <td className="py-1.5 pr-2 text-right tabular-nums">{r.recebidos}</td>
                         <td className="py-1.5 pr-2 text-right tabular-nums text-emerald-700">{r.contato}</td>
                         <td className="py-1.5 pr-2 text-right tabular-nums">{r.visita}</td>
+                        <td className="py-1.5 pr-2 text-right tabular-nums">{r.realizada}</td>
                         <td className="py-1.5 text-right tabular-nums">{r.proposta}</td>
                       </tr>
                     ))}
