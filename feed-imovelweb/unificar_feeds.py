@@ -36,12 +36,14 @@ SUCURSAIS = {
         "nonstop": "https://www.usenonstop.com/integracoes/imovelweb/remaxville",
         "saida":   "remax_ville.xml",
         "vagas":   2742, "cota_home": 67, "cota_destacado": 175,
-    },
-    "homemark": {
-        "ilist":   "https://feeds.goiconnect.com/RemaxBrazil_Imovelweb/1C94D1D6-CA17-45CE-AEB0-BBAC413D5683/Remax_60227.xml",
-        "nonstop": "https://www.usenonstop.com/integracoes/imovelweb/homemark",
-        "saida":   "remax_homemark.xml",
-        "vagas":   2742, "cota_home": 67, "cota_destacado": 175,
+        # 17/11/2026 (Guilherme): a Homemark saiu da conta compartilhada. O iList
+        # dela continua e entra como CARTEIRA DA VILLE, so os imoveis de venda
+        # (locacao fica de fora). O Nonstop da Homemark nao entra mais.
+        "ilist_extra": [
+            {"origem": "homemark",
+             "url": "https://feeds.goiconnect.com/RemaxBrazil_Imovelweb/1C94D1D6-CA17-45CE-AEB0-BBAC413D5683/Remax_60227.xml",
+             "so_venda": True},
+        ],
     },
     "alcance": {
         "ilist":   "https://feeds.goiconnect.com/RemaxBrazil_Imovelweb/6EA466C8-B177-4712-9626-DC8315C4EE5B/Remax_60226.xml",
@@ -52,6 +54,26 @@ SUCURSAIS = {
 }
 
 DIR_SAIDA = os.environ.get("DIR_SAIDA", "./saida")
+
+
+def urls_ilist(cfg):
+    """Todas as URLs de iList da sucursal: a propria e as que ela assumiu."""
+    return [cfg["ilist"]] + [x["url"] for x in cfg.get("ilist_extra", [])]
+
+
+def blocos_ilist(cfg, com_origem=False):
+    """Anuncios do iList da sucursal, incluindo os iLists que ela assumiu.
+
+    17/11/2026: o iList da Homemark entra como carteira da Ville, so venda.
+    Com com_origem=True devolve (origem, bloco); a propria sucursal e 'propria'.
+    """
+    for bloco in blocos_imovel(obter(cfg["ilist"])):
+        yield ("propria", bloco) if com_origem else bloco
+    for extra in cfg.get("ilist_extra", []):
+        for bloco in blocos_imovel(obter(extra["url"])):
+            if extra.get("so_venda") and operacao_de(bloco) != "VENDA":
+                continue
+            yield (extra["origem"], bloco) if com_origem else bloco
 
 # Padrao do codigo RE/MAX inserido na descricao do Nonstop.
 # Aceita "Codigo"/"Código", com ou sem dois-pontos, no fim ou no meio do texto.
@@ -391,11 +413,10 @@ _COMPARTILHADOS_PRONTO = []
 
 def _chaves_da_sucursal(cfg):
     chaves = set()
-    for url in (cfg["ilist"], cfg["nonstop"]):
-        for bloco in blocos_imovel(obter(url)):
-            m = RE_COD.search(bloco)
-            if m:
-                chaves.add(chave_compartilhada(m.group(1).strip()))
+    for bloco in list(blocos_ilist(cfg)) + list(blocos_imovel(obter(cfg["nonstop"]))):
+        m = RE_COD.search(bloco)
+        if m:
+            chaves.add(chave_compartilhada(m.group(1).strip()))
     return chaves
 
 
@@ -645,7 +666,7 @@ def processar(nome, cfg, escolhas=None, compartilhados=None):
     # o mesmo anuncio aparece no Nonstop como remaxville#NZ35X.
     p_ilist = obter(cfg["ilist"])
     codigos_ilist, sufixos_ilist = set(), set()
-    for bloco in blocos_imovel(p_ilist):
+    for bloco in blocos_ilist(cfg):
         m = RE_COD.search(bloco)
         if not m:
             continue
@@ -705,7 +726,7 @@ def processar(nome, cfg, escolhas=None, compartilhados=None):
 
     # 3. levanta codigo e preco de tudo que vai entrar, para decidir os destaques
     itens = []
-    for bloco in blocos_imovel(p_ilist):
+    for bloco in blocos_ilist(cfg):
         m = RE_COD.search(bloco)
         if m:
             itens.append((m.group(1).strip(), preco_de(bloco)))
@@ -777,7 +798,7 @@ def processar(nome, cfg, escolhas=None, compartilhados=None):
     with open(destino, "w", encoding="utf-8") as out:
         out.write('<?xml version="1.0" encoding="UTF-8"?>\n<OpenNavent>\n<Imoveis>\n')
 
-        for bloco in blocos_imovel(p_ilist):          # iList integral
+        for bloco in blocos_ilist(cfg):          # iList integral
             escrever(out, bloco, "i")
 
         for bloco in blocos_imovel(p_nonstop):        # Nonstop filtrado
@@ -883,7 +904,8 @@ RE_COD_IMOBILIARIA = re.compile(
     r"<codigoImobiliaria>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</codigoImobiliaria>", re.S)
 
 # Codigo RE/MAX de cada sucursal, como vem no bloco <publicador> do iList.
-IMOBILIARIA_SUCURSAL = {"60124": "ville", "60227": "homemark", "60226": "alcance"}
+# 17/11/2026: a carteira da Homemark (60227) passou para a Ville.
+IMOBILIARIA_SUCURSAL = {"60124": "ville", "60227": "ville", "60226": "alcance"}
 
 
 def dono_declarado(bloco):
@@ -1117,8 +1139,10 @@ COTAS_SUCURSAL = {
     #   O destaque nao mudou: 175 x 3 = 525.
     # Os totais da conta unica saem da soma desta tabela — nao existe numero
     # de cota escrito em nenhum outro lugar deste arquivo.
-    "ville":    {"HOME": 100, "DESTACADO": 175},
-    "homemark": {"HOME": 100, "DESTACADO": 175},
+    # 17/11/2026: a Homemark saiu da conta compartilhada e a Ville assumiu o
+    #   lugar dela (paga a parte dela): a cota da Homemark passa para a Ville.
+    #   O pacote nao mudou: 300 superdestaques e 525 destaques.
+    "ville":    {"HOME": 200, "DESTACADO": 350},
     "alcance":  {"HOME": 100, "DESTACADO": 175},
 }
 
@@ -1378,9 +1402,11 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
     # esta no conflito. Ate 19/09 isso virava roleta; agora vai para a dona.
     conflitos_terceira_sucursal = 0
 
+    assumidos = 0
+    assumidos_repetidos = 0
     for nome, cfg in SUCURSAIS.items():
         n = 0
-        for bloco in blocos_imovel(obter(cfg["ilist"])):
+        for origem, bloco in blocos_ilist(cfg, com_origem=True):
             m = RE_COD.search(bloco)
             if not m:
                 continue
@@ -1394,6 +1420,22 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
                 continue
 
             cf = chave_de_fato(bloco)
+            if origem != "propria":
+                # 17/11/2026: iList assumido (Homemark -> Ville). Se o mesmo
+                # imovel ja esta no iList proprio da sucursal, fica o proprio.
+                mesmo = None
+                if cf:
+                    for dono_x, cod_x, chave_x, cf_x in por_fato.get(indice_fato(cf), ()):
+                        if dono_x == nome and caracteristicas_compativeis(cf, cf_x):
+                            mesmo = cod_x
+                            break
+                if mesmo:
+                    assumidos_repetidos += 1
+                    traducao[chave] = mesmo
+                    print(f"  iList {origem}: {codigo} ja esta no iList da {nome} "
+                          f"como {mesmo}; fica o da {nome}")
+                    continue
+                assumidos += 1
             # So e conflito quando as sucursais sao DIFERENTES. Dentro da mesma,
             # dois anuncios com o mesmo endereco, area, comodos e preco sao dois
             # apartamentos iguais no mesmo predio — o CRM deu codigos distintos
@@ -1489,6 +1531,9 @@ def processar_unificado(escolhas=None, escolhas_por_sucursal=None):
             else:
                 sem_chave_fato += 1
         print(f"  iList {nome:<9} {n} imoveis")
+    if assumidos or assumidos_repetidos:
+        print(f"  iList assumido (Homemark, so venda): {assumidos} entraram, "
+              f"{assumidos_repetidos} ja estavam no iList da Ville")
 
     print(f"  carteira propria ... {len(carteira)} imoveis "
           f"({sem_chave_fato} sem dado suficiente para cruzar com o Nonstop)")
