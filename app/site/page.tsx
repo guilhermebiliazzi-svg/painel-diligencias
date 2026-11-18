@@ -283,6 +283,8 @@ function QuemConverteu({ lista }: { lista: Convertido[] }) {
                   </div>
                 ) : c.canal === 'Telefone' ? (
                   <p className="text-xs text-slate-500">Clicou para ligar — a ligação não é registrada, então não há como saber quem é.</p>
+                ) : c.canal === 'Formulário' ? (
+                  <p className="text-xs font-semibold text-amber-700">Preencheu o formulário, mas não virou lead no SDR.</p>
                 ) : (
                   <p className="text-xs font-semibold text-amber-700">Conversou com a Eva, mas não virou lead no SDR.</p>
                 )}
