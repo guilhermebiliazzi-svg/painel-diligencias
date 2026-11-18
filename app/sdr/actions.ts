@@ -239,8 +239,19 @@ export async function ofertarCaptacao(captacaoId: string, phones: string[]): Pro
   const fila = await telefonesValidos(phones);
   if (!fila.length) return { ok: false, erro: 'Escolha pelo menos um corretor.' };
   const aluguel = /^alug/i.test(String(c.intencao ?? ''));
+  // 18/11: o celular já tem outro lead ativo (ex.: o proprietário também perguntou de um imóvel como comprador).
+  // O índice "um lead ativo por telefone" não muda (ON CONFLICT do SDR); a captação entra com '<celular>#b'
+  // (mesma regra do estudo de mercado: os dígitos continuam iguais).
+  let telLead = tel55;
+  const { data: ocup } = await sb.from('sdr_leads').select('telefone').like('telefone', tel55 + '%').not('status', 'in', '(encerrado,arquivado,direto)');
+  const usados = new Set(((ocup ?? []) as { telefone: string }[]).map((x) => x.telefone));
+  if (usados.has(tel55)) {
+    const l = 'bcdefghijkmnpqrstuvwxyz'.split('').find((x) => !usados.has(tel55 + '#' + x));
+    if (!l) return { ok: false, erro: 'Esse celular já tem leads ativos demais. Fale com o suporte.' };
+    telLead = tel55 + '#' + l;
+  }
   const { data: novo, error } = await sb.from('sdr_leads').insert({
-    telefone: tel55, nome: c.nome || null, origem: 'campanha', fonte: 'Captação — landing Anuncie na REMAX',
+    telefone: telLead, nome: c.nome || null, origem: 'campanha', fonte: 'Captação — landing Anuncie na REMAX',
     intencao: aluguel ? 'aluguel' : 'venda', tipologia: 'captação (proprietário): ' + (c.tipo || 'imóvel'),
     bairros: c.bairro ? [c.bairro] : [], imovel_anuncio_endereco: c.endereco || null, c2s_lead_id: c.c2s_lead_id || null,
     qualificado: true, temperatura: 'quente', status: 'aguardando_guilherme',
