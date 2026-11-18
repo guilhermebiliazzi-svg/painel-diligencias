@@ -43,6 +43,8 @@ const REGRAS: Regra[] = [
   { re: /^\/postagens(\/|$)/, perm: 'postagens', legacy: false },
   { re: /^\/estudo(\/|$)/, perm: 'estudo', legacy: false },
   { re: /^\/representacao(\/|$)/, perm: 'representacao', legacy: false },
+  // 18/11: carteira do corretor (imóveis representados) — mesma permissão do contrato de representação
+  { re: /^\/carteira(\/|$)/, perm: 'representacao', legacy: false },
   { re: /^\/posicionamento(\/|$)/, perm: 'posicionamento', legacy: false },
   { re: /^\/$/, perm: 'any', legacy: false },
 ];
