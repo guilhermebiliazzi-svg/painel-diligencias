@@ -44,8 +44,12 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
     const cor = await corretorDaPessoa(perfil.email);
     const k8 = String(cor?.phone ?? '').replace(/\D/g, '').slice(-8);
     if (k8.length === 8) {
-      const { data: meus } = await sb.from('sdr_leads').select('id,telefone,created_at').like('corretor_phone', '%' + k8).not('atribuido_em', 'is', null).limit(2000);
-      const ls = (meus ?? []) as { id: string; telefone: string | null; created_at: string }[];
+      // 18/11: além dos leads atribuídos, os que vieram direto ao corretor do imóvel (sem fila, sem atribuido_em),
+      // com a mesma regra do Meu funil — antes a Samia (leads "direto" da carteira) não via as conversas.
+      const { data: meus } = await sb.from('sdr_leads').select('id,telefone,created_at,status,atribuido_em,corretor_phone').like('corretor_phone', '%' + k8).limit(3000);
+      const PRE = ['aguardando_cliente', 'em_qualificacao', 'qualificado', 'em_cascata', 'aguardando_guilherme'];
+      const ls = ((meus ?? []) as { id: string; telefone: string | null; created_at: string; status: string; atribuido_em: string | null; corretor_phone: string | null }[])
+        .filter((l) => String(l.corretor_phone ?? '').replace(/\D/g, '').slice(-8) === k8 && (!!l.atribuido_em || !PRE.includes(l.status)));
       const d8 = dig.slice(-8);
       if (ls.some((l) => String(l.telefone ?? '').replace(/\D/g, '').slice(-8) === d8)) viaCorretor = true;
       else if (ls.length) {
