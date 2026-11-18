@@ -239,19 +239,31 @@ export async function ofertarCaptacao(captacaoId: string, phones: string[]): Pro
   const fila = await telefonesValidos(phones);
   if (!fila.length) return { ok: false, erro: 'Escolha pelo menos um corretor.' };
   const aluguel = /^alug/i.test(String(c.intencao ?? ''));
-  // 18/11: o celular já tem outro lead ativo (ex.: o proprietário também perguntou de um imóvel como comprador).
-  // O índice "um lead ativo por telefone" não muda (ON CONFLICT do SDR); a captação entra com '<celular>#b'
-  // (mesma regra do estudo de mercado: os dígitos continuam iguais).
-  let telLead = tel55;
-  const { data: ocup } = await sb.from('sdr_leads').select('telefone').like('telefone', tel55 + '%').not('status', 'in', '(encerrado,arquivado,direto)');
-  const usados = new Set(((ocup ?? []) as { telefone: string }[]).map((x) => x.telefone));
-  if (usados.has(tel55)) {
-    const l = 'bcdefghijkmnpqrstuvwxyz'.split('').find((x) => !usados.has(tel55 + '#' + x));
-    if (!l) return { ok: false, erro: 'Esse celular já tem leads ativos demais. Fale com o suporte.' };
-    telLead = tel55 + '#' + l;
+  // 18/11: o celular já tem lead ativo (ex.: o proprietário escreveu pelo site e a Eva abriu um lead comum) — junta
+  // tudo nesse lead, transformando-o na captação. Se o lead já está com corretor, não mexe e avisa.
+  const { data: ativos } = await sb.from('sdr_leads').select('id,status,fonte,tipologia,resumo,bairros,imovel_anuncio_endereco')
+    .like('telefone', tel55 + '%').not('status', 'in', '(encerrado,arquivado,direto)').order('created_at', { ascending: false }).limit(5);
+  const atual = ((ativos ?? []) as { id: string; status: string; fonte: string | null; tipologia: string | null; resumo: string | null; bairros: string[] | null; imovel_anuncio_endereco: string | null }[])[0];
+  if (atual) {
+    const jaCaptacao = /^capta/i.test(String(atual.fonte ?? '')) || /^capta/i.test(String(atual.tipologia ?? ''));
+    if (!jaCaptacao) {
+      if (!['aguardando_guilherme', 'aguardando_cliente', 'em_qualificacao', 'qualificado', 'em_cascata'].includes(atual.status)) {
+        return { ok: false, erro: 'Esse celular já tem um lead com corretor. Abra o lead dele e decida por lá.' };
+      }
+      const resumo = 'Proprietário quer ' + (aluguel ? 'alugar' : 'vender') + ' o imóvel' + (c.endereco ? ' (' + c.endereco + ')' : '') + '.';
+      const { error: eu } = await sb.from('sdr_leads').update({
+        origem: 'campanha', fonte: 'Captação — landing Anuncie na REMAX', intencao: aluguel ? 'aluguel' : 'venda',
+        tipologia: 'captação (proprietário): ' + (c.tipo || 'imóvel'),
+        bairros: c.bairro ? [c.bairro] : (atual.bairros ?? []), imovel_anuncio_endereco: c.endereco || atual.imovel_anuncio_endereco,
+        c2s_lead_id: c.c2s_lead_id && c.c2s_lead_id !== 'direto' ? c.c2s_lead_id : undefined, qualificado: true, temperatura: 'quente',
+        resumo: [resumo, atual.resumo].filter(Boolean).join('\n'), updated_at: new Date().toISOString(),
+      }).eq('id', atual.id);
+      if (eu) return { ok: false, erro: 'Não foi possível juntar ao lead existente: ' + eu.message };
+    }
+    return { ...(await ofertar(atual.id, phones)), leadId: atual.id };
   }
   const { data: novo, error } = await sb.from('sdr_leads').insert({
-    telefone: telLead, nome: c.nome || null, origem: 'campanha', fonte: 'Captação — landing Anuncie na REMAX',
+    telefone: tel55, nome: c.nome || null, origem: 'campanha', fonte: 'Captação — landing Anuncie na REMAX',
     intencao: aluguel ? 'aluguel' : 'venda', tipologia: 'captação (proprietário): ' + (c.tipo || 'imóvel'),
     bairros: c.bairro ? [c.bairro] : [], imovel_anuncio_endereco: c.endereco || null, c2s_lead_id: c.c2s_lead_id || null,
     qualificado: true, temperatura: 'quente', status: 'aguardando_guilherme',
