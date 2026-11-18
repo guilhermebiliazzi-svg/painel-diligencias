@@ -227,6 +227,16 @@ export async function encerrar(leadId: string, motivo: string): Promise<Resultad
 
 // Captação da landing (Anuncie na REMAX): cria o lead na hora de escolher a fila.
 export async function ofertarCaptacao(captacaoId: string, phones: string[]): Promise<Resultado> {
+  return paraCaptacao(captacaoId, phones, false);
+}
+
+// 18/11: captação entregue direto a um corretor, sem fila (mesmo caminho do "Entregar direto" do lead comum).
+export async function entregarDiretoCaptacao(captacaoId: string, phone: string): Promise<Resultado> {
+  if (!phone) return { ok: false, erro: 'Escolha um só corretor.' };
+  return paraCaptacao(captacaoId, [phone], true);
+}
+
+async function paraCaptacao(captacaoId: string, phones: string[], direto: boolean): Promise<Resultado> {
   await exigirSdrGestao();
   const sb = supabaseAdmin();
   const { data: c } = await sb.from('captacao_leads').select('*').eq('id', captacaoId).maybeSingle();
@@ -235,7 +245,7 @@ export async function ofertarCaptacao(captacaoId: string, phones: string[]): Pro
   if (!tel) return { ok: false, erro: 'Captação sem telefone.' };
   const tel55 = tel.length <= 11 ? '55' + tel : tel;
   const existente = await leadDaCaptacao(tel55, c.criado_em);
-  if (existente) return ofertar(existente, phones);
+  if (existente) return { ...(direto ? await entregarDireto(existente, phones[0]) : await ofertar(existente, phones)), leadId: existente };
   const fila = await telefonesValidos(phones);
   if (!fila.length) return { ok: false, erro: 'Escolha pelo menos um corretor.' };
   const aluguel = /^alug/i.test(String(c.intencao ?? ''));
@@ -260,7 +270,7 @@ export async function ofertarCaptacao(captacaoId: string, phones: string[]): Pro
       }).eq('id', atual.id);
       if (eu) return { ok: false, erro: 'Não foi possível juntar ao lead existente: ' + eu.message };
     }
-    return { ...(await ofertar(atual.id, phones)), leadId: atual.id };
+    return { ...(direto ? await entregarDireto(atual.id, phones[0]) : await ofertar(atual.id, phones)), leadId: atual.id };
   }
   const { data: novo, error } = await sb.from('sdr_leads').insert({
     telefone: tel55, nome: c.nome || null, origem: 'campanha', fonte: 'Captação — landing Anuncie na REMAX',
@@ -270,7 +280,7 @@ export async function ofertarCaptacao(captacaoId: string, phones: string[]): Pro
     resumo: 'Proprietário quer ' + (aluguel ? 'alugar' : 'vender') + ' o imóvel (landing Anuncie na REMAX).',
   }).select('id').single();
   if (error || !novo) return { ok: false, erro: 'Não foi possível criar o lead: ' + (error?.message ?? '') };
-  const r = await ofertar(novo.id, fila);
+  const r = direto ? await entregarDireto(novo.id, fila[0]) : await ofertar(novo.id, fila);
   return { ...r, leadId: novo.id };
 }
 
