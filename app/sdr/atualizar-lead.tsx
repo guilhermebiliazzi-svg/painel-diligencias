@@ -20,8 +20,10 @@ type Tela = 'menu' | 'feita' | 'contato' | 'arquivar';
 const btn = 'w-full rounded-lg border px-3 py-2 text-left text-sm font-semibold';
 const campo = 'mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-slate-500';
 
-export default function AtualizarLead({ id, nome, visita, hoje }: {
+export default function AtualizarLead({ id, nome, visita, hoje, preAgenda }: {
   id: string; nome: string; hoje: string;
+  /** 18/11: data pré-agendada pelo cliente no site (ainda sem confirmação do corretor) */
+  preAgenda?: string | null;
   /** visita confirmada ainda sem resultado: quando (texto) e se já passou */
   visita: { quando: string; passou: boolean } | null;
 }) {
@@ -73,7 +75,10 @@ export default function AtualizarLead({ id, nome, visita, hoje }: {
               <a href={`/sdr/visita/${id}?r=1`} className={btn + ' block border-emerald-300 text-emerald-800 hover:bg-emerald-50'}>Remarcar visita</a>
             </>
           ) : (
-            <a href={`/sdr/visita/${id}`} className={btn + ' block border-emerald-300 text-emerald-800 hover:bg-emerald-50'}>Registrar visita</a>
+            <a href={`/sdr/visita/${id}`} className={btn + ' block border-emerald-300 text-emerald-800 hover:bg-emerald-50'}>
+              {preAgenda ? 'Confirmar agendamento de visita' : 'Agendar visita'}
+              {preAgenda && <span className="block text-xs font-normal text-slate-500">pré-agendada pelo cliente: {preAgenda}</span>}
+            </a>
           )}
           {visita?.passou && (
             <button type="button" onClick={() => setTela('feita')} className={btn + ' border-emerald-300 text-emerald-800 hover:bg-emerald-50'}>
