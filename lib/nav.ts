@@ -14,7 +14,7 @@ export type ItemNav = {
 };
 
 const EMOJI: Record<string, string> = {
-  sdr: '🔻', recrutamento: '🤝', captacao: '🔎', estudo: '📝', representacao: '✍️', posicionamento: '🗺️', diligencias: '📄', postagens: '🖼️', vitrine: '📣', site: '📊',
+  sdr: '🔻', recrutamento: '🤝', captacao: '🔎', estudo: '📝', representacao: '✍️', carteira: '🏠', posicionamento: '🗺️', diligencias: '📄', postagens: '🖼️', vitrine: '📣', site: '📊',
   'cobranca-avulsa': '💳', 'notas-comissao': '🧾',
   cobrancas: '💳', contratos: '📑', repasse: '🔁', pagamentos: '🏦', locador: '🏢', notas: '🧾',
   usuarios: '👥', treinamento: '🎓', oficinas: '🧑‍🏫', ligacoes: '📞',
@@ -41,6 +41,7 @@ export function getNav(): ItemNav[] {
     item('recrutamento', 'Recrutamento de corretores', 'Candidatos a corretor: quem decidir, encaminhar, entrevistas e quem entrou.', 'PAINEL_URL_RECRUTAMENTO', '/recrutamento', 'usuarios', 'violet', 'recrutamento'),
     item('captacao', 'Captação', 'Quem consta ligado a uma unidade, e como falar com a pessoa.', 'PAINEL_URL_CAPTACAO', '/captacao', 'captacao', 'blue', 'captacao'),
     item('estudo', 'Estudo de mercado', 'Ficha de captação: preencha na visita e mande para a Eva fazer o estudo.', 'PAINEL_URL_ESTUDO', '/estudo', 'captacao', 'blue', 'estudo'),
+    item('carteira', 'Minha carteira', 'Seus imóveis com contrato de representação: prazo do contrato, checklist de divulgação, agenda e avaliação.', 'PAINEL_URL_CARTEIRA', '/carteira', 'captacao', 'blue', 'representacao'),
     item('representacao', 'Contrato de representação', 'Preencher o contrato do proprietário, conferir o PDF e enviar para assinatura.', 'PAINEL_URL_REPRESENTACAO', '/representacao', 'captacao', 'blue', 'representacao'),
     item('posicionamento', 'Posicionamento', 'Mapear os condomínios da sua região e ver o quanto você já domina dela.', 'PAINEL_URL_POSICIONAMENTO', '/posicionamento', 'captacao', 'blue', 'posicionamento'),
     item('ligacoes', 'Lista de ligações', 'Sua lista de proprietários: ligações, retornos e follow-up.', 'PAINEL_URL_LIGACOES', '/ligacoes', 'captacao', 'blue', 'ligacoes'),
