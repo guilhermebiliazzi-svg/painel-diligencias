@@ -20,6 +20,8 @@ export function rotaDoTipo(tipo: string | null | undefined): RotaCertidao | null
     // 13/11: outros estados (Ceará), rota genérica do WF-08 (Infosimples)
     tipo.startsWith('sefaz_ce_') ||
     tipo.startsWith('trt7_') ||
+    // 18/11: TRT15 (interior de SP), rota genérica do WF-08 (Infosimples)
+    tipo.startsWith('trt15_') ||
     tipo === 'tjce_pf'
   )
     return 'wf08';
