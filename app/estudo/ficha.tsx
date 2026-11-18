@@ -44,7 +44,6 @@ const MERCADO: Secao = {
   fields: [
     yn('anunciado', 'Já está anunciado?'),
     F('anunciado_desde', 'Desde quando', { showIf: ['anunciado', 'sim'], half: true, placeholder: 'ex.: jun/2026' }),
-    money('anunciado_valor', 'Por quanto', '', { showIf: ['anunciado', 'sim'], half: true }),
     yn('propostas', 'Recebeu propostas?'),
     money('proposta_valor', 'Valor da proposta', '', { showIf: ['propostas', 'sim'], half: true }),
     F('proposta_quando', 'Quando', { showIf: ['propostas', 'sim'], half: true, placeholder: 'ex.: ago/2026' }),
@@ -166,7 +165,6 @@ const FORMS: Record<Tipo, { label: string; sections: Secao[] }> = {
         money('aluguel', 'Aluguel', '/mês', { showIf: ['alugado', 'sim'], half: true }),
         money('cond_mes', 'Condomínio', '/mês', { half: true }),
         money('iptu', 'IPTU', '/ano', { half: true }),
-        money('alvo', 'Preço-alvo do proprietário', '', { full: true, hint: 'se não souber, tudo bem' }),
         yn('porteira', 'Venda porteira fechada (mobília inclusa)?'),
         money('mobilia', 'Valor estimado da mobília', '', { showIf: ['porteira', 'sim'], full: true }),
       ] },
@@ -208,7 +206,6 @@ const FORMS: Record<Tipo, { label: string; sections: Secao[] }> = {
         money('aluguel_moradia', 'Aluguel de um imóvel igual', '/mês', { showIf: ['mora', 'sim'], full: true, hint: 'quanto pagaria para morar em outro igual — entra como economia na conta vender agora × esperar' }),
         money('cond_mes', 'Condomínio (se houver)', '/mês', { half: true }),
         money('iptu', 'IPTU', '/ano', { half: true }),
-        money('alvo', 'Preço-alvo do proprietário', '', { full: true, hint: 'se não souber, tudo bem' }),
         yn('porteira', 'Venda porteira fechada (mobília inclusa)?'),
         money('mobilia', 'Valor estimado da mobília', '', { showIf: ['porteira', 'sim'], full: true }),
       ] },
@@ -247,7 +244,6 @@ const FORMS: Record<Tipo, { label: string; sections: Secao[] }> = {
         money('aluguel', 'Aluguel', '/mês', { showIf: ['alugado', 'sim'], half: true }),
         money('cond_mes', 'Condomínio', '/mês', { half: true }),
         money('iptu', 'IPTU', '/ano', { half: true }),
-        money('alvo', 'Preço-alvo do proprietário', '', { full: true, hint: 'se não souber, tudo bem' }),
         yn('porteira', 'Venda porteira fechada (mobiliário incluso)?'),
         money('mobilia', 'Valor estimado do mobiliário', '', { showIf: ['porteira', 'sim'], full: true }),
       ] },
@@ -325,10 +321,9 @@ function montarMensagem(tipo: Tipo, vals: Record<string, Valor>): string {
   }
   const custos = line([g('cond_mes') && '*Condomínio:* ' + R$(g('cond_mes')!) + '/mês', g('iptu') && '*IPTU:* ' + R$(g('iptu')!) + '/ano']);
   if (custos) L.push(custos);
-  if (g('alvo')) L.push('*Preço-alvo do proprietário:* ' + R$(g('alvo')!));
   if (g('porteira') === 'sim') L.push('*Porteira fechada:* sim — mobília inclusa' + (g('mobilia') ? ', estimada em ' + R$(g('mobilia')!) : ''));
   const mercado: string[] = [];
-  if (g('anunciado') === 'sim') mercado.push('já anunciado' + (g('anunciado_desde') ? ' desde ' + g('anunciado_desde') : '') + (g('anunciado_valor') ? ' por ' + R$(g('anunciado_valor')!) : ''));
+  if (g('anunciado') === 'sim') mercado.push('já anunciado' + (g('anunciado_desde') ? ' desde ' + g('anunciado_desde') : ''));
   else if (g('anunciado') === 'não') mercado.push('não está anunciado');
   if (g('propostas') === 'sim') mercado.push('proposta' + (g('proposta_valor') ? ' de ' + R$(g('proposta_valor')!) : '') + (g('proposta_quando') ? ' em ' + g('proposta_quando') : ''));
   else if (g('propostas') === 'não') mercado.push('sem propostas');
@@ -779,7 +774,7 @@ function IptuBox({ tipo, get, set }: { tipo: Tipo; get: (id: string) => Valor | 
 
 type VendaP = { chave: string; data: string; unidade: string; area: number; valor: number; valor_m2: number; mesma_area: boolean };
 type AnuncioP = { link: string; codigo: string; titulo: string; preco: number; area: number | null; quartos: number | null; suites: number | null; vagas: number | null; condominio_mensal: number | null; bairro: string; origem?: 'site' | 'portal'; condominio_nome?: string; address?: string };
-type BuscaP = { anuncios: AnuncioP[]; total_na_busca: number | null; links_encontrados: number; fora_do_tamanho: number; criterio: string; outros_links: number; outros?: AnuncioP[]; outros_falha?: string[]; outros_fora?: number };
+type BuscaP = { anuncios: AnuncioP[]; total_na_busca: number | null; links_encontrados: number; fora_do_tamanho: number; criterio: string; outros_links: number; outros?: AnuncioP[]; outros_falha?: string[]; outros_fora?: number; ignorados?: string[]; site_alem?: number };
 const siteDe = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return 'outro site'; } };
 type FaseGerar = 'carregando' | 'escolha' | 'gerando' | 'pronto' | 'erro';
 
@@ -976,6 +971,18 @@ function GerarEstudo({ tipo, vals, aberto, fechar }: { tipo: Tipo; vals: Record<
             )}
             {busca && (busca.outros_fora || 0) > 0 && (
               <p className="fe-gnote">{busca.outros_fora === 1 ? '1 anúncio de outro portal ficou fora' : `${busca.outros_fora} anúncios de outros portais ficaram fora`} do tamanho (mais de 30% de diferença na área útil).</p>
+            )}
+            {busca && todosAn.length > 0 && busca.fora_do_tamanho > 0 && (
+              <p className="fe-gnote">{busca.fora_do_tamanho === 1 ? '1 anúncio do site ficou fora' : `${busca.fora_do_tamanho} anúncios do site ficaram fora`} do tamanho ({busca.criterio}).</p>
+            )}
+            {busca && (busca.site_alem || 0) > 0 && (
+              <p className="fe-gnote fe-galerta">{busca.site_alem === 1 ? '1 link do villejardins.com.br ficou' : `${busca.site_alem} links do villejardins.com.br ficaram`} de fora: o painel lê até 5 links do site.</p>
+            )}
+            {busca && (busca.ignorados || []).length > 0 && (
+              <p className="fe-gnote fe-galerta">
+                {(busca.ignorados || []).length === 1 ? '1 linha do campo Concorrentes não é link de anúncio e ficou de fora' : `${(busca.ignorados || []).length} linhas do campo Concorrentes não são links de anúncio e ficaram de fora`}:{' '}
+                {(busca.ignorados || []).slice(0, 4).map((t) => `“${t}”`).join(', ')}{(busca.ignorados || []).length > 4 ? '…' : ''}. Cole o link do anúncio (endereço sozinho não entra).
+              </p>
             )}
             {busca && (busca.outros_falha || []).length > 0 && (
               <p className="fe-gnote fe-galerta">Não consegui ler {(busca.outros_falha || []).length === 1 ? 'o anúncio' : `${(busca.outros_falha || []).length} anúncios`} de {[...new Set((busca.outros_falha || []).map(siteDe))].join(', ')} — o portal bloqueou a leitura. Se puder, cole o link do mesmo imóvel em outro portal.</p>
