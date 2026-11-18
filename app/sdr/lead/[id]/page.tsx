@@ -287,7 +287,8 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
         {/* 14/11: registrar a visita pelo painel (mesmo formulário do link da Eva) */}
         {!ehCaptacao && l.corretor_phone && !['arquivado', 'encerrado'].includes(l.status) && (
           <a href={`/sdr/visita/${l.id}`} className="block w-full rounded-xl bg-emerald-600 px-4 py-3 text-center text-sm font-semibold text-white hover:bg-emerald-700">
-            Registrar visita
+            {/* 18/11: pré-agendamento do site pede confirmação; sem ele, é agendar */}
+            {(Array.isArray(l.disponibilidade) ? l.disponibilidade : []).some((t: unknown) => /pr[ée]-agendad/i.test(String(t))) ? 'Confirmar agendamento de visita' : 'Agendar visita'}
           </a>
         )}
         {['atribuido', 'visita_agendada', 'direto'].includes(l.status) && <Encerrar id={l.id} />}
