@@ -9,9 +9,10 @@ export async function leadDaCaptacao(tel55: string, criadoEm: string): Promise<s
     .select('id,telefone,created_at')
     .eq('origem', 'campanha')
     .ilike('fonte', 'Capta%')
-    .like('telefone', '%' + fim8)
+    // 18/11: o telefone pode ter sufixo '#b' (2º lead ativo do mesmo celular) — confere os dígitos aqui
+    .like('telefone', '%' + fim8 + '%')
     .gte('created_at', new Date(new Date(criadoEm).getTime() - 60_000).toISOString())
     .order('created_at', { ascending: false })
-    .limit(1);
-  return data?.[0]?.id ?? null;
+    .limit(5);
+  return (data ?? []).find((l) => String(l.telefone ?? '').replace(/\D/g, '').slice(-8) === fim8)?.id ?? null;
 }
