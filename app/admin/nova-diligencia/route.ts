@@ -83,6 +83,125 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();</script>`;
 }
 
+// 18/11: o formulário fica em seções que abrem e fecham (com resumo do que já foi preenchido),
+// e cada vendedor/comprador também fecha. Só muda a forma de mostrar; campos e envio são os do WF-01.
+const SECOES = `<style>
+.fx-barra{display:flex;justify-content:flex-end;gap:14px;margin:0 0 10px;font-size:12px}
+.fx-barra button{background:none;border:0;color:#475569;cursor:pointer;font-size:12px;text-decoration:underline;padding:0}
+.fx-sec{border:1px solid #e5e7eb;border-radius:10px;background:#fff;margin-bottom:10px !important}
+.fx-hd{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;user-select:none;border-radius:10px}
+.fx-hd:hover{background:#f8fafc}
+.fx-hd h2{margin:0 !important;flex:0 1 auto}
+.fx-hd h2 span{display:none}
+.fx-sum{flex:1;min-width:0;font-size:12px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.fx-sum.fx-vazio{color:#b0b7c3}
+.fx-chev{flex:none;width:18px;text-align:center;color:#64748b;transition:transform .15s;font-size:12px}
+.fx-sec:not(.fx-fechado) > .fx-hd .fx-chev{transform:rotate(90deg)}
+.fx-bd{padding:2px 14px 14px}
+.fx-nota{font-size:12px;color:#888;margin:-2px 0 10px}
+.fx-sec.fx-fechado > .fx-bd{display:none}
+.fx-sec.fx-erro{border-color:#c8102e}
+.fx-ghd{display:flex;align-items:center;gap:8px;margin:-4px 30px 10px 0;cursor:pointer;user-select:none;font-size:13px;font-weight:600;color:#334155}
+.fx-ghd .fx-gsum{font-weight:400;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.group.fx-gfechado > .fx-ghd{margin-bottom:0}
+.group.fx-gfechado > *:not(.fx-ghd):not(.remove-btn){display:none !important}
+.group:not(.fx-gfechado) > .fx-ghd .fx-chev{transform:rotate(90deg)}
+</style>
+<script>(function(){
+// Painel 18/11: o formulário da diligência (HTML do WF-01) fica em seções que abrem e fecham,
+// com um resumo do que já está preenchido. Vendedores e compradores também fecham um a um.
+// Nada muda nos campos nem no envio: só a forma de mostrar.
+var ABERTAS_NOVA = { 'imovel':1, 'matriculas':1, 'vendedores-pessoa-fisica':1 };
+var LISTAS_PESSOAS = { 'pf-list':'Vendedor', 'pj-list':'Empresa', 'comp-pf-list':'Comprador', 'comp-pj-list':'Comprador PJ' };
+function chave(t){ return String(t||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z]+/g,'-').replace(/^-|-$/g,''); }
+function val(el){ return el && el.value ? String(el.value).trim() : ''; }
+function porId(id){ return val(document.getElementById(id)); }
+function grupos(id){ var l=document.getElementById(id); if(!l) return []; return Array.prototype.filter.call(l.children,function(c){return c.classList&&c.classList.contains('group');}); }
+function nomeDoGrupo(g){
+  var n = g.querySelector('input[name$="_nome"]:not([name*="conjuge"]):not([name*="rep_"]):not([name*="mae"]):not([name*="pai"])');
+  var d = g.querySelector('input[name$="cpf"]:not([name*="conjuge"]):not([name*="rep_"]), input[name$="cnpj"]');
+  return [val(n), val(d)].filter(Boolean).join(' · ');
+}
+function contagem(n, um, varios){ return n ? (n + ' ' + (n===1?um:varios)) : ''; }
+var RESUMOS = {
+  'imovel': function(){ return [porId('logradouro'), porId('numero'), porId('complemento')].filter(Boolean).join(', '); },
+  'matriculas': function(){ var gs=grupos('matriculas-list'); var ns=gs.map(function(g){return val(g.querySelector('[name=matricula_num]'));}).filter(Boolean); return ns.length ? 'nº ' + ns.join(', ') : ''; },
+  'condominios-unidades': function(){ return contagem(grupos('condominios-list').length,'unidade','unidades'); },
+  'pontos-de-consumo': function(){ return contagem(grupos('consumos-list').length,'ponto','pontos'); },
+  'vendedores-pessoa-fisica': function(){ return grupos('pf-list').map(nomeDoGrupo).filter(Boolean).map(function(s){return s.split(' · ')[0];}).join('; '); },
+  'vendedores-pessoa-juridica': function(){ return grupos('pj-list').map(nomeDoGrupo).filter(Boolean).map(function(s){return s.split(' · ')[0];}).join('; '); },
+  'certidoes-de-outros-estados': function(){ return Array.prototype.map.call(document.querySelectorAll('input[name=estado_extra]:checked'),function(c){return c.parentElement.textContent.trim();}).join(', '); },
+  'compradores-pessoa-fisica': function(){ return grupos('comp-pf-list').map(nomeDoGrupo).filter(Boolean).map(function(s){return s.split(' · ')[0];}).join('; '); },
+  'compradores-pessoa-juridica': function(){ return grupos('comp-pj-list').map(nomeDoGrupo).filter(Boolean).map(function(s){return s.split(' · ')[0];}).join('; '); },
+  'dados-do-negocio': function(){ var p=porId('negocio-preco'); return p ? 'R$ ' + p.replace(/^R\\$\\s*/,'') : ''; }
+};
+var secoes = [];
+function montar(){
+  var fc = document.getElementById('form-content'); if(!fc || fc.getAttribute('data-fx')) return; fc.setAttribute('data-fx','1');
+  Array.prototype.slice.call(fc.children).forEach(function(div){
+    if(div.tagName!=='DIV') return;
+    var h2 = null; for(var i=0;i<div.children.length;i++){ if(div.children[i].tagName==='H2'){ h2=div.children[i]; break; } }
+    if(!h2 || div.querySelector('#busca-dilig')) return;
+    var titulo = h2.childNodes[0] ? h2.childNodes[0].textContent : h2.textContent;
+    var k = chave(titulo);
+    var nota = h2.querySelector('span');
+    var hd = document.createElement('div'); hd.className='fx-hd';
+    var chev = document.createElement('span'); chev.className='fx-chev'; chev.textContent='▶';
+    var sum = document.createElement('span'); sum.className='fx-sum';
+    var bd = document.createElement('div'); bd.className='fx-bd';
+    if (nota && nota.textContent.trim()) { var p=document.createElement('p'); p.className='fx-nota'; p.textContent=nota.textContent.trim().replace(/^\\(|\\)$/g,''); bd.appendChild(p); }
+    while (h2.nextSibling) bd.appendChild(h2.nextSibling);
+    div.insertBefore(hd, h2); hd.appendChild(chev); hd.appendChild(h2); hd.appendChild(sum); div.appendChild(bd);
+    div.classList.add('fx-sec'); div.setAttribute('data-fx-sec', k);
+    var aberta = window.__EDIT_ID ? false : !!ABERTAS_NOVA[k];
+    if (!aberta) div.classList.add('fx-fechado');
+    hd.addEventListener('click', function(){ div.classList.toggle('fx-fechado'); });
+    secoes.push({ div:div, k:k, sum:sum });
+  });
+  var barra = document.createElement('div'); barra.className='fx-barra';
+  barra.innerHTML = '<button type="button" data-a="abrir">Abrir todas</button><button type="button" data-a="fechar">Fechar todas</button>';
+  barra.addEventListener('click', function(e){ var a=e.target && e.target.getAttribute('data-a'); if(!a) return; secoes.forEach(function(s){ s.div.classList.toggle('fx-fechado', a==='fechar'); }); });
+  if (secoes[0]) fc.insertBefore(barra, secoes[0].div);
+  resumir(); setInterval(resumir, 1200);
+  document.addEventListener('input', resumir, true);
+  document.addEventListener('change', resumir, true);
+  // Erros de validação: abre a seção e a pessoa onde está o erro e rola até o primeiro.
+  new MutationObserver(function(ms){
+    var achou=false;
+    ms.forEach(function(m){ Array.prototype.forEach.call(m.addedNodes,function(n){ if(n.nodeType===1 && n.classList.contains('field-error')){ achou=true; abrirAte(n); } }); });
+    if (achou) { secoes.forEach(function(s){ s.div.classList.toggle('fx-erro', !!s.div.querySelector('.field-error')); });
+      setTimeout(function(){ var p=document.querySelector('.field-error'); if(p) p.scrollIntoView({behavior:'smooth',block:'center'}); }, 30); }
+  }).observe(fc, { childList:true, subtree:true });
+  // Pessoas: um cabeçalho por vendedor/comprador, que fecha e abre.
+  Object.keys(LISTAS_PESSOAS).forEach(function(id){
+    var l=document.getElementById(id); if(!l) return;
+    var dec=function(){ grupos(id).forEach(function(g,i){ decorarGrupo(g, LISTAS_PESSOAS[id] + ' ' + (i+1)); }); };
+    dec(); new MutationObserver(dec).observe(l, { childList:true });
+  });
+}
+function abrirAte(n){ var e=n; while(e){ if(e.classList){ if(e.classList.contains('fx-sec')) e.classList.remove('fx-fechado'); if(e.classList.contains('fx-gfechado')) e.classList.remove('fx-gfechado'); } e=e.parentElement; } }
+function decorarGrupo(g, rotulo){
+  var hd = g.querySelector(':scope > .fx-ghd');
+  if (!hd) {
+    hd=document.createElement('div'); hd.className='fx-ghd';
+    hd.innerHTML='<span class="fx-chev">▶</span><span class="fx-grot"></span><span class="fx-gsum"></span>';
+    hd.addEventListener('click', function(){ g.classList.toggle('fx-gfechado'); });
+    g.insertBefore(hd, g.firstChild);
+  }
+  hd.querySelector('.fx-grot').textContent = rotulo;
+}
+function resumir(){
+  secoes.forEach(function(s){
+    var f = RESUMOS[s.k]; var t = '';
+    try { t = f ? f() : ''; } catch(e) {}
+    s.sum.textContent = t || 'vazio'; s.sum.classList.toggle('fx-vazio', !t);
+    if (!s.div.querySelector('.field-error')) s.div.classList.remove('fx-erro');
+  });
+  Object.keys(LISTAS_PESSOAS).forEach(function(id){ grupos(id).forEach(function(g){ var hd=g.querySelector(':scope > .fx-ghd'); if(hd){ var t=nomeDoGrupo(g); hd.querySelector('.fx-gsum').textContent = t ? '— ' + t : ''; } }); });
+}
+if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', montar); else montar();
+})();</script>`;
+
 export async function GET(req: Request) {
   const acesso = await acessoDiligencias();
   const editar = new URL(req.url).searchParams.get('editar') || '';
@@ -126,6 +245,7 @@ export async function GET(req: Request) {
     : BARRA;
   html = /<body[^>]*>/i.test(html) ? html.replace(/<body[^>]*>/i, (m) => m + barra + aviso) : html;
   if (editId) html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, scriptEditar(editId) + '</body>') : html + scriptEditar(editId);
+  html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, () => SECOES + '</body>') : html + SECOES;
 
   return new NextResponse(html, {
     status: 200,
