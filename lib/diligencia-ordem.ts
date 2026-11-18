@@ -105,7 +105,7 @@ export const CATEGORIAS_PF: Categoria[] = [
   },
   {
     titulo: 'Trabalhistas',
-    tipos: ['trt2_digital', 'trt2_fisico', 'cndt_tst'],
+    tipos: ['trt2_digital', 'trt2_fisico', 'trt15_ceat', 'cndt_tst'],
   },
   {
     titulo: 'Fiscais e protestos',
@@ -166,7 +166,7 @@ export const CATEGORIAS_PJ: Categoria[] = [
   },
   {
     titulo: 'Trabalhistas',
-    tipos: ['trt2_digital', 'trt2_fisico', 'cndt_tst_pj', 'crf_fgts'],
+    tipos: ['trt2_digital', 'trt2_fisico', 'trt15_ceat', 'cndt_tst_pj', 'crf_fgts'],
   },
   {
     titulo: 'Fiscais e protestos',
