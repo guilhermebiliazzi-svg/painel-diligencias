@@ -202,6 +202,50 @@ function resumir(){
 if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', montar); else montar();
 })();</script>`;
 
+// 18/11: comprovante de endereço do vendedor PF: ao anexar, lê a conta (WF-12, modo comprovante)
+// e preenche o endereço e o CEP do titular.
+const COMPROVANTE = `<script>(function(){
+// Painel 18/11: ao anexar o comprovante de endereço do vendedor PF, lê a conta (WF-12, modo
+// "comprovante") e preenche "Endereço (residência do titular)" e "CEP". O arquivo continua indo
+// junto no envio, como antes.
+function urlOcr(){ try { if (typeof WF12_URL !== 'undefined' && WF12_URL) return WF12_URL; } catch(e) {} return (window.N8N_BASE || '') + '/wf12-ocr-documento'; }
+function aviso(input, txt, tipo){
+  var box = input.parentElement.querySelector('.fx-comp-msg');
+  if (!box) { box = document.createElement('div'); box.className = 'ocr-result fx-comp-msg'; input.parentElement.appendChild(box); }
+  var cores = { lendo:['#fff3e0','#ffcc02','#e65100'], ok:['#f0f7f0','#c8e6c9','#2e7d32'], erro:['#fff5f5','#ffcdd2','#c62828'] }[tipo];
+  box.style.display = 'block'; box.style.background = cores[0]; box.style.borderColor = cores[1]; box.style.color = cores[2];
+  box.textContent = txt;
+}
+function setar(g, nome, v){ var el = g.querySelector('[name=' + nome + ']'); if (el && v) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); } }
+async function ler(input){
+  var f = input.files && input.files[0]; if (!f) return;
+  var g = input.closest('.group'); if (!g) return;
+  aviso(input, 'Lendo o endereço da conta…', 'lendo');
+  try {
+    var fd = new FormData();
+    fd.append('data', f, f.name); fd.append('vendor_index', 'comprovante'); fd.append('tipo_ocr', 'comprovante');
+    var r = await fetch(urlOcr(), { method: 'POST', body: fd });
+    var j = await r.json().catch(function(){ return {}; });
+    var d = j && j.dados;
+    if (!r.ok || !j.sucesso || !d || !(d.endereco || d.cep)) throw new Error((j && j.erro) || 'sem endereço');
+    setar(g, 'pf_endereco', d.endereco); setar(g, 'pf_cep', d.cep);
+    var de = [d.emissor, d.data_referencia].filter(Boolean).join(', ');
+    aviso(input, 'Endereço preenchido pela conta' + (de ? ' (' + de + ')' : '') + (d.titular ? ', em nome de ' + d.titular : '') + '. Confira.', 'ok');
+  } catch (e) {
+    aviso(input, 'Não consegui ler o endereço desta conta. Preencha à mão (o arquivo vai junto mesmo assim).', 'erro');
+  }
+}
+document.addEventListener('change', function(e){ var t = e.target; if (t && t.name === 'pf_comprovante_endereco') ler(t); }, true);
+function selo(){
+  Array.prototype.forEach.call(document.querySelectorAll('input[name=pf_comprovante_endereco]'), function(inp){
+    var lab = inp.parentElement && inp.parentElement.querySelector('label');
+    if (lab && !lab.querySelector('.ocr-badge')) { var s = document.createElement('span'); s.className = 'ocr-badge'; s.textContent = 'leitura automática'; lab.appendChild(s); }
+  });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', selo); else selo();
+setInterval(selo, 1500);
+})();</script>`;
+
 export async function GET(req: Request) {
   const acesso = await acessoDiligencias();
   const editar = new URL(req.url).searchParams.get('editar') || '';
@@ -245,7 +289,7 @@ export async function GET(req: Request) {
     : BARRA;
   html = /<body[^>]*>/i.test(html) ? html.replace(/<body[^>]*>/i, (m) => m + barra + aviso) : html;
   if (editId) html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, scriptEditar(editId) + '</body>') : html + scriptEditar(editId);
-  html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, () => SECOES + '</body>') : html + SECOES;
+  html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, () => SECOES + COMPROVANTE + '</body>') : html + SECOES + COMPROVANTE;
 
   return new NextResponse(html, {
     status: 200,
