@@ -80,7 +80,12 @@ const INTENCAO: Record<string, string> = {
 };
 
 type Atr = { lead_id: string; corretor_phone: string; resposta: string | null; oferecido_em: string | null; prazo_em: string | null; respondido_em: string | null };
-type LeadMin = { id: string; telefone: string | null; nome: string | null; status: string; intencao: string | null; corretor_phone: string | null; atribuido_em: string | null; feito_em: string | null; created_at: string; fonte: string | null };
+// 18/11: pré-agendamento feito pelo site (gravado em sdr_leads.disponibilidade) -> "sexta, 20/11 — 9h"
+const preAgendaDe = (disp: unknown): string | null => {
+  const x = (Array.isArray(disp) ? disp : []).map(String).find((t) => /pr[ée]-agendad/i.test(t));
+  return x ? x.replace(/^.*?pr[ée]-agendada?\s*(pelo site)?\s*:?\s*/i, '').replace(/\s*c[óo]d\..*$/i, '').trim() || 'pelo site' : null;
+};
+type LeadMin = { id: string; telefone: string | null; nome: string | null; status: string; intencao: string | null; corretor_phone: string | null; atribuido_em: string | null; feito_em: string | null; created_at: string; fonte: string | null; disponibilidade?: string[] | null };
 type Funil = { id: string; endereco: string | null; valor: number | null; visita_agendada: boolean; visitou: boolean; proposta: boolean };
 
 // comoAdmin: o administrador vendo o funil de um corretor ("Ver como corretor").
@@ -105,7 +110,7 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
       const sb = supabaseAdmin();
       const [{ data: a, error: e1 }, { data: l, error: e2 }] = await Promise.all([
         sb.from('sdr_atribuicoes').select('lead_id,corretor_phone,resposta,oferecido_em,prazo_em,respondido_em').ilike('corretor_phone', `%${k}`).gte('oferecido_em', desde).limit(2000),
-        sb.from('sdr_leads').select('id,telefone,nome,status,intencao,corretor_phone,atribuido_em,feito_em,created_at,fonte').ilike('corretor_phone', `%${k}`).gte('created_at', desde).limit(2000),
+        sb.from('sdr_leads').select('id,telefone,nome,status,intencao,corretor_phone,atribuido_em,feito_em,created_at,fonte,disponibilidade').ilike('corretor_phone', `%${k}`).gte('created_at', desde).limit(2000),
       ]);
       if (e1 || e2) throw new Error((e1 || e2)!.message);
       atrs = ((a ?? []) as Atr[]).filter((x) => fim8(x.corretor_phone) === k);
@@ -113,7 +118,7 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
       // leads oferecidos que ele não pegou (para contar na base e saber a resposta)
       const faltam = [...new Set(atrs.map((x) => x.lead_id))].filter((id) => !leads.some((x) => x.id === id));
       for (let i = 0; i < faltam.length; i += 300) {
-        const { data } = await sb.from('sdr_leads').select('id,telefone,nome,status,intencao,corretor_phone,atribuido_em,feito_em,created_at,fonte').in('id', faltam.slice(i, i + 300));
+        const { data } = await sb.from('sdr_leads').select('id,telefone,nome,status,intencao,corretor_phone,atribuido_em,feito_em,created_at,fonte,disponibilidade').in('id', faltam.slice(i, i + 300));
         leads.push(...((data ?? []) as LeadMin[]));
       }
       // só os leads deste funil
@@ -325,7 +330,7 @@ export async function MeuFunil({ cor, nome, periodo, comoAdmin, seletor, funilK 
                               {l.telefone && <Link href={`/sdr/conversa/${String(l.telefone).replace(/\D/g, '')}`} className="block text-xs font-medium text-slate-700 underline hover:text-slate-900">Conversa da Eva com o cliente</Link>}
                               {estudoDo.has(l.id) && <a href={'/api/estudo/arquivo?id=' + estudoDo.get(l.id)} className="block text-xs font-medium text-blue-700 underline">Baixar o estudo de mercado</a>}
                               {/* 15/11: Atualizar = registrar/remarcar visita, visita feita, novo contato, arquivar */}
-                              {!ehProp && !fechado && <AtualizarLead id={l.id} nome={l.nome || ''} visita={vis ?? null} hoje={hoje} />}
+                              {!ehProp && !fechado && <AtualizarLead id={l.id} nome={l.nome || ''} visita={vis ?? null} hoje={hoje} preAgenda={preAgendaDe(l.disponibilidade)} />}
                               {/* 17/11: captação — agendar/remarcar V1 e V2, etapas, novo contato e encerrar */}
                               {ehProp && !fechado && <AtualizarCaptacao id={l.id} nome={l.nome || ''} ultima={nv >= 0 ? ETAPAS_CAP[nv].k : ''} hoje={hoje} />}
                             </td>
