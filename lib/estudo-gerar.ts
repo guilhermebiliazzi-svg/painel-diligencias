@@ -51,6 +51,8 @@ export type Busca = {
   outros: Anuncio[];      // anúncios de outros portais lidos (apartamento/sala)
   outros_falha: string[]; // links de outros portais que não deu para ler (portal bloqueou)
   outros_fora: number;    // de outros portais, mas fora do tamanho (±30% da área útil)
+  ignorados: string[];    // 19/11: linhas do campo que não viraram link de anúncio (texto, endereço) — avisadas na tela
+  site_alem: number;      // 19/11: links do villejardins além dos 5 lidos
 };
 
 // ------------------------------------------------------------------ leitura da ficha
@@ -91,10 +93,20 @@ function padraoReforma(itens: string[]): string {
 }
 
 /** Links colados em "Concorrentes": os do villejardins.com.br e os de outros sites. */
-export function linksConcorrentes(texto: string): { site: string[]; outros: string[] } {
-  const todos = [...new Set((String(texto || '').match(/https?:\/\/[^\s<>"']+/g) || []).map((u) => u.replace(/[),.;]+$/, '')))];
+// 19/11: aceita link sem "https://" (ex.: "vivareal.com.br/imovel/..." ou "www.zapimoveis..."), comum ao copiar
+// pelo app do celular, e devolve as linhas que não viraram link para o painel avisar (antes sumiam sem aviso).
+const RE_LINK = /(?:https?:\/\/|www\.)[^\s<>"']+|\b(?:[a-z0-9-]+\.)+(?:com\.br|com|net\.br|net|imb\.br)\/[^\s<>"']*/gi;
+export function linksConcorrentes(texto: string): { site: string[]; outros: string[]; ignorados: string[]; site_alem: number } {
+  const bruto = String(texto || '');
+  const norm = (u: string) => {
+    const x = u.replace(/[),.;]+$/, '');
+    return /^https?:\/\//i.test(x) ? x : 'https://' + x;
+  };
+  const todos = [...new Set((bruto.match(RE_LINK) || []).map(norm))];
   const ehSite = (u: string) => /^https?:\/\/(www\.)?villejardins\.com\.br\//i.test(u);
-  return { site: todos.filter(ehSite).slice(0, 5), outros: todos.filter((u) => !ehSite(u)) };
+  const ignorados = bruto.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.match(RE_LINK)).map((l) => l.slice(0, 80));
+  const site = todos.filter(ehSite);
+  return { site: site.slice(0, 5), outros: todos.filter((u) => !ehSite(u)), ignorados, site_alem: Math.max(0, site.length - 5) };
 }
 
 /** Código do anúncio pelo link: id numérico no caminho (QuintoAndar) ou fim em maiúsculas/números (...-IIGFT). */
@@ -372,7 +384,7 @@ async function lerOutrosPortais(links: string[], area: number | null, subject: {
 export async function lerConcorrentes(
   texto: string, area: number | null, tolerancia: number, comPortais: boolean, subject: { predio_curto?: string; bairro?: string },
 ): Promise<Busca> {
-  const { site, outros } = linksConcorrentes(texto);
+  const { site, outros, ignorados, site_alem } = linksConcorrentes(texto);
   const ler = comPortais ? outros.slice(0, MAX_OUTROS) : [];
   const [bs, op] = await Promise.all([
     site.length ? lerBuscaSite(site, area, tolerancia) : Promise.resolve(null),
@@ -386,6 +398,8 @@ export async function lerConcorrentes(
     criterio: bs?.criterio || (area ? `de ${Math.round(area * (1 - tolerancia))} a ${Math.round(area * (1 + tolerancia))} m²` : 'sem corte de tamanho'),
     outros_links: outros.length - ler.length,
     ...op,
+    ignorados,
+    site_alem,
   };
 }
 
@@ -457,7 +471,7 @@ export function montarPayload(tipo: TipoFicha, vals: Vals, esc: Escolhas) {
     aluguel_mensal: g('alugado') === 'sim' ? n('aluguel') : undefined,
     condominio_mensal: n('cond_mes'),
     iptu_anual: n('iptu'),
-    preco_alvo: n('alvo'),
+    // 19/11: preço-alvo do proprietário não entra mais no estudo (distorcia a decisão no tempo)
   });
   // amostras "cruas" (o mesmo formato que a EVA passa): o /estudo converte para o contrato do estudo
   const amostras = esc.anuncios.map((a) => ({
