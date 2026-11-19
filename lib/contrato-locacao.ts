@@ -268,28 +268,31 @@ export function montarLocacao(d: DadosContrato): { blocos: Bloco[]; pendencias: 
   // 4 — valor
   const p = inicio ? partesData(inicio) : null;
   const fimPeriodo = inicio ? somarDias(somarMeses(inicio, 1), -1) : null;
-  let venc1: string | null = c.data_primeiro_aluguel || null;
-  if (!venc1 && fimPeriodo) {
-    const f = partesData(fimPeriodo)!;
-    // primeiro dia de vencimento depois do fim do período
-    let cand = somarMeses(`${f.a}-${String(f.m).padStart(2, "0")}-01`, 0);
-    cand = `${cand.slice(0, 8)}${String(Math.min(diaVenc, 28)).padStart(2, "0")}`;
-    if (cand <= fimPeriodo) cand = somarMeses(cand, 1);
-    venc1 = cand;
-  }
+  // 19/11 (Guilherme): só o 1º aluguel vence 30 dias após a entrega das chaves (mesmo dia do mês seguinte);
+  // os demais vencem no dia de vencimento, com o 2º proporcional para alinhar ao mês civil.
+  const venc1: string | null = c.data_primeiro_aluguel || (inicio ? somarMeses(inicio, 1) : null);
   const encargos: string[] = [];
   if (c.iptu_responsavel !== "locador") encargos.push("IPTU");
   if (c.condominio_responsavel !== "locador") encargos.push("condomínio");
-  const diaIni = p?.d || 1;
-  const diaFim = diaIni === 1 ? null : diaIni - 1;
-  const mesLocaticio = diaIni === 1
-    ? "o mês civil"
-    : `o período compreendido entre o dia ${numComExtenso(diaIni)} de um mês e o dia ${numComExtenso(diaFim!)} do mês seguinte`;
   const pars4: string[] = [];
   if (encargos.length) {
     pars4.push(`Os encargos locatícios de ${encargos.join(" e ")}, com vencimento a partir da entrega das chaves, bem como seus reajustes, e os dias proporcionais do mês de entrega das chaves correrão por conta do LOCATÁRIO;`);
   }
-  pars4.push(`O pagamento do aluguel e dos encargos locatícios ordinários deverão ser realizados até o dia ${String(diaVenc).padStart(2, "0")} (${numComExtenso(diaVenc).split(" (")[1]} de cada mês, sendo o aluguel referente ao mês vencido e os encargos referentes ao mês vigente. Considera-se mês de locação ${mesLocaticio}, de modo que o primeiro aluguel, referente ao período de ${fmtData(inicio)} a ${fmtData(fimPeriodo)}, vencerá em ${fmtData(venc1)}.`);
+  {
+    const diaTxt = `${String(diaVenc).padStart(2, "0")} (${numComExtenso(diaVenc).split(" (")[1]}`;
+    let t = `O primeiro aluguel, referente ao período de ${fmtData(inicio)} a ${fmtData(fimPeriodo)}, vencerá em ${fmtData(venc1)}. `
+      + `Os aluguéis seguintes e os encargos locatícios ordinários vencerão no dia ${diaTxt} de cada mês, sendo o aluguel referente ao mês vencido e os encargos referentes ao mês vigente.`;
+    // 2º aluguel proporcional: do dia seguinte ao fim do 1º período até o fim daquele mês, vencendo no mês seguinte
+    const ini2 = fimPeriodo ? somarDias(fimPeriodo, 1) : null;
+    const q = ini2 ? partesData(ini2) : null;
+    if (ini2 && q && q.d !== 1) {
+      const primeiroDoMes = `${q.a}-${String(q.m).padStart(2, "0")}-01`;
+      const fimMes = somarDias(somarMeses(primeiroDoMes, 1), -1);
+      const venc2 = `${somarMeses(primeiroDoMes, 1).slice(0, 8)}${String(Math.min(diaVenc, 28)).padStart(2, "0")}`;
+      t += ` O segundo aluguel, com vencimento em ${fmtData(venc2)}, será proporcional ao período de ${fmtData(ini2)} a ${fmtData(fimMes)}; a partir do terceiro, cada aluguel corresponde ao mês civil anterior ao seu vencimento.`;
+    }
+    pars4.push(t);
+  }
   const intermediacao = cond.primeiro_aluguel_ville !== false;
   if (intermediacao) {
     pars4.push(`A título de honorários pela presente intermediação, devidos pelo LOCADOR nos termos do art. 22, inciso VII, da Lei nº 8.245/1991, a ${VILLE_QUALIF}, fará jus ao valor equivalente ao primeiro aluguel integral, no valor de ${aluguelTxt}. Por determinação do LOCADOR, o primeiro aluguel, com vencimento em ${fmtData(venc1)}, será pago pelo LOCATÁRIO diretamente à ${VILLE}, por meio de boleto bancário ou outro meio de pagamento eletrônico por ela emitido. O pagamento assim realizado dará ao LOCATÁRIO plena quitação do primeiro aluguel, não constituindo valor adicional ao aluguel ou encargo de responsabilidade do LOCATÁRIO.`);
