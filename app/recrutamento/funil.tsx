@@ -71,7 +71,9 @@ const contar = <T,>(xs: T[], f: (x: T) => string) =>
 // ---------- recrutamento ----------
 // 05/11: etapas (Para decidir → Em contato → Entrevistas → Entraram / Descartados; Fora de SP à parte),
 // gravadas em public.recrutamento_candidatos. Perfil = etiqueta automática do "momento" + CRECI.
-type LinhaRec = { telefone: string; etapa: EtapaRec; motivo: string | null; entrevista_em: string | null; retomar_em: string | null; encaminhado_nome: string | null; atualizado_em: string };
+type LinhaRec = { telefone: string; etapa: EtapaRec; motivo: string | null; entrevista_em: string | null; retomar_em: string | null; encaminhado_nome: string | null; atualizado_em: string;
+  // 18/11: formato, 2ª entrevista e e-mail (convite na agenda)
+  entrevista_formato: string | null; entrevista2_em: string | null; entrevista2_formato: string | null; email: string | null };
 
 // 09/11: o custo vem do Google Ads pelo n8n e levava 1 a 2,5 s a cada abertura da tela (e gastava uma
 // execução do n8n por vez). Agora fica guardado por 30 min; falha não é guardada (tenta de novo na próxima).
@@ -102,7 +104,7 @@ async function custoRecrutamento(dias: number | null, ate: string | null = null)
 export async function FunilRecrutamento({ dias, ate = null, base, aba, corretores }: { dias: number | null; ate?: string | null; base: string; aba: string; corretores: { id: number; nome: string }[] }) {
   const [ev, { data: linhas }, custo] = await Promise.all([
     carregarRecrutamento(dias, ate),
-    supabaseAdmin().from('recrutamento_candidatos').select('telefone,etapa,motivo,entrevista_em,retomar_em,encaminhado_nome,atualizado_em').limit(5000),
+    supabaseAdmin().from('recrutamento_candidatos').select('telefone,etapa,motivo,entrevista_em,retomar_em,encaminhado_nome,atualizado_em,entrevista_formato,entrevista2_em,entrevista2_formato,email').limit(5000),
     custoRecrutamento(dias, ate),
   ]);
   const porTel = new Map(((linhas ?? []) as LinhaRec[]).map((l) => [fim8(l.telefone), l]));
@@ -236,11 +238,14 @@ export async function FunilRecrutamento({ dias, ate = null, base, aba, corretore
                   {c.reg && (c.reg.encaminhado_nome || c.reg.entrevista_em || c.reg.motivo) && (
                     <p className="mt-1 text-xs text-slate-700">
                       {c.reg.encaminhado_nome && <>Com {c.reg.encaminhado_nome}. </>}
-                      {c.reg.entrevista_em && <>Entrevista {fmtEnt.format(new Date(c.reg.entrevista_em))}. </>}
+                      {c.reg.entrevista_em && <>Entrevista {fmtEnt.format(new Date(c.reg.entrevista_em))}{c.reg.entrevista_formato === 'meet' ? ' (Meet)' : c.reg.entrevista_formato === 'presencial' ? ' (presencial)' : ''}. </>}
+                      {c.reg.entrevista2_em && <>2ª entrevista {fmtEnt.format(new Date(c.reg.entrevista2_em))}{c.reg.entrevista2_formato === 'meet' ? ' (Meet)' : c.reg.entrevista2_formato === 'presencial' ? ' (presencial)' : ''}. </>}
+                      {c.reg.email && <>{c.reg.email}. </>}
                       {c.reg.motivo && <>Motivo: {c.reg.motivo}.</>}
                     </p>
                   )}
-                  <AcoesCandidato tel={c.tel} etapa={c.etapa === 'fora' ? 'decidir' : c.etapa} fora={c.etapa === 'fora'} corretores={corretores} />
+                  <AcoesCandidato tel={c.tel} etapa={c.etapa === 'fora' ? 'decidir' : c.etapa} fora={c.etapa === 'fora'} corretores={corretores}
+                    ent={c.reg ? { em1: c.reg.entrevista_em, f1: c.reg.entrevista_formato, em2: c.reg.entrevista2_em, f2: c.reg.entrevista2_formato, email: c.reg.email } : undefined} />
                 </li>
               ))}
             </ul>
