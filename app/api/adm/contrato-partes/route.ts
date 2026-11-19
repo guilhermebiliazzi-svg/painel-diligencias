@@ -11,6 +11,8 @@
 //                                        -> leitura automática do documento (n8n "Painel — Ler
 //                                           documento da parte", Gemini); grava dados_extraidos
 // DELETE ?id=PARTE&contrato=ID           -> remove a parte (os documentos ficam na pasta)
+// GET    ?buscar_doc=CPF/CNPJ             -> 19/11: dados da mesma pessoa em outro contrato (ou no cadastro de
+//                                           locadores/locatários), para preencher o quadro ao digitar o documento
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { acessoContratos } from "@/lib/adm-acesso";
@@ -147,10 +149,49 @@ async function sugestoes(sb: SB, dono: Dono): Promise<Parte[]> {
   return out;
 }
 
+// 19/11: pessoa já cadastrada pelo CPF/CNPJ. Prefere a parte de outro contrato com mais dados preenchidos
+// (endereço, representação, estado civil...); sem ela, usa o cadastro de locadores/locatários.
+async function buscarPorDocumento(sb: SB, docBruto: string, excluir: number | null) {
+  const d = soDigitos(docBruto);
+  if (d.length !== 11 && d.length !== 14) return null;
+  const formas = [...new Set([fmtCpfCnpj(d), d])];
+  const { data } = await sb.from("adm_contrato_partes").select(COLS + ",updated_at").in("cpf_cnpj", formas).order("updated_at", { ascending: false }).limit(20);
+  const CAMPOS = ["nome", "rg", "genero", "nacionalidade", "estado_civil", "regime_bens", "profissao", "email", "telefone", "endereco", "representacao"] as const;
+  const preenchidos = (x: any) => CAMPOS.filter((k) => String(x?.[k] ?? "").trim()).length + (x?.conjuge?.nome ? 1 : 0);
+  const cands = ((data || []) as any[]).filter((x) => x.id !== excluir);
+  if (cands.length) {
+    const m = cands.reduce((a, b) => (preenchidos(b) > preenchidos(a) ? b : a));
+    const pessoa: Record<string, unknown> = { tipo_pessoa: d.length === 14 ? "PJ" : "PF", cpf_cnpj: fmtCpfCnpj(d) };
+    for (const k of CAMPOS) if (String(m[k] ?? "").trim()) pessoa[k] = m[k];
+    if (m.conjuge?.nome) pessoa.conjuge = m.conjuge;
+    return { origem: "contrato", pessoa };
+  }
+  for (const tab of ["adm_locadores", "adm_locatarios"]) {
+    const { data: c } = await sb.from(tab).select("*").in("cpf_cnpj", formas).limit(1).maybeSingle();
+    if (c) {
+      const x = c as Record<string, any>;
+      const via = [x.end_tipo_logradouro, x.end_logradouro].filter(Boolean).join(" ");
+      const endereco = [[via, x.end_numero].filter(Boolean).join(", "), x.end_complemento, x.end_bairro, x.end_uf, x.end_cep && "CEP " + x.end_cep]
+        .filter((v) => String(v ?? "").trim()).join(" - ");
+      const pessoa: Record<string, unknown> = { tipo_pessoa: d.length === 14 ? "PJ" : "PF", cpf_cnpj: fmtCpfCnpj(d), nome: x.nome || "" };
+      if (x.email) pessoa.email = x.email;
+      if (x.telefone) pessoa.telefone = x.telefone;
+      if (via) pessoa.endereco = endereco;
+      return { origem: "cadastro", pessoa };
+    }
+  }
+  return null;
+}
+
 export async function GET(req: Request) {
   const ac = await acessoContratos();
   if (!ac.ok) return erro(ac.error, ac.status);
-  const dono = donoDe(new URL(req.url).searchParams);
+  const qs = new URL(req.url).searchParams;
+  if (qs.has("buscar_doc")) {
+    const achado = await buscarPorDocumento(supabaseAdmin(), qs.get("buscar_doc") || "", idValido(qs.get("excluir")));
+    return NextResponse.json({ ok: true, achado });
+  }
+  const dono = donoDe(qs);
   if (!dono) return erro("contrato inválido.");
   const sb = supabaseAdmin();
   const { data: partes, error } = await sb
