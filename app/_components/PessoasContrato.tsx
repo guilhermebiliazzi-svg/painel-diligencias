@@ -32,6 +32,7 @@ type Card = {
   status: "salvo" | "salvando" | "pendente" | "erro" | "vazio";
   erro?: string;
   daBase?: boolean; // veio do cadastro / do formulário
+  aviso?: string; // 19/11: "preenchido com os dados já cadastrados"
 };
 export type PessoaBase = { nome: string; cpf_cnpj?: string | null; email?: string | null; telefone?: string | null };
 
@@ -200,6 +201,36 @@ export default function PessoasContrato({
     } finally {
       salvandoRef.current[key] = false;
       if (sujoRef.current[key]) agendar(key, 300);
+    }
+  }
+
+  // 19/11: ao digitar um CPF/CNPJ já cadastrado (outro contrato ou cadastro de locadores/locatários),
+  // preenche os campos vazios do quadro com os dados que já temos. Não troca o que já está escrito.
+  const buscadoRef = useRef<Record<string, string>>({});
+  async function buscarCadastro(key: string, docTxt: string) {
+    const d = String(docTxt || "").replace(/\D/g, "");
+    if ((d.length !== 11 && d.length !== 14) || buscadoRef.current[key] === d) return;
+    buscadoRef.current[key] = d;
+    try {
+      const c0 = cardsRef.current.find((x) => x.key === key);
+      const r = await fetch(`/api/adm/contrato-partes?buscar_doc=${d}${c0?.parte.id ? "&excluir=" + c0.parte.id : ""}`, { cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      const pe = j?.achado?.pessoa as Record<string, any> | undefined;
+      if (!r.ok || !pe) return;
+      const atual = cardsRef.current.find((x) => x.key === key);
+      if (!atual || String(atual.parte.cpf_cnpj || "").replace(/\D/g, "") !== d) return;
+      const x0 = atual.parte as Record<string, any>;
+      const novos: Record<string, any> = {};
+      for (const [k, v] of Object.entries(pe)) {
+        if (k === "cpf_cnpj" || k === "tipo_pessoa" || v == null || v === "") continue;
+        const vazio = k === "conjuge" ? !x0.conjuge?.nome : !String(x0[k] ?? "").trim();
+        if (vazio) novos[k] = v;
+      }
+      if (!Object.keys(novos).length) return;
+      mudar(key, (x) => ({ ...x, ...novos }) as Parte);
+      atualizar(key, (x) => ({ ...x, aviso: `Preenchido com os dados já cadastrados${j.achado.origem === "contrato" ? " em outro contrato" : ""}. Confira.` }));
+    } catch {
+      /* segue sem preencher */
     }
   }
 
@@ -388,6 +419,8 @@ export default function PessoasContrato({
           </div>
         )}
 
+        {c.aviso && <p className="vj-ps-aviso" style={{ margin: "0 0 10px", padding: "8px 12px", borderRadius: 8, background: "#ecfdf5", color: "#047857", fontSize: 13 }}>{c.aviso}</p>}
+
         <div className="vj-grid">
           <label className="vj-f vj-ps-larga">
             <span>{pj ? "Razão social *" : "Nome completo *"}</span>
@@ -395,7 +428,7 @@ export default function PessoasContrato({
           </label>
           <label className="vj-f">
             <span>{pj ? "CNPJ" : "CPF"}</span>
-            <input value={p.cpf_cnpj || ""} inputMode="numeric" onChange={(e) => set("cpf_cnpj", e.target.value)} />
+            <input value={p.cpf_cnpj || ""} inputMode="numeric" onChange={(e) => { set("cpf_cnpj", e.target.value); buscarCadastro(c.key, e.target.value); }} />
           </label>
           {!pj && (
             <>
