@@ -54,6 +54,59 @@ async function acaoN8n(body: Record<string, unknown>): Promise<ResultadoRec> {
   }
 }
 
+// 18/11: evento da entrevista na agenda do Guilherme (n8n SDR-12, ação agenda_entrevista). O Google manda o convite ao candidato.
+type RespAgenda = { ok: boolean; resposta: string; evento_id: string; meet: string };
+async function agendaN8n(body: Record<string, unknown>): Promise<RespAgenda> {
+  try {
+    const r = await fetch(WEBHOOK_ACAO, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-chave': CHAVE_ACAO },
+      body: JSON.stringify({ acao: 'agenda_entrevista', ...body }),
+      cache: 'no-store',
+    });
+    const j = (await r.json().catch(() => ({}))) as { ok?: boolean; resposta?: string; evento_id?: string; meet?: string };
+    if (!r.ok) return { ok: false, resposta: 'A agenda não respondeu (' + r.status + ').', evento_id: '', meet: '' };
+    return { ok: !!j.ok, resposta: String(j.resposta ?? ''), evento_id: String(j.evento_id ?? ''), meet: String(j.meet ?? '') };
+  } catch {
+    return { ok: false, resposta: 'A agenda não respondeu.', evento_id: '', meet: '' };
+  }
+}
+
+type RegEnt = { email: string | null; entrevista_evento_id: string | null; entrevista2_evento_id: string | null };
+async function lerRegEntrevista(tel: string): Promise<RegEnt | null> {
+  const { data } = await supabaseAdmin().from('recrutamento_candidatos').select('email,entrevista_evento_id,entrevista2_evento_id').eq('telefone', tel).maybeSingle();
+  return (data as RegEnt | null) ?? null;
+}
+
+// 18/11: marcar/remarcar a 1ª ou a 2ª entrevista — grava no painel e cria o evento na agenda (com convite, se tiver e-mail).
+export async function agendarEntrevista(tel: string, numero: 1 | 2, quando: string, formato: string, email: string): Promise<ResultadoRec> {
+  const eu = await exigirRecrutamento();
+  const c = await lerCandidato(tel);
+  if (!c) return { ok: false, erro: 'Candidato não encontrado.' };
+  const q = String(quando ?? '');
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(q)) return { ok: false, erro: 'Informe data e hora da entrevista.' };
+  if (formato !== 'presencial' && formato !== 'meet') return { ok: false, erro: 'Escolha presencial ou Google Meet.' };
+  const em = String(email ?? '').trim().toLowerCase();
+  if (em && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) return { ok: false, erro: 'E-mail inválido.' };
+  const n: 1 | 2 = numero === 2 ? 2 : 1;
+  const iso = new Date(q + ':00-03:00').toISOString();
+  const reg = await lerRegEntrevista(c.telefone);
+  const antigo = (n === 1 ? reg?.entrevista_evento_id : reg?.entrevista2_evento_id) || '';
+  const ag = await agendaN8n({ op: 'salvar', evento_id: antigo, inicio: iso, formato, email: em, nome: c.nome || 'Candidato(a)', numero: n });
+  const sufixo = n === 2 ? '2' : '';
+  const patch: Record<string, unknown> = {
+    etapa: 'entrevista', motivo: null, email: em || reg?.email || null,
+    ['entrevista' + sufixo + '_em']: iso,
+    ['entrevista' + sufixo + '_formato']: formato,
+    ['entrevista' + sufixo + '_evento_id']: ag.ok ? ag.evento_id || null : null,
+  };
+  const rotulo = (n === 2 ? '2ª entrevista' : 'entrevista') + ' marcada: ' + q.replace('T', ' ') + (formato === 'meet' ? ' (Meet)' : ' (presencial)');
+  const erro = await gravar(c.telefone, patch, rotulo, eu.email);
+  if (erro) return { ok: false, erro: 'Não foi possível gravar: ' + erro };
+  if (!ag.ok) return { ok: false, erro: 'Entrevista gravada no painel, mas não entrou na agenda: ' + (ag.resposta || 'erro') + '. Tente gravar de novo.' };
+  return { ok: true, msg: 'Entrevista gravada. ' + ag.resposta + (ag.meet ? ' Meet: ' + ag.meet : '') };
+}
+
 // Muda a etapa (descartar, entrou, voltar para decidir, marcar entrevista).
 export async function mudarEtapaCandidato(tel: string, etapa: EtapaRec, extra?: { motivo?: string; entrevista_em?: string; retomar_em?: string }): Promise<ResultadoRec> {
   const eu = await exigirRecrutamento();
@@ -67,6 +120,13 @@ export async function mudarEtapaCandidato(tel: string, etapa: EtapaRec, extra?: 
     if (!MOTIVOS_DESCARTE.includes(motivo)) return { ok: false, erro: 'Escolha o motivo.' };
     patch.motivo = motivo;
     evento = 'descartado: ' + motivo;
+    // 18/11: descartou → cancela as entrevistas na agenda (o Google avisa o candidato, se ele foi convidado).
+    const reg = await lerRegEntrevista(c.telefone);
+    for (const id of [reg?.entrevista_evento_id, reg?.entrevista2_evento_id]) {
+      if (id) await agendaN8n({ op: 'cancelar', evento_id: id });
+    }
+    patch.entrevista_evento_id = null;
+    patch.entrevista2_evento_id = null;
   } else if (etapa === 'entrevista') {
     const q = String(extra?.entrevista_em ?? '');
     if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(q)) return { ok: false, erro: 'Informe data e hora da entrevista.' };
