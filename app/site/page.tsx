@@ -253,12 +253,18 @@ function QuemConverteu({ lista }: { lista: Convertido[] }) {
       <div className="grid gap-2">
         {lista.map((c) => {
           const recrut = c.tipo_form === 'recrutamento';
+          // 20/11: a pessoa abre a tela dela — lead do SDR, candidato no recrutamento ou a conversa com a Eva
+          const fim8 = String(c.telefone || '').replace(/\D/g, '').slice(-8);
+          const linkRecrut = `/recrutamento?d=tudo&a=${c.recrut_etapa || 'decidir'}${fim8 ? '#r' + fim8 : ''}`;
+          const linkPessoa = c.lead_id ? '/sdr/lead/' + c.lead_id : recrut ? linkRecrut : c.telefone ? '/sdr/conversa/' + c.telefone : null;
           const pagina = c.imovel_titulo ? curto(c.imovel_titulo, c.caminho) : c.caminho === '/anuncie' ? 'Landing “Anuncie seu imóvel”' : c.caminho === '/seja-remax' ? 'Landing “Seja REMAX” (recrutamento)' : c.caminho || '/';
           return (
             <div key={c.sessao + c.canal + c.quando} className="min-w-0 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="tabular-nums text-slate-500">{hora(c.quando)}</span>
-                <span className="font-semibold text-slate-900">{c.nome || (c.telefone ? 'Sem nome' : 'Não identificado')}</span>
+                {linkPessoa
+                  ? <Link href={linkPessoa} className="font-semibold text-blue-800 hover:underline">{c.nome || (c.telefone ? 'Sem nome' : 'Não identificado')}</Link>
+                  : <span className="font-semibold text-slate-900">{c.nome || (c.telefone ? 'Sem nome' : 'Não identificado')}</span>}
                 {c.telefone && <span className="tabular-nums text-slate-600">{telBR(c.telefone)}</span>}
                 <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800">{c.canal}</span>
                 <Selo pago={c.pago} />
@@ -290,7 +296,8 @@ function QuemConverteu({ lista }: { lista: Convertido[] }) {
                 )}
                 <p className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs">
                   {c.lead_id && <Link href={'/sdr/lead/' + c.lead_id} className="font-semibold text-blue-700 hover:underline">Abrir o lead</Link>}
-                  {c.telefone && !recrut && <Link href={'/sdr/conversa/' + c.telefone} className="font-semibold text-blue-700 hover:underline">Ver a conversa</Link>}
+                  {recrut && <Link href={linkRecrut} className="font-semibold text-blue-700 hover:underline">Abrir no recrutamento</Link>}
+                  {c.telefone && <Link href={'/sdr/conversa/' + c.telefone} className="font-semibold text-blue-700 hover:underline">Ver a conversa</Link>}
                 </p>
               </div>
             </div>
