@@ -19,6 +19,7 @@ import {
   reaisComExtenso, somarDias, somarMeses,
 } from "@/lib/extenso";
 import { BANCOS } from "@/lib/bancos";
+import { logradouroPorExtenso, temTipoLogradouro } from "@/lib/logradouro";
 
 export type Bloco =
   | { t: "titulo"; texto: string }
@@ -172,7 +173,7 @@ function blocoPartes(lista: Parte[], designacao: string, opts: { comConjuge?: bo
 function enderecoImovel(im: Record<string, any> | null): string {
   if (!im) return "____________";
   const partes = [
-    [im.rua, im.numero].filter(Boolean).join(", "),
+    [logradouroPorExtenso(im.rua), im.numero].filter(Boolean).join(", "),
     im.complemento,
     im.bairro,
     [im.cidade, im.estado].filter(Boolean).join(" – "),
@@ -253,6 +254,7 @@ export function montarLocacao(d: DadosContrato): { blocos: Bloco[]; pendencias: 
     ["O presente instrumento é acompanhado do Anexo I - Relatório de Vistoria de Entrada, que descreve detalhadamente o imóvel e o seu estado de conservação, no momento de entrega deste ao LOCATÁRIO, o qual as partes aceitam expressamente, cabendo às partes a contestação em até 5 (cinco) dias úteis após a entrega do relatório."],
   ));
   if (!d.imovel?.nro_contribuinte) pend.push("O imóvel está sem número de contribuinte (IPTU).");
+  if (d.imovel?.rua && !temTipoLogradouro(d.imovel.rua)) pend.push(`O endereço do imóvel ("${d.imovel.rua}") está sem o tipo do logradouro (Rua, Avenida, Alameda…).`);
 
   // 2 — destinação
   B.push({ t: "clausula", texto: "CLÁUSULA 2ª - DA DESTINAÇÃO DO IMÓVEL" });
