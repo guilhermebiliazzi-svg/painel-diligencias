@@ -208,7 +208,7 @@ export async function FunilRecrutamento({ dias, ate = null, base, aba, corretore
           ) : (
             <ul className="mt-4 divide-y divide-slate-100">
               {daAba.map((c) => (
-                <li key={c.tel} className="py-3">
+                <li key={c.tel} id={'r' + fim8(c.tel)} className="scroll-mt-20 py-3 target:rounded-lg target:bg-amber-50">
                   <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                     <div className="min-w-0">
                       <span className="font-medium text-slate-900">{cor(c.indicador)} {c.nome || 'Sem nome'}</span>{' '}
