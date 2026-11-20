@@ -184,7 +184,7 @@ export async function GET(req: Request) {
 
   const link = await linkDoEstudo(p);
   if (link && 'erro' in link) return erro(link.erro, 500);
-  if (link) return NextResponse.json({ status: 'pronto', url: link.url, nome: link.nome });
+  if (link) return NextResponse.json({ status: 'pronto', url: link.url, nome: link.nome, aprovacao: p.aprovacao });
 
   const minutos = (Date.now() - new Date(p.criado_em).getTime()) / 60000;
   if (minutos > 8) return NextResponse.json({ status: 'erro', mensagem: 'O estudo demorou demais para ficar pronto. Tente de novo.' });
