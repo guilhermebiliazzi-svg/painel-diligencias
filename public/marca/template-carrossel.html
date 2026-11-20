@@ -62,9 +62,10 @@
   .hidden{display:none !important}
 
   .bg-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;filter:brightness(1.05) saturate(1.06)}
-  .tint-bottom{position:absolute;inset:0;background:linear-gradient(180deg,rgba(12,39,73,0) 52%,rgba(12,39,73,.86) 100%);pointer-events:none}
+  .tint-bottom{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,0) 55%,rgba(0,0,0,.72) 100%);pointer-events:none} /* 20/11: sombra neutra (sem azul) */
   .tint-bottom-strong{position:absolute;inset:0;background:linear-gradient(180deg,rgba(12,39,73,0) 50%,rgba(12,39,73,.92) 100%);pointer-events:none}
-  .tint-top{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,14,53,.42) 0%,rgba(0,14,53,0) 20%);pointer-events:none}
+  .tint-top{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.30) 0%,rgba(0,0,0,0) 18%);pointer-events:none}
+  .tarja-exclusivo{display:inline-flex;align-items:center;height:58px;padding:0 28px;border-radius:8px;background:#DC1C2E;color:#fff;font-weight:800;font-size:32px;letter-spacing:6px;line-height:1;margin-bottom:28px}
 
   .eyebrow{font-size:24px;letter-spacing:.2em;text-transform:uppercase;font-weight:700}
   .label{font-size:22px;letter-spacing:.16em;text-transform:uppercase;font-weight:600}
@@ -136,6 +137,7 @@
     <span class="label" style="color:#fff">REF. {{codigo_imovel}}</span>
   </div>
   <div style="position:absolute;left:80px;right:80px;bottom:132px;color:#fff">
+    <div class="tarja-exclusivo">EXCLUSIVO</div>
     <div class="eyebrow" style="color:#fff;margin-bottom:22px;display:flex;align-items:center;gap:18px"><span class="barra" style="width:12px;height:28px"></span>{{tipo}} · {{bairro}}</div>
     <div class="display-l" style="color:#fff;font-weight:600">{{tipo}}</div>
     <div class="display-xl" style="color:#fff;margin-top:6px">{{bairro}}</div>
