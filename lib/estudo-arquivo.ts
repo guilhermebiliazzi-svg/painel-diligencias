@@ -9,12 +9,14 @@ const VALIDADE_LINK = 24 * 3600;
 export type PedidoEstudo = {
   id: string; email: string | null; status: string; mensagem: string | null; arquivo_path: string | null;
   criado_em: string; nome_arquivo: string | null; lead_id: string | null;
+  // 20/11: aprovação do Guilherme (aguardando | aprovado | correcao; null = estudos antigos)
+  aprovacao: string | null; aprovacao_obs: string | null;
 };
 
 export async function lerPedido(id: string): Promise<PedidoEstudo | null> {
   const { data } = await supabaseAdmin()
     .from('painel_estudo_pedidos')
-    .select('id, email, status, mensagem, arquivo_path, criado_em, lead_id, nome_arquivo:payload->>nome_arquivo')
+    .select('id, email, status, mensagem, arquivo_path, criado_em, lead_id, aprovacao, aprovacao_obs, nome_arquivo:payload->>nome_arquivo')
     .eq('id', id)
     .maybeSingle();
   return (data as PedidoEstudo | null) ?? null;
