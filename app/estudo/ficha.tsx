@@ -809,7 +809,7 @@ function GerarEstudo({ tipo, vals, aberto, fechar }: { tipo: Tipo; vals: Record<
   const [foraItbi, setForaItbi] = useState<string[]>([]);
   const [foraAn, setForaAn] = useState<string[]>([]);
   const [todas, setTodas] = useState(false);
-  const [arquivo, setArquivo] = useState<{ url: string; nome: string } | null>(null);
+  const [arquivo, setArquivo] = useState<{ url: string; nome: string; aprovacao?: string | null } | null>(null);
   const [andamento, setAndamento] = useState('');
   const sessao = useRef(0); // invalida a consulta em andamento quando a janela fecha
   const valsRef = useRef(vals);
@@ -862,7 +862,7 @@ function GerarEstudo({ tipo, vals, aberto, fechar }: { tipo: Tipo; vals: Record<
         const s = await api(undefined, '?id=' + encodeURIComponent(j.id));
         if (sessao.current !== minha) return;
         if (s.status === 'pronto') {
-          setArquivo({ url: s.url, nome: s.nome }); setFase('pronto');
+          setArquivo({ url: s.url, nome: s.nome, aprovacao: s.aprovacao }); setFase('pronto');
           const a = document.createElement('a'); a.href = s.url; a.download = s.nome; document.body.appendChild(a); a.click(); a.remove();
           return;
         }
@@ -898,6 +898,11 @@ function GerarEstudo({ tipo, vals, aberto, fechar }: { tipo: Tipo; vals: Record<
           Estudo pronto. O download começou; se não começar, <a href={arquivo.url} download={arquivo.nome}>baixe aqui</a>.
           <br />O link vale por 24 horas.
           <br />O estudo ficou salvo no lead de captação de {(() => { const v = vals[tipo + '.prop_nome']; return typeof v === 'string' && v.trim() ? v.trim().split(' ')[0] : 'proprietário'; })()} no seu Funil do SDR, com a V2 agendada.
+          {arquivo.aprovacao === 'aguardando' && (
+            <p role="alert" style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, background: '#fff7e6', border: '1px solid #f5c26b', color: '#7a4b00', fontWeight: 600 }}>
+              Estudo enviado para aprovação do Guilherme. Você já pode baixar e conferir, mas aguarde a liberação antes de fazer a V2. O aviso chega no seu WhatsApp.
+            </p>
+          )}
         </div>
       )}
 
