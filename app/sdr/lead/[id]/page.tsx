@@ -79,7 +79,7 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
     sb.from('sdr_captacao_etapas').select('etapa,quando,created_at').eq('lead_id', id).order('created_at'),
     sb.from('sdr_imoveis_lead').select('ref,endereco,parceiro_nome,parceiro_origem').eq('lead_id', id).not('ref', 'is', null),
     // 15/11: estudos de mercado ligados ao lead (gerados pelo painel ou pela Eva)
-    sb.from('painel_estudo_pedidos').select('id,criado_em,status,nome_arquivo:payload->>nome_arquivo').eq('lead_id', id).eq('status', 'pronto').order('criado_em', { ascending: false }).limit(20),
+    sb.from('painel_estudo_pedidos').select('id,criado_em,status,aprovacao,nome_arquivo:payload->>nome_arquivo').eq('lead_id', id).eq('status', 'pronto').order('criado_em', { ascending: false }).limit(20),
   ]);
   if (!lead) notFound();
   const l = lead as Lead;
@@ -224,8 +224,14 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
               (ETAPA_CAP[e.etapa] ?? e.etapa) + (e.quando ? ' ' + fmt.format(new Date(e.quando)) : '') + ' (' + fmt.format(new Date(e.created_at)).slice(0, 5) + ')').join(' → ') : null} />
             <Linha k="Estudos" v={(estudos ?? []).length ? (
               <span className="flex flex-col gap-0.5">
-                {(estudos as { id: string; criado_em: string; nome_arquivo: string | null }[]).map((e) => (
-                  <a key={e.id} href={'/api/estudo/arquivo?id=' + e.id} className="text-blue-700 underline">{(e.nome_arquivo || 'Estudo de mercado').replace(/\.pptx$/i, '').replace(/_/g, ' ')} · {fmt.format(new Date(e.criado_em))}</a>
+                {(estudos as { id: string; criado_em: string; nome_arquivo: string | null; aprovacao: string | null }[]).map((e) => (
+                  <span key={e.id}>
+                    <a href={'/api/estudo/arquivo?id=' + e.id} className="text-blue-700 underline">{(e.nome_arquivo || 'Estudo de mercado').replace(/\.pptx$/i, '').replace(/_/g, ' ')} · {fmt.format(new Date(e.criado_em))}</a>
+                    {/* 20/11: situação da aprovação do Guilherme */}
+                    {e.aprovacao === 'aguardando' && <Link href={'/estudo/aprovar?id=' + e.id} className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">aguardando aprovação</Link>}
+                    {e.aprovacao === 'correcao' && <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-800">correção pedida</span>}
+                    {e.aprovacao === 'aprovado' && <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">aprovado</span>}
+                  </span>
                 ))}
               </span>
             ) : null} />
