@@ -15,6 +15,7 @@ import { CondicoesContrato, EstilosMinuta, GarantiaDetalhes, GerarContratos } fr
 import { FormConta, contaVazia, resumoConta, type ContaForm } from "@/app/_components/ContaRepasse";
 import { normalizarConta } from "@/lib/bancos";
 import { normalizarCobrancaSeguro } from "@/lib/contrato-documentos";
+import { TIPOS_LOGRADOURO, separarLogradouro } from "@/lib/logradouro";
 
 type Pessoa = { id: number; nome: string; cpf_cnpj: string | null };
 type Imovel = {
@@ -52,6 +53,7 @@ const NOVO = "__novo__";
 const vazioPessoa = { nome: "", cpf_cnpj: "", email: "", telefone: "" };
 const vazioImovel = {
   rua: "", numero: "", complemento: "", bairro: "", cep: "", cidade: "São Paulo", estado: "SP",
+  rua_tipo: undefined as string | undefined, // 19/11: Rua, Avenida, Alameda... (o campo rua guarda "Tipo Nome")
   tipo_imovel: "Apartamento", nro_contribuinte: "", administradora: "", dia_venc_condominio: "", dia_venc_iptu: "",
 };
 
@@ -68,6 +70,19 @@ export default function NovoContrato() {
   const [locadorNovo, setLocadorNovo] = useState({ ...vazioPessoa });
   const [imovelSel, setImovelSel] = useState<string>("");
   const [imovelNovo, setImovelNovo] = useState({ ...vazioImovel });
+  // 19/11: tipo do logradouro em seletor próprio; "rua" continua com o texto inteiro ("Alameda Itu")
+  const lgTipo = imovelNovo.rua_tipo ?? separarLogradouro(imovelNovo.rua).tipo;
+  const lgNome = !lgTipo
+    ? imovelNovo.rua
+    : imovelNovo.rua.toLowerCase().startsWith(lgTipo.toLowerCase() + " ")
+      ? imovelNovo.rua.slice(lgTipo.length + 1)
+      : imovelNovo.rua.trim().toLowerCase() === lgTipo.toLowerCase() ? "" : separarLogradouro(imovelNovo.rua).nome;
+  const mudarTipoLogradouro = (t: string) => setImovelNovo({ ...imovelNovo, rua_tipo: t, rua: t ? `${t} ${lgNome}` : lgNome });
+  const mudarNomeLogradouro = (v: string) => {
+    const sp = separarLogradouro(v);
+    if (!lgTipo && sp.tipo) setImovelNovo({ ...imovelNovo, rua_tipo: sp.tipo, rua: `${sp.tipo} ${sp.nome}` });
+    else setImovelNovo({ ...imovelNovo, rua: lgTipo ? `${lgTipo} ${v}` : v });
+  };
   const [locatarioSel, setLocatarioSel] = useState<string>("");
   const [locatarioNovo, setLocatarioNovo] = useState({ ...vazioPessoa });
 
@@ -366,7 +381,8 @@ export default function NovoContrato() {
     if (!imovelSel) return setErro("Escolha o imóvel (ou “Cadastrar novo”).");
     if (imovelSel === NOVO && !locadorSel_) return setErro("Preencha o locador (proprietário).");
     if (imovelSel === NOVO && locadorSel_ === NOVO && !locadorNovo_.nome.trim()) return setErro("Informe o nome do locador.");
-    if (imovelSel === NOVO && (!imovelNovo.rua.trim() || !imovelNovo.numero.trim())) return setErro("Informe rua e número do imóvel.");
+    if (imovelSel === NOVO && (!lgNome.trim() || !imovelNovo.numero.trim())) return setErro("Informe o nome da rua e o número do imóvel.");
+    if (imovelSel === NOVO && !lgTipo) return setErro("Escolha o tipo do logradouro do imóvel (Rua, Avenida, Alameda…).");
     if (!locatarioSel_) return setErro("Preencha o locatário (inquilino).");
     if (locatarioSel_ === NOVO && !locatarioNovo_.nome.trim()) return setErro("Informe o nome do locatário.");
     if (!c.valor_primeiro_aluguel) return setErro("Informe o valor do aluguel.");
@@ -545,7 +561,13 @@ export default function NovoContrato() {
                 <>
                   <h3 className="vj-h3">Novo imóvel</h3>
                   <div className="vj-grid vj-sub-grid">
-                    <label className="vj-f"><span>Rua *</span><input value={imovelNovo.rua} onChange={(e) => setImovelNovo({ ...imovelNovo, rua: e.target.value })} /></label>
+                    <label className="vj-f"><span>Tipo *</span>
+                      <select value={lgTipo} onChange={(e) => mudarTipoLogradouro(e.target.value)}>
+                        <option value="">Escolha…</option>
+                        {TIPOS_LOGRADOURO.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </label>
+                    <label className="vj-f"><span>Nome da rua *</span><input value={lgNome} placeholder="ex.: Viradouro" onChange={(e) => mudarNomeLogradouro(e.target.value)} /></label>
                     <label className="vj-f"><span>Número *</span><input value={imovelNovo.numero} onChange={(e) => setImovelNovo({ ...imovelNovo, numero: e.target.value })} /></label>
                     <label className="vj-f"><span>Complemento</span><input placeholder="ap 121" value={imovelNovo.complemento} onChange={(e) => setImovelNovo({ ...imovelNovo, complemento: e.target.value })} /></label>
                     <label className="vj-f"><span>Bairro</span><input value={imovelNovo.bairro} onChange={(e) => setImovelNovo({ ...imovelNovo, bairro: e.target.value })} /></label>
