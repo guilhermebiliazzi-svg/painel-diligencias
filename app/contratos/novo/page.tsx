@@ -102,6 +102,47 @@ export default function NovoContrato() {
   const set = (k: string, v: any) => setC((p) => ({ ...p, [k]: v }));
 
   const docsRef = useRef<DocumentosContratoHandle>(null);
+  // 20/11: cada quadro abre e fecha clicando no título (o estado fica salvo neste navegador)
+  const formRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const raiz = formRef.current;
+    if (!raiz) return;
+    const CHAVE = "vj-contrato-novo-fechadas";
+    const ler = (): string[] => { try { return JSON.parse(localStorage.getItem(CHAVE) || "[]"); } catch { return []; } };
+    const gravar = (v: string[]) => { try { localStorage.setItem(CHAVE, JSON.stringify(v)); } catch { /* ignora */ } };
+    const titulo = (card: Element) => (card.querySelector("h2.vj-h2")?.textContent || "").trim();
+    const aplicar = () => {
+      const fechadas = new Set(ler());
+      raiz.querySelectorAll(".vj-card").forEach((card) => {
+        if (!card.querySelector("h2.vj-h2") || card.hasAttribute("data-vj-sec")) return;
+        card.setAttribute("data-vj-sec", "1");
+        if (fechadas.has(titulo(card))) card.classList.add("vj-fechado");
+      });
+    };
+    const clique = (e: Event) => {
+      const alvo = e.target as Element | null;
+      const acao = alvo?.closest?.("[data-vj-todas]")?.getAttribute("data-vj-todas");
+      if (acao) {
+        const cards = Array.from(raiz.querySelectorAll(".vj-card[data-vj-sec]"));
+        cards.forEach((c) => c.classList.toggle("vj-fechado", acao === "fechar"));
+        gravar(acao === "fechar" ? cards.map(titulo) : []);
+        return;
+      }
+      const h = alvo?.closest?.("h2.vj-h2");
+      const card = h?.closest(".vj-card[data-vj-sec]");
+      if (!h || !card) return;
+      const fechado = card.classList.toggle("vj-fechado");
+      const t = titulo(card);
+      const set = new Set(ler());
+      if (fechado) set.add(t); else set.delete(t);
+      gravar([...set]);
+    };
+    aplicar();
+    const obs = new MutationObserver(aplicar);
+    obs.observe(raiz, { childList: true, subtree: true });
+    raiz.addEventListener("click", clique);
+    return () => { obs.disconnect(); raiz.removeEventListener("click", clique); };
+  }, []);
 
   // minuta (locação ainda não assinada)
   const [minutaId, setMinutaId] = useState<number | null>(null);
@@ -497,7 +538,7 @@ export default function NovoContrato() {
         <div className="vj-crumb">Administração · Novo contrato</div>
       </header>
 
-      <main className="vj-main">
+      <main className="vj-main vj-form" ref={formRef}>
         <div className="vj-head">
           <div>
             <h1 className="vj-h1">{minutaId ? "Minuta de locação" : "Novo contrato de locação"}</h1>
@@ -535,6 +576,10 @@ export default function NovoContrato() {
 
         {listas && !minutaFechada && (
           <>
+            <div className="vj-todas">
+              <button type="button" data-vj-todas="abrir">Abrir todas</button>
+              <button type="button" data-vj-todas="fechar">Fechar todas</button>
+            </div>
             {/* Imóvel e locador */}
             <section className="vj-card">
               <h2 className="vj-h2">Imóvel</h2>
@@ -580,9 +625,6 @@ export default function NovoContrato() {
                     <label className="vj-f"><span>Cidade</span><input value={imovelNovo.cidade} onChange={(e) => setImovelNovo({ ...imovelNovo, cidade: e.target.value })} /></label>
                     <label className="vj-f"><span>UF</span><input maxLength={2} value={imovelNovo.estado} onChange={(e) => setImovelNovo({ ...imovelNovo, estado: e.target.value })} /></label>
                     <label className="vj-f"><span>Nº contribuinte (IPTU)</span><input value={imovelNovo.nro_contribuinte} onChange={(e) => setImovelNovo({ ...imovelNovo, nro_contribuinte: e.target.value })} /></label>
-                    <label className="vj-f"><span>Administradora do condomínio</span><input value={imovelNovo.administradora} onChange={(e) => setImovelNovo({ ...imovelNovo, administradora: e.target.value })} /></label>
-                    <label className="vj-f"><span>Dia venc. condomínio</span><input type="number" min="1" max="31" value={imovelNovo.dia_venc_condominio} onChange={(e) => setImovelNovo({ ...imovelNovo, dia_venc_condominio: e.target.value })} /></label>
-                    <label className="vj-f"><span>Dia venc. IPTU</span><input type="number" min="1" max="31" value={imovelNovo.dia_venc_iptu} onChange={(e) => setImovelNovo({ ...imovelNovo, dia_venc_iptu: e.target.value })} /></label>
                   </div>
                 </>
               )}
@@ -665,9 +707,6 @@ export default function NovoContrato() {
                 <label className="vj-f"><span>Prazo (meses)</span>
                   <input type="number" value={c.prazo_meses ?? ""} disabled={c.prazo_indeterminado} onChange={(e) => set("prazo_meses", e.target.value)} />
                 </label>
-                <label className="vj-f"><span>Dia venc. condomínio</span>
-                  <input type="number" min="1" max="31" value={c.dia_vencimento_condominio ?? ""} onChange={(e) => set("dia_vencimento_condominio", e.target.value)} />
-                </label>
                 <label className="vj-f vj-check">
                   <input type="checkbox" checked={!!c.prazo_indeterminado} onChange={(e) => set("prazo_indeterminado", e.target.checked)} />
                   <span>Prazo indeterminado (sem alerta de renovação)</span>
@@ -693,30 +732,8 @@ export default function NovoContrato() {
                     {GARANTIAS.map((g) => <option key={g.v} value={g.v}>{g.t}</option>)}
                   </select>
                 </label>
-                {mostraValidadeGarantia && (
-                  <>
-                    <label className="vj-f"><span>Seguradora / instituição</span>
-                      <input value={c.garantia_seguradora ?? ""} onChange={(e) => set("garantia_seguradora", e.target.value)} />
-                    </label>
-                    <label className="vj-f"><span>Prazo da garantia (meses)</span>
-                      <input type="number" value={c.garantia_prazo_meses ?? ""} onChange={(e) => set("garantia_prazo_meses", e.target.value)} />
-                    </label>
-                  </>
-                )}
-                {c.garantia_categoria === "seguro_fianca" && (
-                  <label className="vj-f"><span>Valor do seguro-fiança (mensal)</span>
-                    <input type="number" step="0.01" value={c.valor_seguro_fianca ?? ""} onChange={(e) => set("valor_seguro_fianca", e.target.value)} />
-                  </label>
-                )}
               </div>
               <GarantiaDetalhes c={{ ...c, minuta: minutaDoc }} setMin={setMin} />
-              {mostraValidadeGarantia && (
-                <p className="vj-nota">
-                  {minutaId
-                    ? "A apólice (com a vigência, que dispara o alerta de 30 dias) entra depois de criar o contrato."
-                    : <>A vigência da apólice vai no quadro <b>Apólices</b> abaixo — é ela que dispara o alerta de 30 dias.</>}
-                </p>
-              )}
             </section>
 
             {c.garantia_categoria === "fiador" && (
@@ -729,60 +746,6 @@ export default function NovoContrato() {
                 onDocsMudaram={() => docsRef.current?.recarregar()}
               />
             )}
-
-            {/* Seguro residencial */}
-            <section className="vj-card">
-              <h2 className="vj-h2">Seguro residencial</h2>
-              <div className="vj-grid">
-                <label className="vj-f vj-check">
-                  <input type="checkbox" checked={seg.tem} onChange={(e) => setSeg({ ...seg, tem: e.target.checked })} />
-                  <span>Este contrato tem seguro residencial</span>
-                </label>
-                {seg.tem && (
-                  <>
-                    <label className="vj-f"><span>Seguradora</span>
-                      <input value={seg.seguradora} onChange={(e) => setSeg({ ...seg, seguradora: e.target.value })} />
-                    </label>
-                    <label className="vj-f"><span>Nº da apólice</span>
-                      <input value={seg.numero_apolice} onChange={(e) => setSeg({ ...seg, numero_apolice: e.target.value })} />
-                    </label>
-                    <label className="vj-f"><span>Vigência início</span>
-                      <input type="date" value={seg.vigencia_inicio} onChange={(e) => setSeg({ ...seg, vigencia_inicio: e.target.value })} />
-                    </label>
-                    <label className="vj-f"><span>Vigência fim</span>
-                      <input type="date" value={seg.vigencia_fim} onChange={(e) => setSeg({ ...seg, vigencia_fim: e.target.value })} />
-                      <small>Alerta de vencimento 30 dias antes.</small>
-                    </label>
-                    <label className="vj-f vj-larga"><span>Como o inquilino paga</span>
-                      <select value={seg.cobrar_no_boleto ? "boleto" : "direto"} onChange={(e) => setSeg({ ...seg, cobrar_no_boleto: e.target.value === "boleto" })}>
-                        <option value="boleto">Cobrado no boleto do aluguel</option>
-                        <option value="direto">Paga direto à seguradora (não entra no boleto)</option>
-                      </select>
-                    </label>
-                    {seg.cobrar_no_boleto && (
-                      <>
-                        <label className="vj-f"><span>Valor da parcela (R$) *</span>
-                          <input type="number" step="0.01" value={seg.valor_mensal} onChange={(e) => setSeg({ ...seg, valor_mensal: e.target.value })} />
-                        </label>
-                        <label className="vj-f"><span>Qtde. de parcelas a cobrar *</span>
-                          <input type="number" min="1" max="120" value={seg.parcelas_total} onChange={(e) => setSeg({ ...seg, parcelas_total: e.target.value })} />
-                        </label>
-                        <label className="vj-f"><span>1ª cobrança (mês)</span>
-                          <input type="month" value={seg.cobranca_inicio || mesPrimeiroAluguel} onChange={(e) => setSeg({ ...seg, cobranca_inicio: e.target.value })} />
-                          <small>Padrão: mês do primeiro aluguel. Depois da última parcela, o seguro sai do boleto sozinho.</small>
-                        </label>
-                      </>
-                    )}
-                    <label className="vj-f"><span>Prêmio total (R$)</span>
-                      <input type="number" step="0.01" value={seg.premio} onChange={(e) => setSeg({ ...seg, premio: e.target.value })} />
-                    </label>
-                  </>
-                )}
-              </div>
-              {seg.tem && (
-                <p className="vj-nota">O PDF da apólice pode ser anexado em <b>Documentos → Apólices</b> abaixo (escolha o tipo “Seguro residencial”); ele fica ligado a este seguro.</p>
-              )}
-            </section>
 
             {/* Responsabilidades e taxas */}
             <section className="vj-card">
@@ -832,6 +795,104 @@ export default function NovoContrato() {
               </section>
             )}
 
+            {/* 20/11: dados de gestão — não entram no texto do contrato */}
+            <section className="vj-card vj-gestao">
+              <h2 className="vj-h2">Dados para a administração</h2>
+              <p className="vj-nota" style={{ margin: "-8px 0 14px" }}>Não entram no contrato: servem para alertas, cobranças e repasses. Pode preencher depois.</p>
+              <h3 className="vj-h3" style={{ marginTop: 0 }}>Condomínio e IPTU</h3>
+              <div className="vj-grid">
+                {imovelSel === NOVO && (
+                  <label className="vj-f"><span>Administradora do condomínio</span><input value={imovelNovo.administradora} onChange={(e) => setImovelNovo({ ...imovelNovo, administradora: e.target.value })} /></label>
+                )}
+                <label className="vj-f"><span>Dia venc. condomínio</span>
+                  <input type="number" min="1" max="31" value={c.dia_vencimento_condominio ?? (imovelSel === NOVO ? imovelNovo.dia_venc_condominio : "") ?? ""}
+                    onChange={(e) => { set("dia_vencimento_condominio", e.target.value); if (imovelSel === NOVO) setImovelNovo({ ...imovelNovo, dia_venc_condominio: e.target.value }); }} />
+                </label>
+                {imovelSel === NOVO && (
+                  <label className="vj-f"><span>Dia venc. IPTU</span><input type="number" min="1" max="31" value={imovelNovo.dia_venc_iptu} onChange={(e) => setImovelNovo({ ...imovelNovo, dia_venc_iptu: e.target.value })} /></label>
+                )}
+              </div>
+              {(mostraValidadeGarantia || c.garantia_categoria === "seguro_fianca") && (
+                <>
+                  <h3 className="vj-h3">Garantia</h3>
+                  <div className="vj-grid">
+                    {mostraValidadeGarantia && (
+                      <>
+                        <label className="vj-f"><span>Seguradora / instituição</span>
+                          <input value={c.garantia_seguradora ?? ""} onChange={(e) => set("garantia_seguradora", e.target.value)} />
+                        </label>
+                        <label className="vj-f"><span>Prazo da garantia (meses)</span>
+                          <input type="number" value={c.garantia_prazo_meses ?? ""} onChange={(e) => set("garantia_prazo_meses", e.target.value)} />
+                        </label>
+                      </>
+                    )}
+                    {c.garantia_categoria === "seguro_fianca" && (
+                      <label className="vj-f"><span>Valor do seguro-fiança (mensal)</span>
+                        <input type="number" step="0.01" value={c.valor_seguro_fianca ?? ""} onChange={(e) => set("valor_seguro_fianca", e.target.value)} />
+                      </label>
+                    )}
+                  </div>
+                {mostraValidadeGarantia && (
+                  <p className="vj-nota">
+                    {minutaId
+                      ? "A apólice (com a vigência, que dispara o alerta de 30 dias) entra depois de criar o contrato."
+                      : <>A vigência da apólice vai no quadro <b>Apólices</b> abaixo — é ela que dispara o alerta de 30 dias.</>}
+                  </p>
+                )}
+                </>
+              )}
+              <h3 className="vj-h3">Seguro residencial</h3>
+                <div className="vj-grid">
+                  <label className="vj-f vj-check">
+                    <input type="checkbox" checked={seg.tem} onChange={(e) => setSeg({ ...seg, tem: e.target.checked })} />
+                    <span>Este contrato tem seguro residencial</span>
+                  </label>
+                  {seg.tem && (
+                    <>
+                      <label className="vj-f"><span>Seguradora</span>
+                        <input value={seg.seguradora} onChange={(e) => setSeg({ ...seg, seguradora: e.target.value })} />
+                      </label>
+                      <label className="vj-f"><span>Nº da apólice</span>
+                        <input value={seg.numero_apolice} onChange={(e) => setSeg({ ...seg, numero_apolice: e.target.value })} />
+                      </label>
+                      <label className="vj-f"><span>Vigência início</span>
+                        <input type="date" value={seg.vigencia_inicio} onChange={(e) => setSeg({ ...seg, vigencia_inicio: e.target.value })} />
+                      </label>
+                      <label className="vj-f"><span>Vigência fim</span>
+                        <input type="date" value={seg.vigencia_fim} onChange={(e) => setSeg({ ...seg, vigencia_fim: e.target.value })} />
+                        <small>Alerta de vencimento 30 dias antes.</small>
+                      </label>
+                      <label className="vj-f vj-larga"><span>Como o inquilino paga</span>
+                        <select value={seg.cobrar_no_boleto ? "boleto" : "direto"} onChange={(e) => setSeg({ ...seg, cobrar_no_boleto: e.target.value === "boleto" })}>
+                          <option value="boleto">Cobrado no boleto do aluguel</option>
+                          <option value="direto">Paga direto à seguradora (não entra no boleto)</option>
+                        </select>
+                      </label>
+                      {seg.cobrar_no_boleto && (
+                        <>
+                          <label className="vj-f"><span>Valor da parcela (R$) *</span>
+                            <input type="number" step="0.01" value={seg.valor_mensal} onChange={(e) => setSeg({ ...seg, valor_mensal: e.target.value })} />
+                          </label>
+                          <label className="vj-f"><span>Qtde. de parcelas a cobrar *</span>
+                            <input type="number" min="1" max="120" value={seg.parcelas_total} onChange={(e) => setSeg({ ...seg, parcelas_total: e.target.value })} />
+                          </label>
+                          <label className="vj-f"><span>1ª cobrança (mês)</span>
+                            <input type="month" value={seg.cobranca_inicio || mesPrimeiroAluguel} onChange={(e) => setSeg({ ...seg, cobranca_inicio: e.target.value })} />
+                            <small>Padrão: mês do primeiro aluguel. Depois da última parcela, o seguro sai do boleto sozinho.</small>
+                          </label>
+                        </>
+                      )}
+                      <label className="vj-f"><span>Prêmio total (R$)</span>
+                        <input type="number" step="0.01" value={seg.premio} onChange={(e) => setSeg({ ...seg, premio: e.target.value })} />
+                      </label>
+                    </>
+                  )}
+                </div>
+                {seg.tem && (
+                  <p className="vj-nota">O PDF da apólice pode ser anexado em <b>Documentos → Apólices</b> abaixo (escolha o tipo “Seguro residencial”); ele fica ligado a este seguro.</p>
+                )}
+            </section>
+
             <DocumentosContrato ref={docsRef} contratoId={null} minutaId={minutaId} />
 
             <div className="vj-foot">
@@ -863,6 +924,16 @@ const CSS = `
 .vj-h1{font-family:Archivo,sans-serif;font-size:28px;margin:0}
 .vj-sub{color:var(--mut);margin:4px 0 0}
 .vj-card{background:var(--card);border:1px solid var(--linha);border-radius:14px;padding:20px;margin-bottom:16px}
+.vj-form .vj-card[data-vj-sec] h2.vj-h2{cursor:pointer;user-select:none;display:flex;align-items:center;gap:8px}
+.vj-form .vj-card[data-vj-sec] h2.vj-h2::before{content:"▾";font-size:13px;color:var(--mut);transition:transform .15s;display:inline-block}
+.vj-form .vj-card.vj-fechado h2.vj-h2::before{transform:rotate(-90deg)}
+.vj-form .vj-card.vj-fechado{padding-top:14px;padding-bottom:14px}
+.vj-form .vj-card.vj-fechado h2.vj-h2{margin:0 !important}
+.vj-form .vj-card.vj-fechado > :not(h2):not(:has(h2.vj-h2)){display:none !important}
+.vj-form .vj-card.vj-fechado > :has(h2.vj-h2) > :not(h2):not(:has(h2.vj-h2)){display:none !important}
+.vj-todas{display:flex;justify-content:flex-end;gap:14px;margin:0 0 10px}
+.vj-todas button{background:none;border:0;color:var(--mut);font-size:12px;text-decoration:underline;cursor:pointer;padding:0}
+.vj-gestao{border-style:dashed}
 .vj-h2{font-family:Archivo,sans-serif;font-size:17px;margin:0 0 16px;color:var(--azul)}
 .vj-h3{font-size:13px;margin:18px 0 10px;color:var(--txt);text-transform:uppercase;letter-spacing:.4px}
 .vj-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
