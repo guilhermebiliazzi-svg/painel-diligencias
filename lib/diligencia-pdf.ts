@@ -5,7 +5,10 @@
 // categoria), com a situação e a página onde ela começa. Certidões sem arquivo
 // aparecem como "pendente"; arquivos que não deu para juntar (formato não
 // suportado, PDF corrompido ou grande demais) aparecem como "não incluído".
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
+// @cantoo/pdf-lib (fork do pdf-lib, MIT) porque descriptografa: certidões de cartório (matrícula) e CND do
+// condomínio chegam com senha de proprietário. O pdf-lib com ignoreEncryption copiava o conteúdo ainda
+// cifrado e as páginas saíam em branco (Aracuípe 64, 23/11).
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from '@cantoo/pdf-lib';
 import { agrupar, categoriasFor, preencherCategorias, rotuloSituacao, type RowOrdem } from './diligencia-ordem';
 
 export type ItemPdf = {
@@ -156,7 +159,10 @@ export async function montarPdfCertidoes(opts: {
             const texto = paginarTexto(htmlParaTexto(bytes), reg);
             carregados.push({ item, texto, paginas: texto.length, status: 'ok' });
           } else if (tipo === 'pdf') {
-            const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+            // password '' abre os PDFs protegidos só contra edição (o caso dos cartórios). Se ainda ficar cifrado
+            // (pede senha para abrir), vai para "não incluídas" em vez de sair em branco.
+            const doc = await PDFDocument.load(bytes, { password: '', updateMetadata: false });
+            if (doc.isEncrypted) throw new Error('PDF com senha');
             carregados.push({ item, doc, paginas: doc.getPageCount(), status: 'ok' });
           } else if (tipo === 'jpg') {
             carregados.push({ item, imagem: { bytes, tipo: 'jpg' }, paginas: 1, status: 'ok' });
