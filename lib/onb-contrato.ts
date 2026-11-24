@@ -18,7 +18,9 @@ const MODELO_DRIVE = '15T6W8ioBLhfk8lnsEjDqO0dbChNFpbiG';
 // O modelo é restrito na base: o n8n só entrega restritos para o número do administrador.
 const FONE_ADMIN = '5511989766590';
 
-const CARTILHA_URL = process.env.ONB_CARTILHA_URL || '';
+// Cartilha do Corretor da Universidade REMAX (MAN-005 v2.1, out/2026), no Drive em EVA Base de Conhecimento/Treinamentos.
+// Fica no código (e não mais na variável ONB_CARTILHA_URL da Vercel) para trocar de versão com um commit.
+const CARTILHA_URL = 'https://drive.google.com/file/d/1p9_G4Sx-RwWAfOy1CWVFw8n6_-fnaFQF/view';
 const HUB_SENHA_INICIAL = process.env.ONB_HUB_SENHA_INICIAL || '';
 
 const dig = (s: unknown) => String(s ?? '').replace(/\D/g, '');
