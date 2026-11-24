@@ -229,7 +229,9 @@ function Secao({ titulo, children }: { titulo: string; children: React.ReactNode
 }
 
 function Funil({ etapas, nota }: { etapas: Etapa[]; nota?: string }) {
-  const topo = Math.max(etapas[0]?.n ?? 0, 1);
+  // 24/11: a base é a maior etapa, não a primeira. No funil de proprietários a 1ª etapa (cliques na landing)
+  // é menor que os contatos (que vêm também de portais, site e Eva): as barras passavam de 100% e saíam do card.
+  const topo = Math.max(...etapas.map((e) => e.n), 1);
   return (
     <>
       <ol className="space-y-3">
@@ -240,11 +242,11 @@ function Funil({ etapas, nota }: { etapas: Etapa[]; nota?: string }) {
                 <span className={e.itens?.length ? 'text-blue-700 underline decoration-dotted underline-offset-2' : 'text-slate-700'}>{e.rotulo}</span>
                 <span className="tabular-nums text-slate-900">
                   <strong>{e.n}</strong>
-                  {i > 0 && <span className="ml-2 text-xs text-slate-500">{pct(e.n, etapas[0].n)}%</span>}
+                  {i > 0 && <span className="ml-2 text-xs text-slate-500">{pct(e.n, topo)}%</span>}
                 </span>
               </div>
               <div className="mt-1 h-2.5 w-full rounded-full bg-slate-100">
-                <div className="h-2.5 rounded-full bg-blue-600" style={{ width: `${Math.max((e.n / topo) * 100, e.n ? 2 : 0)}%` }} />
+                <div className="h-2.5 rounded-full bg-blue-600" style={{ width: `${Math.min(100, Math.max((e.n / topo) * 100, e.n ? 2 : 0))}%` }} />
               </div>
             </>
           );
@@ -644,7 +646,7 @@ async function FunilProprietario({ dias, ate = null, alugar }: { dias: number | 
         <Kpi rotulo="Contatos" valor={contatos.length} sub={`${contatos.filter((c) => c.evento === 'formulario').length} por formulário`} />
         <Kpi rotulo="Captador assumiu" valor={assumiu.length} sub={`${pct(assumiu.length, contatos.length)}% dos contatos`} />
         <Kpi rotulo="Esperando você" valor={contatos.filter((c) => !leadDe(c) && !c.descartado_em && !c.referenciado_em).length} sub="sem fila definida" />
-        <Kpi rotulo="Cliques no WhatsApp" valor={cliques} sub={`${pct(contatos.length, cliques)}% viraram contato`} />
+        <Kpi rotulo="Cliques no WhatsApp" valor={cliques} sub={contatos.length > cliques ? 'os contatos vêm também de outros canais' : `${pct(contatos.length, cliques)}% viraram contato`} />
       </section>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-5">
