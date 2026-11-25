@@ -12,7 +12,8 @@ export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Conversa — SDR REMAX Ville' };
 
 const fmt = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
-const telFmt = (t: string) => { const d = t.replace(/\D/g, '').replace(/^55/, ''); return d.length >= 10 ? `(${d.slice(0, 2)}) ${d.slice(2, -4)}-${d.slice(-4)}` : t; };
+// 25/11: número estrangeiro (sem 55, como +45 da Dinamarca) aparece com o código do país, não como DDD.
+const telFmt = (t: string, exterior = false) => { if (exterior) return '+' + t.replace(/\D/g, ''); const d = t.replace(/\D/g, '').replace(/^55/, ''); return d.length >= 10 ? `(${d.slice(0, 2)}) ${d.slice(2, -4)}-${d.slice(-4)}` : t; };
 
 // Mesmo número com e sem o 9 (fora de SP o WhatsApp manda sem o 9).
 function variantes(tel: string): string[] {
@@ -34,7 +35,10 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
   const { tel } = await params;
   const dig = decodeURIComponent(tel).replace(/\D/g, '');
   if (dig.length < 10 || dig.length > 13) notFound();
-  const vs = variantes(dig.length <= 11 ? '55' + dig : dig);
+  // 25/11: o WhatsApp manda o número com o código do país. Sem 55 pode ser número estrangeiro (ex.: 4591885478 = +45):
+  // procura também o número como veio, senão as mensagens recebidas não aparecem.
+  const vsBR = variantes(dig.length <= 11 ? '55' + dig : dig);
+  const vs = dig.startsWith('55') ? vsBR : [...vsBR, dig];
   const sb = supabaseAdmin();
   // 10/11: o corretor vê a conversa da Eva com o cliente de um lead que é dele e com o corretor parceiro desse lead
   // (a do parceiro só a partir da chegada do lead, para não mostrar conversas de outros leads antigos).
@@ -66,7 +70,7 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
   }
 
   const [{ data: buf }, { data: hist }, { data: msgs }, { data: cors }, { data: leadsCli }, { data: leadsCor }, { data: parcs }, { data: orulo }] = await Promise.all([
-    sb.from('mensagens_buffer').select('id,mensagem_texto,tipo_msg,created_at,processado_em').in('phone', vs).order('created_at', { ascending: true }).limit(800),
+    sb.from('mensagens_buffer').select('id,phone,mensagem_texto,tipo_msg,created_at,processado_em').in('phone', vs).order('created_at', { ascending: true }).limit(800),
     sb.from('n8n_chat_histories').select('id,session_id,message').in('session_id', [...vs, ...vs.map((v) => 'orulo:' + v)]).order('id', { ascending: true }).limit(1200),
     sb.from('sdr_mensagens').select('id,created_at,direcao,interlocutor,template,conteudo,wa_message_id,lead_id').in('telefone', vs).order('created_at', { ascending: true }).limit(800),
     sb.from('corretores_associados').select('nome,apelido,phone').in('phone', vs).limit(1),
@@ -102,7 +106,9 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
   const quem = cor ? `${cor.nome} · corretor(a) da REMAX Ville` : ehProf && !parc.length ? `${nomeProf || 'Corretor(a) de fora'} · corretor(a) de fora` : parc.length ? `${parc[0].parceiro_nome || 'Corretor(a) parceiro(a)'} · corretor(a) parceiro(a)` : nomeOrulo ? `${nomeOrulo} · corretor(a) parceiro(a) (Órulo)` : lc.length ? `${lc[0].nome || 'Cliente'} · cliente` : 'Contato';
 
   const eventos: Ev[] = [];
-  const bufs = (buf ?? []) as { id: number; mensagem_texto: string | null; tipo_msg: string | null; created_at: string; processado_em: string | null }[];
+  const bufs = (buf ?? []) as { id: number; phone: string; mensagem_texto: string | null; tipo_msg: string | null; created_at: string; processado_em: string | null }[];
+  const exterior = !dig.startsWith('55') && bufs.some((b) => b.phone === dig);
+  const principal = exterior ? dig : vs[0];
   for (const b of bufs) {
     const tx = (b.mensagem_texto || '').trim() || (b.tipo_msg && b.tipo_msg !== 'text' ? '[' + b.tipo_msg + ']' : '');
     if (tx) eventos.push({ k: 'b' + b.id, t: new Date(b.created_at).getTime(), lado: 'pessoa', rotulo: b.tipo_msg === 'button' ? 'tocou no botão' : '', texto: tx });
@@ -161,7 +167,7 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
       <Link href={gestao || viaCorretor ? '/sdr' : '/recrutamento'} className="text-sm text-blue-700 underline">{gestao ? '← SDR' : viaCorretor ? '← Meu funil' : '← Recrutamento'}</Link>
       <section style={{ backgroundColor: '#ffffff' }} className="mt-3 rounded-2xl border border-slate-200 p-4 shadow-sm">
         <h1 className="text-lg font-semibold text-slate-900">Conversa com {quem}</h1>
-        <p className="text-sm text-slate-600">{telFmt(vs[0])} · <a href={'https://wa.me/' + vs[0]} target="_blank" className="text-blue-700 underline">abrir no WhatsApp</a></p>
+        <p className="text-sm text-slate-600">{telFmt(principal, exterior)} · <a href={'https://wa.me/' + principal} target="_blank" className="text-blue-700 underline">abrir no WhatsApp</a></p>
         {gestao && (lc.length > 0 || lr.length > 0 || parc.length > 0) && (
           <div className="mt-2 flex flex-wrap gap-2 text-xs">
             {[...lc.map((x) => ({ id: x.id, t: 'cliente: ' + (x.nome || 'lead') })), ...lr.map((x) => ({ id: x.id, t: 'corretor de ' + (x.nome || 'lead') })), ...parc.map((x) => ({ id: x.lead_id, t: 'parceiro · ' + (x.ref || 'imóvel') }))]
@@ -184,15 +190,15 @@ export default async function ConversaSdr({ params }: { params: Promise<{ tel: s
       </ol>
       {gestao && externo && (
         <div className="mt-4">
-          <MensagemEva leadId="" parceiroTel={vs[0]}
-            destinos={[{ chave: 'parceiro', destino: 'parceiro', rotulo: 'Corretor(a) de fora', detalhe: (nomeProf || nomeOrulo || parc[0]?.parceiro_nome || 'Corretor') + ' · ' + telFmt(vs[0]), janela: (recentes ?? 0) > 0 }]} />
+          <MensagemEva leadId="" parceiroTel={principal}
+            destinos={[{ chave: 'parceiro', destino: 'parceiro', rotulo: 'Corretor(a) de fora', detalhe: (nomeProf || nomeOrulo || parc[0]?.parceiro_nome || 'Corretor') + ' · ' + telFmt(principal, exterior), janela: (recentes ?? 0) > 0 }]} />
         </div>
       )}
       {/* 08/11: responder qualquer contato que escreveu para a Eva (sem lead, sem ser corretor). */}
       {gestao && !externo && !cor && bufs.length > 0 && (
         <div className="mt-4">
-          <MensagemEva leadId="" parceiroTel={vs[0]}
-            destinos={[{ chave: 'contato', destino: 'contato', rotulo: lc[0]?.nome || 'Contato', detalhe: telFmt(vs[0]), janela: (recentes ?? 0) > 0 }]} />
+          <MensagemEva leadId="" parceiroTel={principal}
+            destinos={[{ chave: 'contato', destino: 'contato', rotulo: lc[0]?.nome || 'Contato', detalhe: telFmt(principal, exterior), janela: (recentes ?? 0) > 0 }]} />
         </div>
       )}
     </main>
