@@ -94,6 +94,7 @@ function lerAnuncios(x: unknown): Anuncio[] {
       origem: doSite ? 'site' as const : 'portal' as const,
       condominio_nome: String(o.condominio_nome || '').slice(0, 120), address: String(o.address || '').slice(0, 200),
       area_terreno: num(o.area_terreno),
+      foto_url: /^https:\/\/[^\s]+$/i.test(String(o.foto_url || '')) ? String(o.foto_url).slice(0, 600) : undefined,
     }];
   });
 }
