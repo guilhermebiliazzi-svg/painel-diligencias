@@ -86,6 +86,9 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
   // 25/11: outros números do mesmo cliente (ex.: WhatsApp de outro país, diferente do telefone do portal)
   const { data: aliases } = await sb.from('sdr_telefone_alias').select('alias').eq('lead_id', id);
   const outrosTel = ((aliases ?? []) as { alias: string }[]).map((x) => x.alias.replace(/\D/g, '')).filter(Boolean);
+  // 26/11: imóveis que o corretor ofereceu e incluiu ao registrar a visita
+  const { data: ofs } = await sb.from('sdr_imoveis_lead').select('id,ref,endereco,valor').eq('lead_id', id).not('oferecido_por', 'is', null).order('created_at');
+  const oferecidos = (ofs ?? []) as { id: string; ref: string | null; endereco: string | null; valor: number | null }[];
   // Referenciamentos deste cliente (tabela indicacoes, mesmo telefone, a partir da chegada do lead)
   const fim8 = l.telefone.replace(/\D/g, '').slice(-8);
   const { data: inds } = await sb.from('indicacoes')
@@ -219,6 +222,7 @@ export default async function LeadSdr({ params }: { params: Promise<{ id: string
                 {l.imovel_anuncio_url && <> · <a href={l.imovel_anuncio_url} target="_blank" className="text-blue-700 underline">anúncio</a></>}
               </>
             ) : null} />
+            <Linha k="Oferecidos" v={oferecidos.length ? oferecidos.map((o) => (o.endereco || o.ref || 'Imóvel') + (o.ref ? ' (ref. ' + o.ref + ')' : '') + (o.valor ? ' · ' + brl(o.valor) : '')).join(' · ') : null} />
             <Linha k="Até" v={brl(l.valor_max)} />
             <Linha k="Origem" v={[l.fonte, l.temperatura].filter(Boolean).join(' · ')} />
             <Linha k="Resumo" v={l.resumo} />
