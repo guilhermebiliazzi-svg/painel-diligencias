@@ -85,7 +85,7 @@ function lerAnuncios(x: unknown): Anuncio[] {
     const o = (a || {}) as Record<string, unknown>;
     const link = String(o.link || '').slice(0, 500);
     const doSite = /^https:\/\/(www\.)?villejardins\.com\.br\/imovel\//i.test(link);
-    // villejardins: anúncio /imovel/; outros portais: qualquer https (só apartamento/sala chegam aqui)
+    // villejardins: anúncio /imovel/; outros portais: qualquer https
     if (!(doSite || /^https:\/\/[^\s]+$/i.test(link)) || !num(o.preco)) return [];
     return [{
       link, codigo: String(o.codigo || '').slice(0, 20), titulo: String(o.titulo || '').slice(0, 200),
@@ -93,6 +93,7 @@ function lerAnuncios(x: unknown): Anuncio[] {
       condominio_mensal: num(o.condominio_mensal), bairro: String(o.bairro || '').slice(0, 80),
       origem: doSite ? 'site' as const : 'portal' as const,
       condominio_nome: String(o.condominio_nome || '').slice(0, 120), address: String(o.address || '').slice(0, 200),
+      area_terreno: num(o.area_terreno),
     }];
   });
 }
@@ -125,7 +126,7 @@ export async function POST(req: Request) {
         return null;
       }),
       g('concorrentes')
-        ? lerConcorrentes(g('concorrentes'), area, tipo === 'casa' ? 0.3 : 0.15, tipo !== 'casa',
+        ? lerConcorrentes(g('concorrentes'), area, tipo === 'casa' ? 0.3 : 0.15, true, // 26/11: casa também lê outros portais
             { predio_curto: tipo === 'sala' ? g('edificio') : g('condominio'), bairro: g('bairro') })
         : Promise.resolve(null),
     ]);
@@ -136,7 +137,7 @@ export async function POST(req: Request) {
   }
 
   if (body.acao === 'gerar') {
-    const anuncios = lerAnuncios(body.anuncios).filter((a) => tipo !== 'casa' || a.origem === 'site'); // casa: só o site
+    const anuncios = lerAnuncios(body.anuncios); // 26/11: casa também aceita anúncios de outros portais
     const esc = { itbi_manter: chaves(body.itbi_manter), itbi_excluir: chaves(body.itbi_excluir), anuncios };
     if (tipo !== 'casa' && !esc.itbi_manter.length) return erro('Deixe pelo menos uma venda do ITBI marcada.');
     if (reformadoRecente(tipo, vals) && !anuncios.length) return erro(MSG_REFORMADO + ' Deixe pelo menos um anúncio marcado.', 409);
