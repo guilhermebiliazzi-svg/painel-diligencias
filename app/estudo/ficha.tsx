@@ -773,7 +773,7 @@ function IptuBox({ tipo, get, set }: { tipo: Tipo; get: (id: string) => Valor | 
 // ---------------------------------------------------------------- Gerar estudo pelo painel
 
 type VendaP = { chave: string; data: string; unidade: string; area: number; valor: number; valor_m2: number; mesma_area: boolean };
-type AnuncioP = { link: string; codigo: string; titulo: string; preco: number; area: number | null; quartos: number | null; suites: number | null; vagas: number | null; condominio_mensal: number | null; bairro: string; origem?: 'site' | 'portal'; condominio_nome?: string; address?: string };
+type AnuncioP = { link: string; codigo: string; titulo: string; preco: number; area: number | null; quartos: number | null; suites: number | null; vagas: number | null; condominio_mensal: number | null; bairro: string; origem?: 'site' | 'portal'; condominio_nome?: string; address?: string; area_terreno?: number | null };
 type BuscaP = { anuncios: AnuncioP[]; total_na_busca: number | null; links_encontrados: number; fora_do_tamanho: number; criterio: string; outros_links: number; outros?: AnuncioP[]; outros_falha?: string[]; outros_fora?: number; ignorados?: string[]; site_alem?: number };
 const siteDe = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return 'outro site'; } };
 type FaseGerar = 'carregando' | 'escolha' | 'gerando' | 'pronto' | 'erro';
@@ -888,7 +888,7 @@ function GerarEstudo({ tipo, vals, aberto, fechar }: { tipo: Tipo; vals: Record<
         <button type="button" aria-label="Fechar" onClick={sair}>×</button>
       </div>
 
-      {fase === 'carregando' && <p className="fe-gsub"><span className="fe-spin" aria-hidden="true" /> Buscando as vendas do ITBI{ehCasa ? '' : ' do prédio'} e lendo os anúncios dos concorrentes…{!ehCasa && <><br />Links de outros portais podem levar até 1 minuto.</>}</p>}
+      {fase === 'carregando' && <p className="fe-gsub"><span className="fe-spin" aria-hidden="true" /> Buscando as vendas do ITBI{ehCasa ? '' : ' do prédio'} e lendo os anúncios dos concorrentes…<br />Links de outros portais podem levar até 1 minuto.</p>}
       {fase === 'erro' && <p className="fe-gsub fe-gerro" role="alert">{msg}</p>}
       {fase === 'gerando' && (
         <div className="fe-gsub" role="status"><span className="fe-spin" aria-hidden="true" /> {andamento}<br />Não feche esta janela.</div>
@@ -958,7 +958,7 @@ function GerarEstudo({ tipo, vals, aberto, fechar }: { tipo: Tipo; vals: Record<
                     <input type="checkbox" checked={!foraAn.includes(a.link)} onChange={() => alterna(foraAn, setForaAn, a.link)} />
                     <span>
                       <strong>{reais(a.preco)}</strong>
-                      <span className="d">{[a.condominio_nome || a.bairro || a.titulo.split(/ em | à venda/)[0] || 'Anúncio', a.area && fmtM2(a.area) + ' m²', a.quartos && a.quartos + ' quartos', a.suites && a.suites + (a.suites === 1 ? ' suíte' : ' suítes'), a.vagas && a.vagas + (a.vagas === 1 ? ' vaga' : ' vagas')].filter(Boolean).join(' · ')}</span>
+                      <span className="d">{[a.condominio_nome || a.bairro || a.titulo.split(/ em | à venda/)[0] || 'Anúncio', a.area && fmtM2(a.area) + ' m²', a.area_terreno && 'terreno ' + fmtM2(a.area_terreno) + ' m²', a.quartos && a.quartos + ' quartos', a.suites && a.suites + (a.suites === 1 ? ' suíte' : ' suítes'), a.vagas && a.vagas + (a.vagas === 1 ? ' vaga' : ' vagas')].filter(Boolean).join(' · ')}</span>
                       <a href={a.link} target="_blank" rel="noopener noreferrer">{a.origem === 'portal' ? `ver no ${siteDe(a.link)} ›` : `ver anúncio ${a.codigo} ›`}</a>
                     </span>
                   </label>
@@ -994,9 +994,7 @@ function GerarEstudo({ tipo, vals, aberto, fechar }: { tipo: Tipo; vals: Record<
             )}
             {busca && busca.outros_links > 0 && (
               <p className="fe-gnote fe-galerta">
-                {ehCasa
-                  ? `${busca.outros_links === 1 ? '1 link de outro site não entra' : `${busca.outros_links} links de outros sites não entram`} no estudo de casa pelo painel (só anúncios do villejardins.com.br). Para usar, envie a ficha pra Eva.`
-                  : `${busca.outros_links === 1 ? '1 link ficou' : `${busca.outros_links} links ficaram`} de fora: o painel lê até 6 anúncios de outros portais.`}
+                {`${busca.outros_links === 1 ? '1 link ficou' : `${busca.outros_links} links ficaram`} de fora: o painel lê até 6 anúncios de outros portais.`}
               </p>
             )}
           </div>
