@@ -441,6 +441,7 @@ export function montarPayload(tipo: TipoFicha, vals: Vals, esc: Escolhas) {
         condominio_fechado: g('casa_tipo') === 'casa em condomínio' ? 'sim' : undefined,
         ano_construcao: ano >= 1850 && ano <= anoAtual ? ano : undefined,
         sql: g('sql').replace(/\D/g, '') || undefined,
+        bairro: g('bairro') || undefined, // 26/11: slide da unidade e capa do estudo de casa
         estado: reformado ? 'reformada' + (n('reforma_ano') ? ' em ' + n('reforma_ano') : '') + (itens.length ? ' (' + itens.join(', ') + ')' : '') : ESTADO[g('estado')] || g('estado'),
         reside: simNao(g('mora')),
         aluguel_moradia: g('mora') === 'sim' ? n('aluguel_moradia') : undefined,
