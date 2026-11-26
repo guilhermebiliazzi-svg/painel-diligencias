@@ -39,6 +39,7 @@ export type Anuncio = {
   origem?: 'site' | 'portal';   // site = villejardins.com.br; portal = outros sites (lidos pelo serviço do estudo)
   condominio_nome?: string;
   address?: string;
+  area_terreno?: number | null; // 26/11: casa de outros portais (bnsir informa o terreno)
 };
 
 export type Busca = {
@@ -367,8 +368,9 @@ async function lerOutrosPortais(links: string[], area: number | null, subject: {
     if (area && ar && Math.abs(ar - area) > area * 0.3) { out.outros_fora++; continue; } // o estudo descarta fora de ±30%
     const raw = (a._raw || {}) as Record<string, unknown>;
     out.outros.push({
-      link, codigo: codigoDoLink(link), titulo: String(a.nome || ''), preco, area: ar,
-      quartos: null, suites: num(a.suites), vagas: num(a.vagas), condominio_mensal: null,
+      link, codigo: codigoDoLink(link), titulo: String(a.nome || ''), preco, area: num(a.area_construida) || ar,
+      quartos: num(a.quartos), suites: num(a.suites), vagas: num(a.vagas), condominio_mensal: num(a.condominio_mensal),
+      area_terreno: num(a.area_terreno),
       bairro: String(a.bairro || ''), origem: 'portal',
       condominio_nome: String(raw.condominio || ''), address: String(raw.endereco || ''),
     });
@@ -378,8 +380,8 @@ async function lerOutrosPortais(links: string[], area: number | null, subject: {
 }
 
 /**
- * Concorrentes colados na ficha: busca/anúncios do villejardins.com.br e, no apartamento/sala,
- * anúncios de outros portais (até 6). Na casa, só o villejardins (o estudo de casa lê só o site).
+ * Concorrentes colados na ficha: busca/anúncios do villejardins.com.br e anúncios de outros portais (até 6).
+ * 26/11: a casa também aceita outros portais (QuintoAndar, bnsir...), com o terreno quando o anúncio informa.
  */
 export async function lerConcorrentes(
   texto: string, area: number | null, tolerancia: number, comPortais: boolean, subject: { predio_curto?: string; bairro?: string },
@@ -440,7 +442,14 @@ export function montarPayload(tipo: TipoFicha, vals: Vals, esc: Escolhas) {
         estado: reformado ? 'reformada' + (n('reforma_ano') ? ' em ' + n('reforma_ano') : '') + (itens.length ? ' (' + itens.join(', ') + ')' : '') : ESTADO[g('estado')] || g('estado'),
         reside: simNao(g('mora')),
         aluguel_moradia: g('mora') === 'sim' ? n('aluguel_moradia') : undefined,
-        anuncios: esc.anuncios.map((a) => a.link).join(' '),
+        // 26/11: links do site (o n8n relê a página) + anúncios de outros portais já lidos na prévia
+        anuncios: esc.anuncios.filter((a) => a.origem !== 'portal').map((a) => a.link).join(' '),
+        anuncios_portais: esc.anuncios.some((a) => a.origem === 'portal')
+          ? JSON.stringify(esc.anuncios.filter((a) => a.origem === 'portal').map((a) => ({
+              link: a.link, ref: a.codigo, titulo: a.titulo, valor: a.preco, area_construida: a.area,
+              area_terreno: a.area_terreno ?? null, quartos: a.quartos, suites: a.suites, vagas: a.vagas,
+            })))
+          : undefined,
       }),
     };
   }
