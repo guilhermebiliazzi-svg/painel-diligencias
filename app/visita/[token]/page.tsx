@@ -26,7 +26,7 @@ export default async function VisitaLink({ params, searchParams }: { params: Pro
   if (new Date(lk.expira_em).getTime() < Date.now()) return <Caixa><p className="text-sm text-slate-700">Este link expirou. Toque de novo em &quot;Visita agendada&quot; na próxima mensagem da Eva.</p></Caixa>;
   const [{ data: lead }, { data: ims }, { data: vis }] = await Promise.all([
     sb.from('sdr_leads').select('nome,status').eq('id', lk.lead_id).maybeSingle(),
-    sb.from('sdr_imoveis_lead').select('id,ref,endereco,valor,do_anuncio,aprovado_cliente').eq('lead_id', lk.lead_id).order('created_at'),
+    sb.from('sdr_imoveis_lead').select('id,ref,endereco,valor,do_anuncio,aprovado_cliente,oferecido_por').eq('lead_id', lk.lead_id).order('created_at'),
     // 15/11: remarcar — a visita marcada mais recente (o imóvel dela vem escolhido)
     remarcar
       ? sb.from('sdr_visitas').select('imovel_lead_id,horario_confirmado').eq('lead_id', lk.lead_id).not('horario_confirmado', 'is', null)
@@ -37,18 +37,17 @@ export default async function VisitaLink({ params, searchParams }: { params: Pro
   const l = lead as { nome: string | null; status: string } | null;
   if (!l || ['arquivado', 'encerrado'].includes(l.status)) return <Caixa><p className="text-sm text-slate-700">Este lead já foi encerrado.</p></Caixa>;
   const brl = (v: number | null) => (v ? ' · R$ ' + Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) : '');
-  const imoveis: ImovelOpc[] = ((ims ?? []) as { id: string; ref: string | null; endereco: string | null; valor: number | null; do_anuncio: boolean | null; aprovado_cliente: boolean | null }[])
+  const imoveis: ImovelOpc[] = ((ims ?? []) as { id: string; ref: string | null; endereco: string | null; valor: number | null; do_anuncio: boolean | null; aprovado_cliente: boolean | null; oferecido_por: string | null }[])
     .filter((i) => i.do_anuncio || i.aprovado_cliente !== false)
-    .map((i) => ({ id: i.id, rotulo: (i.endereco || i.ref || 'Imóvel') + brl(i.valor) + (i.ref ? ' (ref. ' + i.ref + ')' : '') + (i.do_anuncio ? ' · anúncio' : '') }));
+    .map((i) => ({ id: i.id, rotulo: (i.endereco || i.ref || 'Imóvel') + brl(i.valor) + (i.ref ? ' (ref. ' + i.ref + ')' : '') + (i.do_anuncio ? ' · anúncio' : '') + (i.oferecido_por ? ' · oferecido pelo corretor' : '') }));
   const nome = (l.nome || 'cliente').split(' ')[0];
   return (
     <Caixa>
       <h1 className="text-lg font-semibold text-slate-900">{marcada ? 'Remarcar' : 'Registrar'} visita de {nome}</h1>
       {marcada && <p className="mt-1 text-sm text-slate-700">Hoje está marcada para {new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(marcada.horario_confirmado))}.</p>}
       <p className="mt-1 text-sm text-slate-600">{marcada ? 'Escolha o novo dia e a nova hora. Ao salvar, a Eva avisa o cliente da mudança, atualiza sua agenda e lembra na véspera.' : 'Ao salvar, a Eva confirma com o cliente, coloca na sua agenda e lembra na véspera.'}</p>
-      {imoveis.length ? <FormVisita token={token} imoveis={imoveis} inicial={marcada && imoveis.some((i) => i.id === marcada.imovel_lead_id) ? marcada.imovel_lead_id : undefined} /> : (
-        <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">Este lead não tem imóvel cadastrado. Fale com o Guilherme para incluir o imóvel da visita.</p>
-      )}
+      {/* 26/11: sem imóvel no lead, o corretor inclui o imóvel que ofereceu ("Outro imóvel") */}
+      <FormVisita token={token} imoveis={imoveis} inicial={marcada && imoveis.some((i) => i.id === marcada.imovel_lead_id) ? marcada.imovel_lead_id : undefined} />
     </Caixa>
   );
 }
