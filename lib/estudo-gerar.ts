@@ -40,6 +40,7 @@ export type Anuncio = {
   condominio_nome?: string;
   address?: string;
   area_terreno?: number | null; // 26/11: casa de outros portais (bnsir informa o terreno)
+  foto_url?: string;            // 26/11: capa lida na prévia (Zap/Imovelweb bloqueiam a página na hora do estudo)
 };
 
 export type Busca = {
@@ -371,6 +372,7 @@ async function lerOutrosPortais(links: string[], area: number | null, subject: {
       link, codigo: codigoDoLink(link), titulo: String(a.nome || ''), preco, area: num(a.area_construida) || ar,
       quartos: num(a.quartos), suites: num(a.suites), vagas: num(a.vagas), condominio_mensal: num(a.condominio_mensal),
       area_terreno: num(a.area_terreno),
+      foto_url: /^https?:\/\//i.test(String(a.foto_url || raw.foto_url || '')) ? String(a.foto_url || raw.foto_url) : undefined,
       bairro: String(a.bairro || ''), origem: 'portal',
       condominio_nome: String(raw.condominio || ''), address: String(raw.endereco || ''),
     });
@@ -447,7 +449,7 @@ export function montarPayload(tipo: TipoFicha, vals: Vals, esc: Escolhas) {
         anuncios_portais: esc.anuncios.some((a) => a.origem === 'portal')
           ? JSON.stringify(esc.anuncios.filter((a) => a.origem === 'portal').map((a) => ({
               link: a.link, ref: a.codigo, titulo: a.titulo, valor: a.preco, area_construida: a.area,
-              area_terreno: a.area_terreno ?? null, quartos: a.quartos, suites: a.suites, vagas: a.vagas,
+              area_terreno: a.area_terreno ?? null, quartos: a.quartos, suites: a.suites, vagas: a.vagas, foto_url: a.foto_url || '',
             })))
           : undefined,
       }),
@@ -486,6 +488,7 @@ export function montarPayload(tipo: TipoFicha, vals: Vals, esc: Escolhas) {
   const amostras = esc.anuncios.map((a) => ({
     link: a.link, preco: a.preco, area: a.area, quartos: a.quartos, suites: a.suites, vagas: a.vagas,
     bairro: a.bairro, condominio_mensal: a.condominio_mensal, address: a.address || '', condominio_nome: a.condominio_nome || '',
+    foto_url: a.foto_url || '',
   }));
   return {
     tipo,
