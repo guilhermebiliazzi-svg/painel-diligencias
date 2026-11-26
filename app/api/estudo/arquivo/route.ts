@@ -32,5 +32,9 @@ export async function GET(req: Request) {
   const link = await linkDoEstudo(p);
   if (!link) return texto('Este estudo ainda não ficou pronto.', 404);
   if ('erro' in link) return texto(link.erro, 500);
+  // 26/11: abrir no navegador sem baixar — ?ver=office (Office Online) ou ?ver=google (visualizador do Google)
+  const ver = new URL(req.url).searchParams.get('ver');
+  if (ver === 'office') return NextResponse.redirect('https://view.officeapps.live.com/op/view.aspx?src=' + encodeURIComponent(link.url), 302);
+  if (ver === 'google') return NextResponse.redirect('https://docs.google.com/viewer?url=' + encodeURIComponent(link.url), 302);
   return NextResponse.redirect(link.url, 302);
 }
