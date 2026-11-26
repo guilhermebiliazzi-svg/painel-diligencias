@@ -58,7 +58,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ i
           {corretorDe(p)}{p.origem === 'eva' ? ' · pela Eva' : ' · pelo painel'}{l?.nome ? ' · proprietário: ' + l.nome : ''}
         </p>
         <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-          <a href={'/api/estudo/arquivo?id=' + p.id} className="font-semibold text-blue-700 underline">Baixar o estudo</a>
+          {/* 26/11: abrir no navegador (Office Online ou Google), sem baixar; baixar continua ao lado */}
+          <a href={'/api/estudo/arquivo?ver=office&id=' + p.id} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-700 underline">Abrir no Office</a>
+          <a href={'/api/estudo/arquivo?ver=google&id=' + p.id} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-700 underline">Abrir no Google</a>
+          <a href={'/api/estudo/arquivo?id=' + p.id} className="text-blue-700 underline">Baixar</a>
           {p.lead_id && <Link href={'/sdr/lead/' + p.lead_id} className="text-blue-700 underline">Abrir o lead</Link>}
         </p>
         {aberto ? (
